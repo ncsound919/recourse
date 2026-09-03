@@ -1,0 +1,11 @@
+@import "tailwindcss";
+
+/* Hide scrollbars while keeping scrollability — used on compact mission-control
+   overflow strips (status bars, telemetry rows) for a clean NASA-console look. */
+@utility scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
