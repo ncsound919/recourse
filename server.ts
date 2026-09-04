@@ -129,9 +129,8 @@ import {
 import type { ProposedPatch, DevFinding, RepairSubmitResult, BrainAskResult, PatchResult, DossierInput, AuditorDriver, DevBrainAction, DevBrainStrategy, DevBrainCandidate } from './src/lib/fleetDevelopment.js';
 
 // AgentBrowser web-fetch connector (download from the web through the real browser).
-import { agentBrowserConfig, agentBrowserOnline, agentBrowserFetch } from './src/lib/agentBrowser.js';
-import type { AgentBrowserMode } from './src/lib/agentBrowser.js';
 import { isWebCategory, htmlFromResult, pickRenderMethod } from './src/lib/webArtifact.js';
+import { createWebChannelRouter } from './src/server/routes/webChannel.js';
 import {
   CapabilityId,
   CapabilityBacking,
@@ -6013,31 +6012,8 @@ app.post('/api/recourse/develop/autopilot/toggle', (req, res) => {
 // =========================================================================
 // AGENTBROWSER WEB CHANNEL — download from the web via the real browser
 // =========================================================================
-app.get('/api/recourse/web/agentbrowser', async (req, res) => {
-  try {
-    const cfg = agentBrowserConfig();
-    const online = cfg.configured ? await agentBrowserOnline() : false;
-    res.json({ success: true, configured: cfg.configured, baseUrl: cfg.baseUrl, online });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-/** Download / fetch a web URL through AgentBrowser (download, reader, extract, search). */
-app.post('/api/recourse/web/download', async (req, res) => {
-  try {
-    const { url, mode, selectors } = req.body ?? {};
-    if (typeof url !== 'string' || !url.trim()) {
-      return res.status(400).json({ success: false, error: 'url is required' });
-    }
-    const m = (['download', 'reader', 'extract', 'search'] as AgentBrowserMode[]).includes(mode) ? mode : 'download';
-    const result = await agentBrowserFetch({ url, mode: m, selectors: Array.isArray(selectors) ? selectors.map(String) : undefined });
-    appendProvenanceEvent('intake_poll', { source: 'agentbrowser', url: url.slice(0, 300), mode: m, ok: result.ok, httpStatus: result.httpStatus });
-    res.json({ success: result.ok, ...result });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
+// Extracted to src/server/routes/webChannel.ts (Router + narrow deps pattern).
+app.use(createWebChannelRouter({ appendProvenanceEvent }));
 
 // Initialize Express + Vite Server
 async function startServer() {
