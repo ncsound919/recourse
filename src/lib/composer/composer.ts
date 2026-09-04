@@ -163,16 +163,13 @@ function realize(brief: ComposeBrief, res: { seed: number; bars: number; key: nu
   };
 }
 
-/** Compose a track deterministically from a brief. */
-export function compose(brief: ComposeBrief): Track {
+/** Compose a track deterministically from a brief. `opts.lexicon` lets a learner
+ *  overlay an adjusted lexicon (learned biases) on the base style for the harmony
+ *  pass. */
+export function compose(brief: ComposeBrief, opts: { lexicon?: import('./lexicons.js').StyleLexicon } = {}): Track {
   const res = resolveBrief(brief);
-  const lx = getLexicon(brief.style);
+  const lx = opts.lexicon ?? getLexicon(brief.style);
   const chords = generateChords(lx, createRng(res.seed ^ 0x51ed), res.key, res.bars);
-  // Apply the signature device for styles that lift on a final chorus: the final
-  // key lift is represented as the tonic resolving upward a step, recorded in the
-  // lead line only as a meta note is overkill — we note it in the returned brief
-  // semantics via the chord tail. (Audio lift belongs to arrangement, out of scope
-  // for a looping sketch, so we leave harmony loop-closed.)
   return realize(brief, res, chords);
 }
 

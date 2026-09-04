@@ -199,6 +199,9 @@ import {
   encodeToSeq,
   seqToJson,
   listStyles,
+  ComposerLearner,
+  defaultLearnerFile,
+  composeWithLearner,
 } from './src/lib/composer/index.js';
 
 const app = express();
@@ -5550,7 +5553,13 @@ app.post('/api/recourse/compose', (req, res) => {
       seed: typeof b.seed === 'number' ? b.seed : undefined,
       title: typeof b.title === 'string' ? b.title : undefined,
     };
-    const out = composeToOutcome(brief, { midi: true, seq: true });
+    const out = composeToOutcome(brief, {
+      midi: true,
+      seq: true,
+      // Compose with the learner's current biases unless explicitly bypassed, so
+      // the more you rate, the more it steers toward what you like.
+      lexicon: req.body?.learn === false ? undefined : composerLearner.adjustedLexicon(style),
+    });
     const dir = path.join(COMPOSE_DIR, safeSlug(style));
     fs.mkdirSync(dir, { recursive: true });
     const base = `${safeSlug(brief.title || `${style}-${brief.seed ?? 'x'}`)}-${brief.seed ?? ''}`;
@@ -5581,6 +5590,54 @@ app.post('/api/recourse/compose', (req, res) => {
 /** List supported composer styles (read-only). */
 app.get('/api/recourse/compose/styles', (_req, res) => {
   res.json({ success: true, styles: listStyles(), composeDir: COMPOSE_DIR });
+});
+
+// --- Composer learner loop (the honest "gets better" mechanism) ----------
+// Episodes are human ratings on reproducible (style,seed) compositions. The
+// learner derives quality biases that the compose route now applies via
+// composeWithLearner. Ratings are the only signal; no fake autonomy.
+const composerLearner = new ComposerLearner(defaultLearnerFile());
+
+/** Record / update a rating for a reproducible composition. Guarded write. */
+app.post('/api/recourse/compose/rate', (req, res) => {
+  if (!requireMutationAuth(req, res)) return;
+  try {
+    const b = req.body ?? {};
+    const style = b.style;
+    if (!listStyles().includes(style)) return res.status(400).json({ success: false, error: 'unknown style' });
+    const rating = Number(b.rating);
+    if (!Number.isFinite(rating)) return res.status(400).json({ success: false, error: 'rating must be a number' });
+    const seed = Number(b.seed);
+    if (!Number.isFinite(seed)) return res.status(400).json({ success: false, error: 'seed must be a number' });
+    const bars = [4, 8, 16].includes(b.bars) ? b.bars : 8;
+    const episode = composerLearner.rate(
+      { style, seed, bars, key: b.key, major: b.major, bpm: b.bpm },
+      rating,
+      Array.isArray(b.tags) ? b.tags.map(String) : undefined,
+      typeof b.notes === 'string' ? b.notes : undefined,
+    );
+    res.json({ success: true, episode });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message ?? String(err) });
+  }
+});
+
+/** Learned quality biases per style (read-only). */
+app.get('/api/recourse/compose/learned', (req, res) => {
+  const style = typeof req.query.style === 'string' ? req.query.style : undefined;
+  if (style && listStyles().includes(style as any)) {
+    return res.json({ success: true, style, adjustments: composerLearner.adjustmentsFor(style as any), episodes: composerLearner.episodesFor(style as any).slice(-20) });
+  }
+  const leaderboard = composerLearner.leaderboard();
+  const byStyle = (Object.fromEntries(leaderboard.map((l) => [l.style, composerLearner.adjustmentsFor(l.style)])) as Record<string, unknown>);
+  res.json({ success: true, styles: listStyles(), leaderboard, adjustments: byStyle });
+});
+
+/** Candidate briefs to explore near what you liked (read-only). */
+app.get('/api/recourse/compose/suggest', (req, res) => {
+  const style = typeof req.query.style === 'string' && listStyles().includes(req.query.style as any) ? req.query.style : 'steely-dan';
+  const count = Math.min(10, Number(req.query.count) || 4);
+  res.json({ success: true, style, suggestions: composerLearner.suggestNext(style as any, count) });
 });
 
 // =========================================================================

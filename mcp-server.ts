@@ -259,5 +259,33 @@ server.registerTool('recourse.compose', {
   }, null, 2));
 });
 
+server.registerTool('recourse.rate_track', {
+  title: 'Rate a composed track (feeds the learner loop)',
+  description: 'Record your 1-5 rating for a reproducible composition so the composer learns to steer toward what you like. Same style+seed+rating updates the episode. Mutating: requires RECOURSE_API_SECRET.',
+  inputSchema: {
+    style: z.enum(['steely-dan', 'jasper-ballad', 'dangelo-glasper', 'airplane']),
+    seed: z.number().int(),
+    rating: z.number().min(1).max(5),
+    bars: z.union([z.literal(4), z.literal(8), z.literal(16)]).optional(),
+    tags: z.array(z.string()).optional(),
+    notes: z.string().optional(),
+  },
+}, async ({ style, seed, rating, bars, tags, notes }) => {
+  const r = await apiPost('/api/recourse/compose/rate', { style, seed, rating, bars, tags, notes });
+  if (!r.ok) return text(`rate_track failed (HTTP ${r.status}): ${r.data?.error ?? 'see server log'}`);
+  const ep = r.data.episode ?? {};
+  return text(JSON.stringify({ ok: true, id: ep.id, style: ep.style, seed: ep.brief?.seed, rating: ep.rating, chords: ep.chords, rootMoves: ep.rootMoves }, null, 2));
+});
+
+server.registerTool('recourse.learned', {
+  title: 'Show the composer learner state',
+  description: 'Read per-style learned quality biases, episodes, and leaderboard so you can see how ratings are shaping composition.',
+}, async () => {
+  try {
+    const j = await apiGet('/api/recourse/compose/learned');
+    return text(JSON.stringify({ styles: j?.styles, leaderboard: j?.leaderboard, adjustments: j?.adjustments }, null, 2));
+  } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
+});
+
 const transport = new StdioServerTransport();
 await server.connect(transport);
