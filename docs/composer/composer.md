@@ -112,21 +112,25 @@ each style — including at Steely Dan complexity.
 A reproducible, computed benchmark (`src/lib/composer/benchmark.ts`) grades output
 on weighted metrics: **integrity, harmonic-model validity, loop closure, style
 root-motion adherence, voice-leading smoothness, harmonic richness, signature
-nuance presence** (0..1, summed to a total). It is **explicitly not a taste or
-timbre grade** — that remains the operator's human rating. Benchmark winners can
-be auto-rated into the learner tagged `benchmark` (`autoRateBenchmark`); human
-ratings for the same `(style,seed)` win.
+nuance presence** — plus a **general music-theory certification**:
+**spelling** (every voiced note is a chord tone of its bar), **bass-root
+integrity** (downbeats open on the root, below the voicing), **melody** (every
+lead note is a chord tone), **spacing** (voicings in register, no excessive gaps).
+It is **explicitly not a taste or timbre grade** — that remains the operator's
+human rating. Benchmark winners can be auto-rated into the learner tagged
+`benchmark` (`autoRateBenchmark`); human ratings for the same `(style,seed)` win.
+
+The theory certification is load-bearing, not decoration: extending it surfaced a
+real generator bug (voicings ignored `rootPc` and were spelled relative-only,
+producing wrong notes) which is now fixed — so what you hear is chord-correct.
 
 - Inspect: `GET /api/recourse/compose/benchmark` or MCP `recourse.benchmark`.
 - Seed the learner objectively: `POST /api/recourse/compose/benchmark { autoRate:true }`.
 
-**Results (8-bar loops, seeds 1–10):** baseline **87.4 (A)** → 90.4 (A) after
-style-adherence counted the lexicon's full root-motion vocabulary → **97.3 (A)**
-after DP voice-leading. Voice-leading rose ~44 → **~90** by choosing each bar's
-voicing from candidate sets via a Viterbi shortest path scored by minimal-
-assignment voice motion (common tones retained) + a central-register penalty
-(music21-style method; the naive nearest-tone replacer regressed and was
-discarded). Integrity/harmony/closure/richness/nuance ~99–100.
+**Results (8-bar loops, seeds 1–10):** 87.4 → 90.4 (style-adherence vocab) →
+97.3 (DP voice-leading) → **96.7 (A)** after adding the theory group and fixing
+the spelling bug. Voice-leading ~80–89; **spelling/bass/melody/spacing all ~100**.
+Integrity/harmony/closure/richness/nuance ~99–100.
 
 ## Surfaces
 

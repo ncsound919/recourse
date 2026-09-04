@@ -62,13 +62,17 @@ export interface BenchmarkReport {
 }
 
 const WEIGHTS: Record<string, number> = {
-  integrity: 0.2,
-  harmony: 0.1,
-  closure: 0.15,
-  styleAdherence: 0.2,
+  integrity: 0.15,
+  harmony: 0.05,
+  closure: 0.1,
+  styleAdherence: 0.15,
   voiceLeading: 0.15,
-  richness: 0.1,
-  nuance: 0.1,
+  richness: 0.05,
+  nuance: 0.05,
+  spelling: 0.1, // every voiced chord note is a tone of that chord
+  bass: 0.08,    // bar-start bass is the chord root, below the voicing
+  melody: 0.07,  // every lead/hook note is a chord tone of its bar
+  spacing: 0.05, // voicings sit in register with no excessive gaps
 };
 
 // ---------------------------------------------------------------------------
@@ -105,6 +109,13 @@ function rootMoves(chords: Chord[]): number[] {
     moves.push(d);
   }
   return moves;
+}
+
+/** Absolute pitch-class set of a chord (root-transposed tones). */
+function chordTonePcs(c: Chord): Set<number> {
+  const s = new Set<number>();
+  for (const t of CHORD_TONES[c.quality] ?? []) s.add(((c.rootPc + t) % 12 + 12) % 12);
+  return s;
 }
 
 /** Normalize a semitone step to the [-6..6] range used for root-motion. */
@@ -199,6 +210,75 @@ export function scoreTrack(track: Track): TrackScore {
   const present = expected.filter((p) => parts.has(p as any)).length;
   const nuance = expected.length ? present / expected.length : 1;
   metrics.push({ key: 'nuance', label: 'Signature nuance parts present', value: nuance, detail: `${present}/${expected.length} of [${expected.join(',')}]` });
+
+  // ---- General music-theory certification ---------------------------------
+  // spelling: every keys voicing note is a tone of that bar's chord.
+  {
+    let ok = 0;
+    let tot = 0;
+    for (let b = 0; b < track.bars; b++) {
+      const tonePcs = chordTonePcs(track.chords[b]);
+      for (const e of track.events) {
+        if (e.part !== 'keys') continue;
+        if (e.tick < b * BAR || e.tick >= (b + 1) * BAR) continue;
+        tot++;
+        if (tonePcs.has(((e.pitch % 12) + 12) % 12)) ok++;
+      }
+    }
+    const spelling = tot ? ok / tot : 1;
+    metrics.push({ key: 'spelling', label: 'Chord spelling (voicings are real chord tones)', value: clamp01(spelling), detail: `${ok}/${tot} keys notes are chord tones` });
+  }
+  // bass: each bar opens with the chord root in the bass, kept below the voicing.
+  {
+    let ok = 0;
+    let checked = 0;
+    for (let b = 0; b < track.bars; b++) {
+      const down = track.events.find((e) => e.part === 'bass' && e.tick >= b * BAR && e.tick < b * BAR + 60);
+      if (!down) continue;
+      checked++;
+      const rootOk = ((down.pitch % 12) + 12) % 12 === track.chords[b].rootPc;
+      const lowVoicing = Math.min(
+        ...track.events.filter((e) => e.part === 'keys' && e.tick >= b * BAR && e.tick < (b + 1) * BAR).map((e) => e.pitch),
+        Infinity,
+      );
+      const below = Number.isFinite(lowVoicing) ? down.pitch < lowVoicing : true;
+      if (rootOk && below) ok++;
+    }
+    metrics.push({ key: 'bass', label: 'Bass-root integrity on downbeats', value: clamp01(checked ? ok / checked : 1), detail: `${ok}/${track.bars} bars open on the root below the voicing` });
+  }
+  // melody: lead/hook notes are chord tones of the bar they sound in.
+  {
+    let ok = 0;
+    let tot = 0;
+    for (const e of track.events) {
+      if (e.part !== 'lead') continue;
+      const b = Math.min(track.bars - 1, Math.floor(e.tick / BAR));
+      const tonePcs = chordTonePcs(track.chords[b]);
+      tot++;
+      if (tonePcs.has(((e.pitch % 12) + 12) % 12)) ok++;
+    }
+    const melody = tot ? ok / tot : 1;
+    metrics.push({ key: 'melody', label: 'Melody uses chord tones', value: clamp01(melody), detail: `${ok}/${tot} lead notes are chord tones` });
+  }
+  // spacing: keys voicings stay in the style register with no excessive gap.
+  {
+    let okBars = 0;
+    let maxGap = 0;
+    for (let b = 0; b < track.bars; b++) {
+      const notes = track.events.filter((e) => e.part === 'keys' && e.tick >= b * BAR && e.tick < (b + 1) * BAR).map((e) => e.pitch).sort((x, y) => x - y);
+      if (!notes.length) continue;
+      let inReg = true;
+      let gap = 0;
+      for (const n of notes) {
+        if (n < lx.voicing.lo || n > lx.voicing.hi) inReg = false;
+      }
+      for (let i = 1; i < notes.length; i++) gap = Math.max(gap, notes[i] - notes[i - 1]);
+      maxGap = Math.max(maxGap, gap);
+      if (inReg && gap <= 24) okBars++;
+    }
+    const spacing = track.bars ? okBars / track.bars : 1;
+    metrics.push({ key: 'spacing', label: 'Register & spacing', value: clamp01(spacing), detail: `max adjacent gap ${maxGap} semitones` });
+  }
 
   let total = 0;
   for (const m of metrics) total += (WEIGHTS[m.key] ?? 0) * m.value;

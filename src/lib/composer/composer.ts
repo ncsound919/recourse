@@ -124,11 +124,12 @@ function clampVel(v: number): number {
 
 const VL_VOICES = 4;
 
-/** Pitch-class set for a chord's keys voicing (rootless for steely dominants). */
+/** Absolute pitch-class set for a chord's keys voicing (root-transposed;
+ *  rootless for steely dominants so the root stays in the bass). */
 function voiceTonePcs(ch: Chord, lx: StyleLexicon): number[] {
   let tones = CHORD_TONES[ch.quality];
   if (lx.voicer === 'steely' && DOMINANT_QUALITIES.has(ch.quality)) tones = tones.filter((t) => t % 12 !== 0);
-  return [...new Set(tones.map((t) => ((t % 12) + 12) % 12))];
+  return [...new Set(tones.map((t) => (((ch.rootPc + t) % 12) + 12) % 12))];
 }
 
 /** Smallest pitch in [lo,hi] of a pc nearest an anchor (octave-aligned). */

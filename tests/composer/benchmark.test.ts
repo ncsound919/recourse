@@ -65,4 +65,24 @@ describe('composer benchmark (objective grading)', () => {
     expect(md).toContain('Composer benchmark');
     expect(md).toContain('steely-dan');
   });
+
+  it('certifies general music theory: voicings/bass/melody are chord-correct in register', () => {
+    for (const style of ['steely-dan', 'jasper-ballad', 'dangelo-glasper', 'airplane'] as const) {
+      const sc = scoreTrack(compose({ style, seed: 3, bars: 8 }));
+      for (const key of ['spelling', 'bass', 'melody', 'spacing']) {
+        const m = sc.metrics.find((x) => x.key === key)!;
+        expect(m.value, `${style}/${key} should certify`).toBeGreaterThanOrEqual(0.99);
+      }
+    }
+  });
+
+  it('root-transposes chord-tone validation (spelling is not relative-only)', () => {
+    // A track whose progression moves far from C must still have every voiced
+    // note be a real chord tone of its bar (the earlier validator/generator bug
+    // dropped rootPc and produced wrong notes — this guards against it).
+    const t = compose({ style: 'steely-dan', seed: 3, bars: 8 });
+    const sc = scoreTrack(t);
+    expect(sc.metrics.find((m) => m.key === 'spelling')!.value).toBeGreaterThanOrEqual(0.99);
+    expect(sc.metrics.find((m) => m.key === 'melody')!.value).toBeGreaterThanOrEqual(0.99);
+  });
 });
