@@ -18,7 +18,7 @@
 import type { ArrSection, Chord, ComposeBrief, NoteEvent, StyleId, Track } from './types.js';
 import { createRng, pickWeighted } from './types.js';
 import { getLexicon, GROOVES, type StyleLexicon } from './lexicons.js';
-import { PPQ, voiceChord, voiceMuChord, voiceRootless, DOMINANT_QUALITIES, bassMidi, chordTonesMidi } from './theory.js';
+import { PPQ, CHORD_TONES, voiceChord, voiceMuChord, voiceRootless, DOMINANT_QUALITIES, bassMidi, chordTonesMidi } from './theory.js';
 
 const VALID_BARS = [4, 8, 16];
 
@@ -112,29 +112,158 @@ function clampVel(v: number): number {
   return Math.max(1, Math.min(127, Math.round(v)));
 }
 
+// ---------------------------------------------------------------------------
+// VOICE-LEADING (DP) — choose one voicing per bar so the WHOLE progression moves
+// smoothly. This is the method the field uses (music21 VoiceLeadingQuartet; cf.
+// soundlab's voicingCost): enumerate candidate voicings per chord, then run a
+// Viterbi shortest-path over them scored by minimal-assignment voice motion plus
+// a small central-register penalty. Common tones are retained automatically
+// (assignment distance 0), which is exactly what a nearest-note replacer cannot
+// do. Style-aware: rootless dominants (Steely) keep the root out of the keys.
+// ---------------------------------------------------------------------------
+
+const VL_VOICES = 4;
+
+/** Pitch-class set for a chord's keys voicing (rootless for steely dominants). */
+function voiceTonePcs(ch: Chord, lx: StyleLexicon): number[] {
+  let tones = CHORD_TONES[ch.quality];
+  if (lx.voicer === 'steely' && DOMINANT_QUALITIES.has(ch.quality)) tones = tones.filter((t) => t % 12 !== 0);
+  return [...new Set(tones.map((t) => ((t % 12) + 12) % 12))];
+}
+
+/** Smallest pitch in [lo,hi] of a pc nearest an anchor (octave-aligned). */
+function nearestPitch(pc: number, anchor: number, lo: number, hi: number): number {
+  const pcMod = ((pc % 12) + 12) % 12;
+  const oct = Math.round((anchor - pcMod) / 12);
+  let best = pcMod + oct * 12;
+  if (best < lo) best += 12;
+  if (best > hi) best -= 12;
+  return Math.max(lo, Math.min(hi, best));
+}
+
+/** Deterministic candidate voicings for one chord (state-independent, so DP is
+ *  a clean shortest path). V notes near a central register, plus octave variants. */
+function voicingCandidates(ch: Chord, lx: StyleLexicon): number[][] {
+  const lo = lx.voicing.lo;
+  const hi = lx.voicing.hi;
+  const center = (lo + hi) / 2;
+  const pcs = voiceTonePcs(ch, lx);
+  // Keep at most VL_VOICES pcs, dropping extremes if the chord is very dense.
+  let usePcs = pcs;
+  if (pcs.length > VL_VOICES) {
+    usePcs = [...pcs].sort((a, b) => Math.abs(nearestPitch(a, center, lo, hi) - center) - Math.abs(nearestPitch(b, center, lo, hi) - center)).slice(0, VL_VOICES);
+    usePcs.sort((a, b) => a - b);
+  }
+  const voices = Math.max(3, Math.min(usePcs.length, VL_VOICES));
+  const basePcs = usePcs.slice(0, voices).sort((a, b) => a - b);
+  // Octave variants: independently raise each voice by an octave when in range.
+  const out = new Set<string>();
+  const stack: number[][] = [basePcs.map((pc) => nearestPitch(pc, center, lo, hi))];
+  // Generate subset-raise variants iteratively.
+  const push = (arr: number[]) => { const s = arr.join(','); if (!out.has(s)) { out.add(s); } };
+  const work: number[][] = [stack[0]];
+  push(stack[0]);
+  for (const v of work) {
+    for (let k = 0; k < v.length; k++) {
+      const raised = v.slice();
+      if (raised[k] + 12 <= hi) {
+        raised[k] += 12;
+        raised.sort((a, b) => a - b);
+        const key = raised.join(',');
+        if (!out.has(key)) { out.add(key); work.push(raised); }
+      }
+    }
+  }
+  return [...out].map((s) => s.split(',').map(Number));
+}
+
+/** Minimal-assignment distance between two sorted voicings (voice motion). */
+function assignCost(a: number[], b: number[]): number {
+  if (a.length !== b.length) return Math.abs(a.length - b.length) * 12;
+  // V <= 4: exact assignment via permutation search is fine.
+  const idx = a.map((_, i) => i);
+  let best = Infinity;
+  const perm = (chosen: number[], used: boolean[]) => {
+    if (chosen.length === b.length) {
+      let s = 0;
+      for (let i = 0; i < chosen.length; i++) s += Math.abs(a[i] - b[chosen[i]]);
+      best = Math.min(best, s);
+      return;
+    }
+    for (let j = 0; j < b.length; j++) {
+      if (used[j]) continue;
+      used[j] = true;
+      chosen.push(j);
+      perm(chosen, used);
+      chosen.pop();
+      used[j] = false;
+    }
+  };
+  void idx;
+  perm([], new Array(b.length).fill(false));
+  return best;
+}
+
+/** Register penalty: keep a voicing's mean near the band center. */
+function regCost(v: number[], lx: StyleLexicon): number {
+  const center = (lx.voicing.lo + lx.voicing.hi) / 2;
+  const mean = v.reduce((s, n) => s + n, 0) / v.length;
+  return Math.abs(mean - center) * 0.4;
+}
+
+/** Pick a smooth voicing per bar via Viterbi over candidate voicings. */
+function chooseVoicings(chords: Chord[], lx: StyleLexicon): number[][] {
+  const nodes = chords.map((c) => voicingCandidates(c, lx));
+  const nBars = chords.length;
+  const cost: number[][] = [];
+  const prev: number[][] = [];
+  for (let i = 0; i < nBars; i++) {
+    cost.push(new Array(nodes[i].length).fill(Infinity));
+    prev.push(new Array(nodes[i].length).fill(-1));
+  }
+  nodes[0].forEach((v, j) => { cost[0][j] = regCost(v, lx); });
+  for (let i = 1; i < nBars; i++) {
+    for (let k = 0; k < nodes[i].length; k++) {
+      const node = nodes[i][k];
+      const enter = regCost(node, lx);
+      let bestJ = 0;
+      let bestC = Infinity;
+      for (let j = 0; j < nodes[i - 1].length; j++) {
+        const c = cost[i - 1][j] + assignCost(nodes[i - 1][j], node);
+        if (c < bestC) { bestC = c; bestJ = j; }
+      }
+      cost[i][k] = bestC + enter;
+      prev[i][k] = bestJ;
+    }
+  }
+  // Backtrack from cheapest final node.
+  let bestK = 0;
+  let bestEnd = Infinity;
+  cost[nBars - 1].forEach((c, k) => { if (c < bestEnd) { bestEnd = c; bestK = k; } });
+  const path: number[] = new Array(nBars).fill(0);
+  path[nBars - 1] = bestK;
+  for (let i = nBars - 1; i > 0; i--) path[i - 1] = prev[i][path[i]];
+  return path.map((k, i) => nodes[i][k]);
+}
+
 function realize(brief: ComposeBrief, res: { seed: number; bars: number; key: number; major: boolean; bpm: number }, chords: Chord[]): Track {
   const lx = getLexicon(brief.style);
   const rng = createRng(res.seed ^ 0x9e3779b9);
   const ctx: RealizeCtx = { lx, rng, bpm: res.bpm, bars: res.bars, events: [] };
   const voic = lx.voicing;
   const groove = GROOVES[brief.style];
+  const barVoicings = chooseVoicings(chords, lx);
 
   for (let i = 0; i < res.bars; i++) {
     const ch = chords[i];
     const start = i * BAR_TICKS;
     const barLen = BAR_TICKS;
 
-    // --- Keys: spread voicing held ~90% of the bar; a lighter re-voice on beat
-    // 3 gives inner motion without a new chord (a Steely-Dan trait).
-    const voicingNotes = voiceKeys(ch, voic.lo, voic.hi, voic.n, lx.voicer);
+    // --- Keys: the DP-chosen voicing for this bar, held ~90% of the bar. The
+    // voicing is a global smooth path over the whole progression (voice-leading).
+    const voicingNotes = barVoicings[i];
     for (const midi of voicingNotes) {
       ctx.events.push({ tick: start, dur: Math.round(barLen * 0.92), pitch: midi, velocity: 74, part: 'keys' });
-    }
-    if (ctx.rng() < 0.45 && voicingNotes.length) {
-      const re = voiceKeys(ch, voic.lo - 6, voic.hi + 3, voic.n, lx.voicer);
-      for (const midi of re) {
-        ctx.events.push({ tick: start + Math.round(barLen / 2), dur: Math.round(barLen * 0.4), pitch: midi, velocity: 60, part: 'keys' });
-      }
     }
 
     // --- Bass: root on beat 1 (whole) plus a syncopated root/fifth eighth pulse

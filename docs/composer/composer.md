@@ -120,12 +120,13 @@ ratings for the same `(style,seed)` win.
 - Inspect: `GET /api/recourse/compose/benchmark` or MCP `recourse.benchmark`.
 - Seed the learner objectively: `POST /api/recourse/compose/benchmark { autoRate:true }`.
 
-**Results (8-bar loops, seeds 1–10):** baseline **87.4 (A)** → after improving
-style-adherence to count the lexicon's full root-motion vocabulary (archetypes are
-style DNA) **90.4 (A)**. Per-style ~89.8–91.4. Weak dimension remaining:
-**voice-leading ~44** (a naive nearest-tone smoothing attempt REGRESSED it and was
-reverted rather than shipped — proper common-tone voice-leading is the open
-improvement). Integrity/harmony/closure/richness/nuance ~99–100.
+**Results (8-bar loops, seeds 1–10):** baseline **87.4 (A)** → 90.4 (A) after
+style-adherence counted the lexicon's full root-motion vocabulary → **97.3 (A)**
+after DP voice-leading. Voice-leading rose ~44 → **~90** by choosing each bar's
+voicing from candidate sets via a Viterbi shortest path scored by minimal-
+assignment voice motion (common tones retained) + a central-register penalty
+(music21-style method; the naive nearest-tone replacer regressed and was
+discarded). Integrity/harmony/closure/richness/nuance ~99–100.
 
 ## Surfaces
 
