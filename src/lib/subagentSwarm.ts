@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   SubAgent,
   SubAgentType,
@@ -426,7 +427,7 @@ export function stepSubTeams(
 
   const mergedCollaborations = [
     ...newCollaborations.map((c) => ({
-      id: `collab_${Date.now()}_${c.teamId}_${Math.floor(Math.random() * 1000)}`,
+      id: `collab_${Date.now()}_${c.teamId}_${randomUUID().slice(0, 8)}`,
       title: c.summary,
       participants: c.members,
       teamId: c.teamId,

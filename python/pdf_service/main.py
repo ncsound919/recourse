@@ -21,8 +21,12 @@ from __future__ import annotations
 
 import base64
 import io
+import ipaddress
+import socket
 import urllib.request
 from typing import Any, Optional
+from urllib.parse import urlparse
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 import pymupdf
 from fastapi import FastAPI, HTTPException
@@ -34,6 +38,65 @@ MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
 MAX_PAGES = 400
 MAX_PAGE_CHARS = 400_000  # ~2x a dense A4 page; keeps responses bounded
 MAX_ACCEPTED_BYTES = 60 * 1024 * 1024  # 60 MB upload cap
+
+
+def _is_blocked_ip(ip_str: str) -> bool:
+    """True when an IP is not a safe public destination (SSRF guard)."""
+    try:
+        ip = ipaddress.ip_address(ip_str)
+    except ValueError:
+        return True  # not even an IP -> treat as unsafe
+    return (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_reserved
+        or ip.is_multicast
+        or ip.is_unspecified
+    )
+
+
+def _assert_public_url(url: str) -> None:
+    """Reject http(s) URLs whose host is a literal private/loopback address, or
+    whose DNS resolution yields any private/loopback/link-local address. This is
+    the SSRF defense: the sidecar must never fetch cloud metadata, internal
+    services, or localhost, no matter how the host is spelled."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(status_code=400, detail="url must be http(s)")
+    host = parsed.hostname
+    if not host:
+        raise HTTPException(status_code=400, detail="url must include a host")
+
+    # Literal IP host -> decide directly.
+    try:
+        if _is_blocked_ip(host):
+            raise HTTPException(status_code=400, detail="url host is a private/loopback/link-local address")
+        return
+    except ValueError:
+        pass  # host is a hostname, resolve below
+
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        raise HTTPException(status_code=400, detail="url host does not resolve")
+
+    resolved = {info[4][0] for info in infos}
+    for ip in resolved:
+        if _is_blocked_ip(ip):
+            raise HTTPException(
+                status_code=400,
+                detail=f"url host resolves to a private/loopback/link-local address ({ip}) - blocked",
+            )
+
+
+class _SafeRedirectHandler(HTTPRedirectHandler):
+    """Re-check the SSRF guard on every redirect target before following it, so
+    a public page can never bounce the fetch onto an internal host."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[override]
+        _assert_public_url(str(newurl))
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 class UrlIn(BaseModel):
@@ -99,12 +162,14 @@ def health() -> dict[str, Any]:
 
 @app.post("/pdf/url")
 def pdf_url(inp: UrlIn) -> dict[str, Any]:
-    if not (inp.url.startswith("https://") or inp.url.startswith("http://")):
-        raise HTTPException(status_code=400, detail="url must be http(s)")
+    _assert_public_url(inp.url)
+    opener = build_opener(_SafeRedirectHandler())
     try:
-        req = urllib.request.Request(inp.url, headers={"User-Agent": "recourse-pdf-sidecar/1.0"})
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        req = Request(inp.url, headers={"User-Agent": "recourse-pdf-sidecar/1.0"})
+        with opener.open(req, timeout=30) as resp:
             data = resp.read(MAX_DOWNLOAD_BYTES + 1)
+    except HTTPException:
+        raise
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"download failed: {e}")
     if len(data) > MAX_DOWNLOAD_BYTES:

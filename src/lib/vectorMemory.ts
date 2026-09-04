@@ -36,7 +36,9 @@ export interface RecallHit extends MemoryDoc {
 }
 
 export interface MemoryStoreStatus {
-  embedder: 'ollama' | 'lexical';
+  /** 'unknown' until the first remember/recall actually embeds something —
+   *  honest, never an implied backend. */
+  embedder: 'ollama' | 'lexical' | 'unknown';
   store: 'lancedb' | 'memory';
   dir?: string;
   docs: number;
@@ -62,7 +64,14 @@ export function lexicalEmbed(text: string): number[] {
   return v.map((x) => x / norm);
 }
 
+// Ollama probe cooldown: when a probe fails we skip the network round-trip for
+// COOLDOWN_MS so a batch (learner episode, dream tick) never pays the ~500 ms
+// timeout N times. lastProbeOkAt=0 means "never probed or last probe succeeded".
+let lastProbeOkAt = 0;
+const OLLAMA_PROBE_COOLDOWN_MS = 30_000;
+
 async function embedWithOllama(text: string): Promise<number[] | null> {
+  if (lastProbeOkAt !== 0 && Date.now() - lastProbeOkAt < OLLAMA_PROBE_COOLDOWN_MS) return null;
   try {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 500);
@@ -73,16 +82,18 @@ async function embedWithOllama(text: string): Promise<number[] | null> {
       signal: ctrl.signal,
     });
     clearTimeout(t);
-    if (!res.ok) return null;
+    if (!res.ok) { lastProbeOkAt = Date.now(); return null; }
     const j: any = await res.json();
     const vec: number[] | undefined = j?.embeddings?.[0];
-    if (!Array.isArray(vec) || vec.length === 0) return null;
+    if (!Array.isArray(vec) || vec.length === 0) { lastProbeOkAt = Date.now(); return null; }
     // Normalize to VEC_DIM (truncate or pad) so the table stays fixed-shape.
     const out = new Array<number>(VEC_DIM).fill(0);
     for (let i = 0; i < Math.min(vec.length, VEC_DIM); i++) out[i] = vec[i];
     const norm = Math.sqrt(out.reduce((a, x) => a + x * x, 0)) || 1;
+    lastProbeOkAt = 0; // healthy again — allow the next probe
     return out.map((x) => x / norm);
   } catch {
+    lastProbeOkAt = Date.now();
     return null;
   }
 }
@@ -102,6 +113,7 @@ interface MemoryStore {
   remember(doc: Omit<MemoryDoc, 'vec'> & { vec: number[] }): Promise<void>;
   recall(kind: MemoryKind | null, vec: number[], topK: number): Promise<RecallHit[]>;
   count(): Promise<number>;
+  remove(id: string): Promise<void>;
   close?(): Promise<void>;
 }
 
@@ -123,6 +135,7 @@ class InMemoryStore implements MemoryStore {
     return scored;
   }
   async count(): Promise<number> { return this.docs.length; }
+  async remove(id: string): Promise<void> { this.docs = this.docs.filter((d) => d.id !== id); }
 }
 
 function cosine(a: number[], b: number[]): number {
@@ -130,6 +143,17 @@ function cosine(a: number[], b: number[]): number {
   for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
   const denom = Math.sqrt(na) * Math.sqrt(nb) || 1;
   return dot / denom;
+}
+
+function safeMeta(raw: any): Record<string, any> | undefined {
+  if (raw == null) return undefined;
+  if (typeof raw === 'string') { try { return JSON.parse(raw); } catch { return { raw }; } }
+  return raw;
+}
+
+/** Quote an identifier for a LanceDB SQL filter (single quotes doubled). */
+function sqlStr(s: string): string {
+  return `'${String(s).replace(/'/g, "''")}'`;
 }
 
 let lanceModule: any = null;
@@ -149,13 +173,30 @@ async function openLance(dir: string): Promise<MemoryStore | null> {
     }
     return {
       type: 'lancedb',
+      // Upsert by (id, kind) — same semantics as the in-memory store — so both
+      // backends produce the same store state for the same call sequence.
       async remember(doc) {
+        await table.delete(`id = ${sqlStr(doc.id)} AND kind = ${sqlStr(doc.kind)}`);
         await table.add([{ id: doc.id, kind: doc.kind, text: doc.text, vec: doc.vec, meta: JSON.stringify(doc.meta ?? {}) }]);
       },
+      async remove(id) {
+        await table.delete(`id = ${sqlStr(id)}`);
+      },
       async recall(kind, vec, topK) {
-        const rows = await table.search(vec).limit(topK * 3).toArray();
-        const hits = (rows ?? []).filter((r: any) => !kind || r.kind === kind).slice(0, topK);
-        return hits.map((r: any) => ({ id: String(r.id), kind: r.kind, text: String(r.text), vec: r.vec, meta: safeMeta(r.meta), score: typeof r._distance === 'number' ? 1 / (1 + r._distance) : 1 }));
+        const rows = await table.search(vec).limit(Math.max(1, topK * 3)).toArray();
+        // Re-score with cosine in JS so scores share the in-memory store's
+        // semantics (higher = more similar, cosine in [-1, 1]) regardless of the
+        // engine's native distance metric.
+        const scored = (rows ?? [])
+          .filter((r: any) => !kind || r.kind === kind)
+          .map((r: any) => ({
+            id: String(r.id), kind: r.kind, text: String(r.text),
+            vec: r.vec, meta: safeMeta(r.meta),
+            score: cosine(vec, Array.isArray(r.vec) ? r.vec : []),
+          }))
+          .sort((a: RecallHit, b: RecallHit) => b.score - a.score)
+          .slice(0, topK);
+        return scored;
       },
       async count() { try { return (await table.countRows()); } catch { return 0; } },
       async close() { await db.close(); },
@@ -163,12 +204,6 @@ async function openLance(dir: string): Promise<MemoryStore | null> {
   } catch {
     return null;
   }
-}
-
-function safeMeta(raw: any): Record<string, any> | undefined {
-  if (raw == null) return undefined;
-  if (typeof raw === 'string') { try { return JSON.parse(raw); } catch { return { raw }; } }
-  return raw;
 }
 
 /**
@@ -191,6 +226,8 @@ export async function openVectorMemory(opts: { dir?: string } = {}): Promise<Vec
         const probeId = `__probe__${Date.now()}`;
         await candidate.remember({ id: probeId, kind: 'gene', text: 'probe', vec: lexicalEmbed('probe') });
         await candidate.recall(null, lexicalEmbed('probe'), 1);
+        // Remove the probe row so it never pollutes count()/recall results.
+        await candidate.remove(probeId);
         store = candidate;
       }
     } catch {
@@ -222,7 +259,9 @@ export class VectorMemory {
   async count(): Promise<number> { return this.store.count(); }
 
   async status(): Promise<MemoryStoreStatus> {
-    return { embedder: this.embedBackend === 'unknown' ? 'lexical' : this.embedBackend, store: this.store.type, dir: this.dir, docs: await this.count() };
+    // Report the actual embedder state — including 'unknown' before the first
+    // embed — never imply a backend that has not run.
+    return { embedder: this.embedBackend, store: this.store.type, dir: this.dir, docs: await this.count() };
   }
 
   async close(): Promise<void> { if (this.store.close) await this.store.close(); }

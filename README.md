@@ -7,23 +7,13 @@ has a real sandboxed test suite behind it.
 
 ## Run locally
 
-Prerequisites: Node.js 18+, and (for generative features) any OpenAI-compatible
-model server — Ollama is the default target. To use the recommended open model
-from Hugging Face, e.g. [Qwen/Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B):
-
-```
-ollama serve                 # in one terminal
-ollama pull hf.co/Qwen/Qwen3.5-4B   # or any Qwen3.5-4B GGUF build
-```
-
-then in `.env`: `MODEL_NAME="hf.co/Qwen/Qwen3.5-4B"` (leave
-`MODEL_BASE_URL="http://localhost:11434/v1"`).
-
-## Run locally
-
 1. `npm install`
 2. Copy `.env.example` to `.env` and set `MODEL_BASE_URL` and `MODEL_NAME`.
-3. Start your model server.
+3. Start your model server. Prerequisites: Node.js 18+, and (for generative
+   features) any OpenAI-compatible model server — Ollama is the default target.
+   Set `MODEL_NAME` in `.env` to whichever model you have pulled (the default in
+   `.env.example` is `qwen3.8-4b-distill:q4_k_m`); leave
+   `MODEL_BASE_URL="http://localhost:11434/v1"` for a local Ollama.
 4. `npm run dev` → http://localhost:3000
 
 ## What is real (and what is not)

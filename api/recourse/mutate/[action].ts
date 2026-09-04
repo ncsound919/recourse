@@ -19,6 +19,7 @@ import {
   setActivePolicy,
 } from '../../../src/dream/mutator';
 import type { ToolDomain } from '../../../src/dream/types';
+import { requireMutationAuth, serverError } from '../_guard';
 
 const VALID_DOMAINS: ToolDomain[] = [
   'coding', 'math', 'biotech', 'systemic',
@@ -44,6 +45,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   res.setHeader('Cache-Control', 'no-store');
   const action = Array.isArray(req.query.action) ? req.query.action[0] : req.query.action;
   const store = createGeneRegistryStore();
+
+  if (!requireMutationAuth(req, res)) return;
 
   try {
     switch (action) {
@@ -99,8 +102,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         return res.status(404).json({ success: false, error: `unknown mutate action: ${action}` });
     }
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'mutator error';
-    console.error(`[mutate:${action}]`, err);
-    return res.status(500).json({ success: false, error: message });
+    return serverError(res, err, `mutate:${action}`);
   }
 }

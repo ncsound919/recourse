@@ -7,6 +7,8 @@ coverage/
 .env*
 !.env.example
 .selfhosted/
+__pycache__/
+*.pyc
 # Recourse runtime state (regenerated each run — not source)
 recourse_storage.json
 recourse_learner.json

@@ -14,6 +14,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { DreamingEngine } from '../../../src/dream/engine';
 import { createDreamStore } from '../../../src/dream/store';
+import { requireMutationAuth, requireCronSecret, serverError } from '../_guard';
 
 const engine = new DreamingEngine(createDreamStore());
 
@@ -22,6 +23,14 @@ const MAX_CATCHUP_TICKS = 60;
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<VercelResponse | void> {
   res.setHeader('Cache-Control', 'no-store');
   const action = Array.isArray(req.query.action) ? req.query.action[0] : req.query.action;
+
+  // Fail-closed guards: the scheduler target requires DREAM_CRON_SECRET set +
+  // present; every other non-GET action requires RECOURSE_API_SECRET.
+  if (action === 'cron') {
+    if (!requireCronSecret(req, res)) return;
+  } else if (!requireMutationAuth(req, res)) {
+    return;
+  }
 
   try {
     switch (action) {
@@ -59,11 +68,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       }
 
       case 'cron': {
-        // Scheduler target for the "always-on" loop. Optionally protected by
-        // a shared secret: set DREAM_CRON_SECRET and send `x-dream-secret`.
-        if (process.env.DREAM_CRON_SECRET && req.headers['x-dream-secret'] !== process.env.DREAM_CRON_SECRET) {
-          return res.status(401).json({ success: false, error: 'unauthorized' });
-        }
+        // Scheduler target for the "always-on" loop. DREAM_CRON_SECRET must be
+        // set (enforced above, fail-closed) and the request must present it.
         const r = await engine.runCatchUpTicks(MAX_CATCHUP_TICKS);
         return res.status(200).json({ success: true, ...r });
       }
@@ -72,8 +78,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         return res.status(404).json({ success: false, error: `unknown dream action: ${action}` });
     }
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'dream engine error';
-    console.error(`[dream:${action}]`, err);
-    return res.status(500).json({ success: false, error: message });
+    return serverError(res, err, `dream:${action}`);
   }
 }

@@ -37,6 +37,8 @@ describe('vector memory (offline in-memory store + lexical embedder)', () => {
 
   it('reports an honest status (store type + embedder)', async () => {
     const mem = await openVectorMemory({ dir: '' });
+    // Before anything embeds, the embedder is honestly 'unknown' — never implied.
+    expect((await mem.status()).embedder).toBe('unknown');
     await mem.remember('snapshot', 's1', 'boot baseline snapshot');
     const st = await mem.status();
     expect(st.store).toBe('memory');

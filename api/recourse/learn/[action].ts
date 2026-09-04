@@ -16,6 +16,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createLearnerStore, RecursiveLearner } from '../../../src/dream/learner';
+import { requireMutationAuth, serverError } from '../_guard';
 
 const MAX_BATCH_EPISODES = 50;
 
@@ -46,6 +47,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   const action = Array.isArray(req.query.action) ? req.query.action[0] : req.query.action;
   const store = createLearnerStore();
   const learner = new RecursiveLearner(store);
+
+  if (!requireMutationAuth(req, res)) return;
 
   try {
     switch (action) {
@@ -85,8 +88,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         return res.status(404).json({ success: false, error: `unknown learn action: ${action}` });
     }
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'learner error';
-    console.error(`[learn:${action}]`, err);
-    return res.status(500).json({ success: false, error: message });
+    return serverError(res, err, `learn:${action}`);
   }
 }
