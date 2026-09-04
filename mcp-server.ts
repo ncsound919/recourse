@@ -238,5 +238,26 @@ server.registerTool('recourse.promote', {
   return text(JSON.stringify({ ok: r.data?.success, name: g.name, domain: g.domain, status: g.status, version: g.version }, null, 2));
 });
 
+server.registerTool('recourse.compose', {
+  title: 'Compose an original track in a studied style',
+  description: 'Generate an original "in the vein of" track (steely-dan | jasper-ballad | dangelo-glasper | airplane) as a deterministic 4/8/16-bar loop. Writes a DAW-ready .mid + a SoundLab .seq pocket to disk. Mutating: requires RECOURSE_API_SECRET.',
+  inputSchema: {
+    style: z.enum(['steely-dan', 'jasper-ballad', 'dangelo-glasper', 'airplane']).describe('Studied style lexicon to compose from'),
+    key: z.number().min(0).max(11).optional().describe('Tonic pitch class 0-11 (C=0); omit to let the style choose'),
+    major: z.boolean().optional().describe('Major (true) or minor-ish tonic color'),
+    bpm: z.number().int().min(30).max(200).optional().describe('Beats per minute override'),
+    bars: z.union([z.literal(4), z.literal(8), z.literal(16)]).optional().describe('Loop length in bars'),
+    seed: z.number().int().optional().describe('Deterministic seed'),
+    title: z.string().optional().describe('Track title (affects output filename)'),
+  },
+}, async ({ style, key, major, bpm, bars, seed, title }) => {
+  const r = await apiPost('/api/recourse/compose', { style, key, major, bpm, bars, seed, title });
+  if (!r.ok) return text(`compose failed (HTTP ${r.status}): ${r.data?.error ?? 'see server log'}`);
+  return text(JSON.stringify({
+    ok: true, style: r.data.style, key: r.data.key, bpm: r.data.bpm, bars: r.data.bars, seed: r.data.seed,
+    chords: r.data.chords, events: r.data.events, files: r.data.files, summary: r.data.summary,
+  }, null, 2));
+});
+
 const transport = new StdioServerTransport();
 await server.connect(transport);

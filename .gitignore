@@ -16,3 +16,7 @@ recourse_dream.json
 .recourse.lock
 data/
 
+
+# composer outputs
+composer-out/
+composer-demo-*

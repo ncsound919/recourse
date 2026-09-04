@@ -191,6 +191,15 @@ import {
   currentToolVersion,
   isVerifiableVersion,
 } from './src/skills/exporter.js';
+// Composer (creative domain): style-driven original track generation -> .mid/.seq
+import {
+  composeToOutcome,
+  summarizeTrack,
+  toMidiBytes,
+  encodeToSeq,
+  seqToJson,
+  listStyles,
+} from './src/lib/composer/index.js';
 
 const app = express();
 const PORT = Number(process.env.PORT || 3050);
@@ -5507,6 +5516,71 @@ app.post('/api/recourse/skills/import', async (req, res) => {
   } catch (err: any) {
     res.status(500).json({ success: false, error: err?.message ?? String(err) });
   }
+});
+
+// =========================================================================
+// COMPOSER — creative domain. Original tracks "in the vein of" a studied style
+// (Steely Dan complexity / Jasper soul ballads / D'Angelo x Glasper neo-soul /
+// Jefferson Airplane psych), deterministic per seed. Emits a .mid for the DAW
+// and a SoundLab .seq pocket. Writes files => guarded write route.
+// =========================================================================
+
+const COMPOSE_DIR = process.env.RECOURSE_COMPOSE_DIR || path.join(process.cwd(), 'composer-out');
+
+function safeSlug(s: string): string {
+  return String(s || 'track').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'track';
+}
+
+/** Compose an original track. Body mirrors a ComposeBrief. */
+app.post('/api/recourse/compose', (req, res) => {
+  if (!requireMutationAuth(req, res)) return;
+  try {
+    const b = req.body ?? {};
+    const style = b.style;
+    const known = listStyles();
+    if (!known.includes(style)) {
+      return res.status(400).json({ success: false, error: `style must be one of: ${known.join(', ')}` });
+    }
+    const brief = {
+      style,
+      key: typeof b.key === 'number' ? b.key : undefined,
+      major: typeof b.major === 'boolean' ? b.major : undefined,
+      bpm: typeof b.bpm === 'number' && b.bpm > 0 ? b.bpm : undefined,
+      bars: [4, 8, 16].includes(b.bars) ? b.bars : 8,
+      seed: typeof b.seed === 'number' ? b.seed : undefined,
+      title: typeof b.title === 'string' ? b.title : undefined,
+    };
+    const out = composeToOutcome(brief, { midi: true, seq: true });
+    const dir = path.join(COMPOSE_DIR, safeSlug(style));
+    fs.mkdirSync(dir, { recursive: true });
+    const base = `${safeSlug(brief.title || `${style}-${brief.seed ?? 'x'}`)}-${brief.seed ?? ''}`;
+    const midiFile = path.join(dir, `${base}.mid`);
+    const seqFile = path.join(dir, `${base}.seq`);
+    fs.writeFileSync(midiFile, toMidiBytes(out.track));
+    fs.writeFileSync(seqFile, seqToJson(out.seq!));
+    const summary = summarizeTrack(out);
+    fs.writeFileSync(path.join(dir, `${base}.txt`), summary);
+    res.json({
+      success: true,
+      files: { midi: midiFile, seq: seqFile, notes: path.join(dir, `${base}.txt`) },
+      style: out.track.style,
+      key: out.keyName,
+      bpm: out.bpm,
+      bars: out.bars,
+      seed: out.track.seed,
+      chords: out.chordLabels,
+      events: out.track.events.length,
+      styles: known,
+      summary,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message ?? String(err) });
+  }
+});
+
+/** List supported composer styles (read-only). */
+app.get('/api/recourse/compose/styles', (_req, res) => {
+  res.json({ success: true, styles: listStyles(), composeDir: COMPOSE_DIR });
 });
 
 // =========================================================================
