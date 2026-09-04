@@ -2,13 +2,55 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import yaml from 'yaml';
 import {
+  BusinessProfile,
   BusinessProfileError,
+  isAutoMergeEnabled,
+  isKillSwitchActive,
   listBusinessSlugs,
   loadBusinessProfile,
   profileIsStale,
+  RepoBinding,
   BUSINESS_PROFILES_DIR,
+  type BusinessProfileT,
+  type RepoBindingT,
 } from '../src/autopilot/businessProfile';
+
+function loadBusinessProfileFromYaml(yamlText: string): BusinessProfileT {
+  return BusinessProfile.parse(yaml.parse(yamlText));
+}
+
+type ProfileOverrides = Partial<Omit<BusinessProfileT, 'repo'>> & { repo?: Partial<RepoBindingT> };
+
+function makeMinimalProfile(overrides: ProfileOverrides = {}): BusinessProfileT {
+  const base: BusinessProfileT = {
+    business: {
+      name: 'TestBiz',
+      tagline: 'Tagline',
+      industry: 'Test',
+      website: '',
+      stage: 'idea',
+    },
+    customer: {
+      icp: 'Test ICP',
+      segments: [{ name: 'Seg', pain: 'Pain' }],
+      buyingTrigger: 'Trigger',
+      topObjections: ['Obj'],
+    },
+    offering: {
+      summary: 'Summary',
+      pricing: '$0',
+      model: 'free',
+      differentiators: ['Diff'],
+    },
+    gaps: [],
+  };
+  const { repo, ...rest } = overrides;
+  const profile = { ...base, ...rest } as BusinessProfileT;
+  if (repo !== undefined) profile.repo = RepoBinding.parse(repo);
+  return profile;
+}
 
 function makeTmpProfilesDir(): string {
   const dir = mkdtempSync(path.join(tmpdir(), 'recourse-profiles-'));
@@ -211,5 +253,135 @@ offering:
 
   it('uses the canonical profiles directory by default', () => {
     expect(BUSINESS_PROFILES_DIR).toBe('data/business-profiles');
+  });
+});
+
+describe('repo binding', () => {
+  it('accepts a complete repo binding', () => {
+    const profile = loadBusinessProfileFromYaml(`
+business:
+  name: TestBiz
+  tagline: t
+  industry: t
+  website: ""
+  stage: live_product
+customer:
+  icp: t
+  segments:
+    - name: a
+      pain: b
+  buyingTrigger: t
+  topObjections: [t]
+offering:
+  summary: t
+  pricing: t
+  model: subscription
+  differentiators: [t]
+gaps: []
+repo:
+  localPath: "C:/Users/Test/repo"
+  githubUrl: "https://github.com/test/repo"
+  defaultBranch: main
+  autoMergeEnabled: true
+  autoMergeVetoHours: 24
+  minSandboxScore: 0.7
+`);
+    expect(profile.repo?.localPath).toBe('C:/Users/Test/repo');
+    expect(profile.repo?.autoMergeEnabled).toBe(true);
+    expect(profile.repo?.autoMergeVetoHours).toBe(24);
+    expect(profile.repo?.githubUrl).toBe('https://github.com/test/repo');
+  });
+
+  it('repo is optional — a profile without it is valid', () => {
+    const profile = loadBusinessProfileFromYaml(`
+business:
+  name: TestBiz
+  tagline: t
+  industry: t
+  website: ""
+  stage: live_product
+customer:
+  icp: t
+  segments:
+    - name: a
+      pain: b
+  buyingTrigger: t
+  topObjections: [t]
+offering:
+  summary: t
+  pricing: t
+  model: subscription
+  differentiators: [t]
+gaps: []
+`);
+    expect(profile.repo).toBeUndefined();
+  });
+
+  it('applies defaults when repo fields are omitted', () => {
+    const profile = loadBusinessProfileFromYaml(`
+business:
+  name: TestBiz
+  tagline: t
+  industry: t
+  website: ""
+  stage: live_product
+customer:
+  icp: t
+  segments:
+    - name: a
+      pain: b
+  buyingTrigger: t
+  topObjections: [t]
+offering:
+  summary: t
+  pricing: t
+  model: subscription
+  differentiators: [t]
+gaps: []
+repo:
+  localPath: "/tmp/repo"
+`);
+    expect(profile.repo?.autoMergeEnabled).toBe(false);
+    expect(profile.repo?.autoMergeVetoHours).toBe(24);
+    expect(profile.repo?.defaultBranch).toBe('main');
+    expect(profile.repo?.protectedPaths.length).toBeGreaterThan(0);
+  });
+
+  it('isAutoMergeEnabled returns false when repo is absent', () => {
+    const profile = makeMinimalProfile();
+    expect(isAutoMergeEnabled(profile)).toBe(false);
+  });
+
+  it('isAutoMergeEnabled returns true when repo.autoMergeEnabled is true', () => {
+    const profile = makeMinimalProfile({
+      repo: {
+        localPath: '/tmp/repo',
+        autoMergeEnabled: true,
+        autoMergeVetoHours: 24,
+        minSandboxScore: 0.7,
+      },
+    });
+    expect(isAutoMergeEnabled(profile)).toBe(true);
+  });
+
+  it('isKillSwitchActive returns true when env var is set', () => {
+    const prev = process.env.RECOURSE_AUTOPILOT_DISABLED;
+    process.env.RECOURSE_AUTOPILOT_DISABLED = '1';
+    try {
+      expect(isKillSwitchActive()).toBe(true);
+    } finally {
+      if (prev) process.env.RECOURSE_AUTOPILOT_DISABLED = prev;
+      else delete process.env.RECOURSE_AUTOPILOT_DISABLED;
+    }
+  });
+
+  it('isKillSwitchActive returns false when env var is absent', () => {
+    const prev = process.env.RECOURSE_AUTOPILOT_DISABLED;
+    delete process.env.RECOURSE_AUTOPILOT_DISABLED;
+    try {
+      expect(isKillSwitchActive()).toBe(false);
+    } finally {
+      if (prev) process.env.RECOURSE_AUTOPILOT_DISABLED = prev;
+    }
   });
 });
