@@ -113,9 +113,29 @@ each style — including at Steely Dan complexity.
   requires `RECOURSE_API_SECRET`), `GET /api/recourse/compose/styles`,
   `POST /api/recourse/compose/rate` (guarded), `GET /api/recourse/compose/learned`,
   `GET /api/recourse/compose/suggest`. Files land under `composer-out/<style>/`
-  (override `RECOURSE_COMPOSE_DIR`).
-- **MCP:** `recourse.compose`, `recourse.rate_track`, `recourse.learned`.
+  (override `RECOURSE_COMPOSE_DIR`). Body `mode: 'arr'` composes a non-looping
+  written-out arc instead of a loop.
+- **MCP:** `recourse.compose` (mode loop|arr), `recourse.rate_track`, `recourse.learned`.
 - **Library:** importable by any Recourse gene/forge module.
+
+## Signature nuances in the creation process
+
+Per-style loop nuances are realized into the parts (`lexicons.ts` `nuance` +
+`realize`): **Steely Dan** written-chart horn stabs + stacked bg-vox accents;
+**Jasper** sustained string/pad wash + bg-vox (gospel); **D'Angelo** laid-back
+behind-the-beat timing on harmonic/melodic parts (drums stay tight) + a dynamic
+climax swell; **Airplane** build-and-release dynamics across the loop.
+Covered by `tests/composer/nuance.test.ts`.
+
+## Arrangement mode (`arr:`) — the non-looping arc
+
+Section-changes and the final key-lift can't live in a self-closing loop, so they
+are delivered by `composeArrangement` / `mode:'arr'`: a written-out arc of
+`intro → A → bridge (new changes — the SD "written charts" trait) → final chorus
+→ outro`, over 16 bars. Jasper's **final-chorus whole-step key lift** is applied
+to the final section (`sections[].lift`). Arrangement output is **`.mid` only**
+(SoundLab's `.seq` cannot hold a multi-bar progression). Covered by
+`tests/composer/arrange.test.ts`.
 
 ## How you turn output into productions
 
@@ -128,10 +148,8 @@ each style — including at Steely Dan complexity.
    progressions belong to the `.mid`, not the `.seq`.
 
 ## Next increments (in order)
-1. Fuller part model for the SD "written charts" trait: horn/bg-vox/string stabs,
-   and section changes (intro → A → bridge-with-new-chords → vamp outro).
-2. The jasper final-chorus *audio* key-lift + richer D'Angelo behind-the-beat
-   timing in the realize pass.
-3. Optional SoundLab injection seam (small Tauri/HTTP hook in soundlab) so a
+1. Voice/sample sourcing guidance so SoundLab timbres approach the targets.
+2. Optional SoundLab injection seam (small Tauri/HTTP hook in soundlab) so a
    `.seq` can be loaded live rather than by file-open.
-4. Voice/sample sourcing guidance so SoundLab timbres approach the targets.
+3. Richer section-specific arrangement (per-section tempo/groove changes, real
+   horn/solo sections over the SD per-soloist "new changes" trait).

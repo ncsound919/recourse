@@ -68,7 +68,8 @@ export type PartName =
   | 'drums'
   | 'lead'      // melody / hook / sax-lead
   | 'horns'     // stabs / accents
-  | 'bgvox';    // background vocal / choir stack
+  | 'bgvox'     // background vocal / choir stack
+  | 'strings';  // sustained string / pad wash
 
 export interface Track {
   style: StyleId;
@@ -84,6 +85,18 @@ export interface Track {
   events: NoteEvent[];
   /** Where the structure came from — provenance for the learner. */
   brief: ComposeBrief;
+  /** Non-looping arrangement metadata when produced via `arr:` mode. */
+  sections?: ArrSection[];
+  mode?: 'loop' | 'arr';
+}
+
+/** One section of a written-out arrangement (bar ranges are inclusive-start). */
+export interface ArrSection {
+  name: string;
+  startBar: number;
+  bars: number;
+  /** Whole/half-step lift applied to this section's chords (e.g. jasper final). */
+  lift?: number;
 }
 
 /** Deterministic, seedable PRNG (mulberry32). Reproducible composition. */

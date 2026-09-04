@@ -7,7 +7,7 @@
 import type { PartName, Track } from '../types.js';
 import { PPQ, usPerQuarter } from '../theory.js';
 
-const CHANNEL: Record<PartName, number> = { keys: 0, bass: 1, lead: 2, horns: 3, bgvox: 4, drums: 9 };
+const CHANNEL: Record<PartName, number> = { keys: 0, bass: 1, lead: 2, horns: 3, bgvox: 4, strings: 5, drums: 9 };
 
 function vlq(n: number): number[] {
   const bytes: number[] = [n & 0x7f];

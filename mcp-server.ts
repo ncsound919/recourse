@@ -240,7 +240,7 @@ server.registerTool('recourse.promote', {
 
 server.registerTool('recourse.compose', {
   title: 'Compose an original track in a studied style',
-  description: 'Generate an original "in the vein of" track (steely-dan | jasper-ballad | dangelo-glasper | airplane) as a deterministic 4/8/16-bar loop. Writes a DAW-ready .mid + a SoundLab .seq pocket to disk. Mutating: requires RECOURSE_API_SECRET.',
+  description: 'Generate an original "in the vein of" track (steely-dan | jasper-ballad | dangelo-glasper | airplane). Loop mode (default): a deterministic 4/8/16-bar loop -> .mid + a SoundLab .seq pocket. Mode "arr": a non-looping written-out arc (intro/A/bridge/final/outro, jasper final key-lift) -> .mid only. Mutating: requires RECOURSE_API_SECRET.',
   inputSchema: {
     style: z.enum(['steely-dan', 'jasper-ballad', 'dangelo-glasper', 'airplane']).describe('Studied style lexicon to compose from'),
     key: z.number().min(0).max(11).optional().describe('Tonic pitch class 0-11 (C=0); omit to let the style choose'),
@@ -249,13 +249,14 @@ server.registerTool('recourse.compose', {
     bars: z.union([z.literal(4), z.literal(8), z.literal(16)]).optional().describe('Loop length in bars'),
     seed: z.number().int().optional().describe('Deterministic seed'),
     title: z.string().optional().describe('Track title (affects output filename)'),
+    mode: z.enum(['loop', 'arr']).optional().describe('loop (default) or arr (written-out non-loop arc)'),
   },
-}, async ({ style, key, major, bpm, bars, seed, title }) => {
-  const r = await apiPost('/api/recourse/compose', { style, key, major, bpm, bars, seed, title });
+}, async ({ style, key, major, bpm, bars, seed, title, mode }) => {
+  const r = await apiPost('/api/recourse/compose', { style, key, major, bpm, bars, seed, title, mode });
   if (!r.ok) return text(`compose failed (HTTP ${r.status}): ${r.data?.error ?? 'see server log'}`);
   return text(JSON.stringify({
-    ok: true, style: r.data.style, key: r.data.key, bpm: r.data.bpm, bars: r.data.bars, seed: r.data.seed,
-    chords: r.data.chords, events: r.data.events, files: r.data.files, summary: r.data.summary,
+    ok: true, mode: r.data.mode ?? 'loop', style: r.data.style, key: r.data.key, bpm: r.data.bpm, bars: r.data.bars, seed: r.data.seed,
+    chords: r.data.chords, events: r.data.events, sections: r.data.sections, files: r.data.files, summary: r.data.summary,
   }, null, 2));
 });
 

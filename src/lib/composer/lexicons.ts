@@ -39,6 +39,19 @@ export interface StyleLexicon {
   /** Optional specialized voicing engine. 'steely' applies the mu(add2)
    *  adjacency rule and rootless dominant voicings (Steely Dan deepening). */
   voicer?: 'standard' | 'steely';
+  /** Per-style signature nuances realized into the parts. */
+  nuance?: {
+    /** Short written-chart horn stabs on the chord color (Steely Dan). */
+    horns?: boolean;
+    /** Stacked background-vocal accents (Steely Dan / Jasper gospel). */
+    bgvox?: boolean;
+    /** Sustained string/pad wash doubling the harmony (Jasper / lush). */
+    strings?: boolean;
+    /** Laid-back "behind-the-beat" nudge, in 16th-steps (D'Angelo pocket). */
+    behindBeat?: number;
+    /** Dynamic crescendo strength 0..1 applied across bars (D'Angelo/Airplane). */
+    dynamics?: number;
+  };
   /** Signature behavior knobs. */
   signature: {
     /** whole/half-step final-chorus lift for ballads; false to disable. */
@@ -91,6 +104,7 @@ export const STYLE_LEXICONS: Record<StyleId, StyleLexicon> = {
     voicing: { lo: 55, hi: 88, n: 5 },
     bassOctave: 2,
     voicer: 'steely',
+    nuance: { horns: true, bgvox: true },
     signature: { holdBarChance: 0.25, drumDensity: 0.5 },
   },
 
@@ -127,6 +141,7 @@ export const STYLE_LEXICONS: Record<StyleId, StyleLexicon> = {
     ],
     voicing: { lo: 55, hi: 84, n: 5 },
     bassOctave: 2,
+    nuance: { bgvox: true, strings: true },
     signature: { finalKeyLift: 2, staticVampChance: 0.1, holdBarChance: 0.3, drumDensity: 0.35 },
   },
 
@@ -161,6 +176,7 @@ export const STYLE_LEXICONS: Record<StyleId, StyleLexicon> = {
     ],
     voicing: { lo: 57, hi: 90, n: 5 }, // open/quartal-friendly upper spread
     bassOctave: 2,
+    nuance: { behindBeat: 0.2, dynamics: 0.6 },
     signature: { staticVampChance: 0.4, holdBarChance: 0.5, drumDensity: 0.3 },
   },
 
@@ -196,6 +212,7 @@ export const STYLE_LEXICONS: Record<StyleId, StyleLexicon> = {
     ],
     voicing: { lo: 52, hi: 79, n: 3 }, // open triads/fifths, few notes, wide
     bassOctave: 2,
+    nuance: { dynamics: 1 },
     signature: { staticVampChance: 0.35, holdBarChance: 0.4, drumDensity: 0.55 },
   },
 };

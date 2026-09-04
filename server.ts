@@ -194,6 +194,7 @@ import {
 // Composer (creative domain): style-driven original track generation -> .mid/.seq
 import {
   composeToOutcome,
+  composeArrangement,
   summarizeTrack,
   toMidiBytes,
   encodeToSeq,
@@ -5553,6 +5554,30 @@ app.post('/api/recourse/compose', (req, res) => {
       seed: typeof b.seed === 'number' ? b.seed : undefined,
       title: typeof b.title === 'string' ? b.title : undefined,
     };
+
+    // Arrangement mode: a non-looping written-out arc (SD charts / Jasper final
+    // key-lift). .mid only — SoundLab's .seq can't hold a multi-bar progression.
+    if (b.mode === 'arr') {
+      const track = composeArrangement({ ...brief, style });
+      const dir = path.join(COMPOSE_DIR, safeSlug(style));
+      fs.mkdirSync(dir, { recursive: true });
+      const base = `${safeSlug(brief.title || `${style}-arr`)}-${brief.seed ?? ''}`;
+      const midiFile = path.join(dir, `${base}.mid`);
+      fs.writeFileSync(midiFile, toMidiBytes(track));
+      return res.json({
+        success: true,
+        mode: 'arr',
+        style: track.style,
+        key: track.key,
+        bpm: track.bpm,
+        bars: track.bars,
+        seed: track.seed,
+        events: track.events.length,
+        sections: track.sections,
+        files: { midi: midiFile },
+      });
+    }
+
     const out = composeToOutcome(brief, {
       midi: true,
       seq: true,

@@ -10,10 +10,10 @@ import { toMidiBytes } from './encode/midi.js';
 import { pcName } from './theory.js';
 import { ComposerLearner, defaultLearnerFile } from './learner.js';
 
-export { compose, listStyles } from './composer.js';
+export { compose, composeArrangement, listStyles } from './composer.js';
 export { toMidiBytes } from './encode/midi.js';
 export { encodeToSeq, seqToJson } from './encode/seq.js';
-export type { ComposeBrief, Track, Chord, NoteEvent, StyleId } from './types.js';
+export type { ComposeBrief, Track, Chord, NoteEvent, StyleId, ArrSection } from './types.js';
 export { STYLE_LEXICONS, GROOVES } from './lexicons.js';
 export { ComposerLearner, defaultLearnerFile } from './learner.js';
 export type { Episode, StyleLearning, Adjustment } from './learner.js';

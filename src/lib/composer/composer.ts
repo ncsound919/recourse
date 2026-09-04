@@ -15,7 +15,7 @@
  * consume, so MIDI and grid stay consistent. Nothing here reads the network.
  */
 
-import type { Chord, ComposeBrief, NoteEvent, StyleId, Track } from './types.js';
+import type { ArrSection, Chord, ComposeBrief, NoteEvent, StyleId, Track } from './types.js';
 import { createRng, pickWeighted } from './types.js';
 import { getLexicon, GROOVES, type StyleLexicon } from './lexicons.js';
 import { PPQ, voiceChord, voiceMuChord, voiceRootless, DOMINANT_QUALITIES, bassMidi, chordTonesMidi } from './theory.js';
@@ -48,8 +48,10 @@ function pickQuality(lx: StyleLexicon, rng: () => number): import('./types.js').
   return pickWeighted(rng, lx.qualityWeights).q;
 }
 
-/** Generate `bars` chords following the style's harmony DNA, loop-closed. */
-function generateChords(lx: StyleLexicon, rng: () => number, tonicPc: number, bars: number): Chord[] {
+/** Generate `bars` chords following the style's harmony DNA. When `close` is
+ *  true (looping mode) the final bar resolves back to the tonic so the loop
+ *  repeats; `close:false` (open bridge / arrangement sections) keeps the arc. */
+function generateChords(lx: StyleLexicon, rng: () => number, tonicPc: number, bars: number, close = true): Chord[] {
   // Static-vamp styles hold the tonic color most of the loop (D'Angelo/psych).
   const staticChance = lx.signature.staticVampChance ?? 0;
   const chords: Chord[] = [];
@@ -61,7 +63,7 @@ function generateChords(lx: StyleLexicon, rng: () => number, tonicPc: number, ba
       const drift = rng() < qBias / (qBias + 2) ? 0 : -2;
       chords.push({ rootPc: (((tonicPc + drift) % 12) + 12) % 12, quality: i === bars - 1 ? q : pickQuality(lx, rng) });
     }
-    chords[bars - 1] = { rootPc: tonicPc, quality: q };
+    if (close) chords[bars - 1] = { rootPc: tonicPc, quality: q };
     return chords;
   }
 
@@ -81,7 +83,7 @@ function generateChords(lx: StyleLexicon, rng: () => number, tonicPc: number, ba
     }
   }
   // Loop closure: final bar resolves back to the tonic to make the loop repeat.
-  chords[bars - 1] = { rootPc: tonicPc, quality: pickQuality(lx, rng) };
+  if (close) chords[bars - 1] = { rootPc: tonicPc, quality: pickQuality(lx, rng) };
   return chords;
 }
 
@@ -104,6 +106,10 @@ function voiceKeys(ch: Chord, lo: number, hi: number, n: number, voicer?: string
     if (DOMINANT_QUALITIES.has(ch.quality)) return voiceRootless(ch.rootPc, ch.quality, lo, hi);
   }
   return voiceChord(ch.rootPc, ch.quality, lo, hi, n);
+}
+
+function clampVel(v: number): number {
+  return Math.max(1, Math.min(127, Math.round(v)));
 }
 
 function realize(brief: ComposeBrief, res: { seed: number; bars: number; key: number; major: boolean; bpm: number }, chords: Chord[]): Track {
@@ -156,6 +162,62 @@ function realize(brief: ComposeBrief, res: { seed: number; bars: number; key: nu
       const note = tones[Math.floor(ctx.rng() * tones.length)] + (ctx.rng() < 0.2 ? 12 : 0);
       ctx.events.push({ tick: start + Math.round(ctx.rng() * 3) * STEP, dur: Math.round(STEP * (3 + ctx.rng() * 6)), pitch: note, velocity: 86, part: 'lead' });
     }
+
+    // --- Style signature color parts (loop nuances).
+    const nu = lx.nuance;
+    // Steely-Dan written-chart horn stabs on the chord color.
+    if (nu?.horns) {
+      const tones = chordTonesMidi(ch.rootPc, ch.quality, Math.max(4, Math.floor(voic.hi / 12)));
+      const hiTones = tones.filter((t) => t >= voic.hi - 6 && t <= voic.hi + 12);
+      const pool = hiTones.length ? hiTones : tones.slice(-2);
+      if (pool.length && ctx.rng() < 0.6) {
+        const stabStep = ctx.rng() < 0.5 ? 6 : 14;
+        const n = 1 + Math.floor(ctx.rng() * 2);
+        for (let k = 0; k < n; k++) {
+          const p = pool[Math.floor(ctx.rng() * pool.length)];
+          ctx.events.push({ tick: start + stabStep * STEP, dur: Math.round(STEP * (1 + ctx.rng() * 1.5)), pitch: p, velocity: 64, part: 'horns' });
+        }
+      }
+    }
+    // Stacked background-vocal accent in chorus-y bars.
+    if (nu?.bgvox && i % 4 >= 2 && ctx.rng() < 0.6) {
+      const t5 = chordTonesMidi(ch.rootPc, ch.quality, 5);
+      const picks = [0, t5.length > 1 ? 2 : 0];
+      const acc = ctx.rng() < 0.5 ? 0 : 8;
+      for (const idx of picks.slice(0, 2)) {
+        const p = t5[idx] ?? t5[0];
+        ctx.events.push({ tick: start + acc * STEP, dur: Math.round(STEP * 2), pitch: p, velocity: 52, part: 'bgvox' });
+      }
+    }
+    // Sustained string/pad wash doubling the harmony (Jasper/lush).
+    if (nu?.strings && voicingNotes.length) {
+      for (const m of voicingNotes.map((n) => n + 12).filter((n) => n <= 110)) {
+        ctx.events.push({ tick: start, dur: Math.round(barLen * 0.95), pitch: m, velocity: 44, part: 'strings' });
+      }
+    }
+  }
+
+  // --- Laid-back timing ("behind-the-beat" pocket) + dynamic swell (post-pass).
+  // Instruments sit behind the grid (D'Angelo); drums stay tight; velocities
+  // crescendo across the loop (D'Angelo climax / Airplane build-and-release).
+  const nu2 = lx.nuance;
+  const total = ctx.bars * BAR_TICKS;
+  if (nu2?.behindBeat) {
+    const nudge = Math.round(nu2.behindBeat * STEP);
+    for (const ev of ctx.events) {
+      if (ev.part === 'drums') continue;
+      if (ev.tick + nudge + ev.dur <= total && ev.tick + nudge >= 0) ev.tick += nudge;
+    }
+  }
+  if (nu2?.dynamics) {
+    const denom = Math.max(1, ctx.bars - 1);
+    for (const ev of ctx.events) {
+      if (ev.part === 'drums') continue;
+      const barNo = Math.min(ctx.bars - 1, Math.floor(ev.tick / BAR_TICKS));
+      const ramp = 0.62 + nu2.dynamics * 0.5 * (barNo / denom);
+      const boost = barNo === ctx.bars - 1 ? 0.08 : 0; // final-bar swell
+      ev.velocity = clampVel(ev.velocity * (ramp + boost));
+    }
   }
 
   ctx.events.sort((a, b) => a.tick - b.tick || a.pitch - b.pitch);
@@ -185,4 +247,67 @@ export function compose(brief: ComposeBrief, opts: { lexicon?: import('./lexicon
 
 export function listStyles(): StyleId[] {
   return Object.keys(GROOVES) as StyleId[];
+}
+
+// ---------------------------------------------------------------------------
+// ARRANGEMENT MODE (`arr:`) — a non-looping, written-out arc.
+// Realizes the signature devices that CANNOT live in a self-closing loop:
+//   intro vamp -> A -> bridge (with NEW changes for the SD "written charts"
+//   trait) -> final chorus (with the jasper whole-step key lift) -> outro vamp.
+// Output is a linear Track (mode:'arr', sections recorded). Encoded as .mid;
+// SoundLab's .seq cannot hold a multi-bar progression, so arr mode is .mid-only.
+// ---------------------------------------------------------------------------
+
+function staticChords(lx: StyleLexicon, rng: () => number, tonicPc: number, bars: number): Chord[] {
+  const q = pickQuality(lx, rng);
+  const out: Chord[] = [];
+  for (let i = 0; i < bars; i++) out.push({ rootPc: tonicPc, quality: q });
+  return out;
+}
+
+export function composeArrangement(brief: ComposeBrief): Track {
+  const res = resolveBrief(brief);
+  const lx = getLexicon(brief.style);
+  const tonic = res.key;
+  const layout: Array<{ name: string; kind: 'vamp' | 'closed' | 'open'; bars: number }> = [
+    { name: 'intro', kind: 'vamp', bars: 2 },
+    { name: 'A', kind: 'closed', bars: 4 },
+    { name: 'bridge', kind: 'open', bars: 4 }, // open => new changes, no tonic close
+    { name: 'final', kind: 'closed', bars: 4 },
+    { name: 'outro', kind: 'vamp', bars: 2 },
+  ];
+  const chords: Chord[] = [];
+  const sections: ArrSection[] = [];
+  let at = 0;
+  layout.forEach((sec, idx) => {
+    const rng = createRng(res.seed ^ (0x51ed + idx * 0x2c1));
+    const ch = sec.kind === 'vamp'
+      ? staticChords(lx, rng, tonic, sec.bars)
+      : generateChords(lx, rng, tonic, sec.bars, sec.kind === 'closed');
+    sections.push({ name: sec.name, startBar: at, bars: sec.bars });
+    chords.push(...ch);
+    at += sec.bars;
+  });
+
+  // Signature device: jasper final-chorus whole-step key lift.
+  const lift = lx.signature.finalKeyLift;
+  if (lift) {
+    const finalSec = sections.find((s) => s.name === 'final');
+    if (finalSec) {
+      for (let i = finalSec.startBar; i < finalSec.startBar + finalSec.bars; i++) {
+        chords[i] = { ...chords[i], rootPc: (chords[i].rootPc + lift) % 12 };
+      }
+      finalSec.lift = lift;
+    }
+  }
+
+  const total = chords.length;
+  const track = realize(
+    { style: brief.style, seed: res.seed, bars: total, key: res.key, major: res.major, bpm: res.bpm, title: brief.title || `${brief.style} arrangement` } as ComposeBrief,
+    { ...res, bars: total },
+    chords,
+  );
+  track.sections = sections;
+  track.mode = 'arr';
+  return track;
 }
