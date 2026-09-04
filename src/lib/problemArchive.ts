@@ -157,3 +157,36 @@ export function nextByCurriculum(
   }
   return { problem: null, difficulty: 0, chosenDomain: null };
 }
+
+/**
+ * Deterministic full curriculum queue (Phase 3 #12): every unsolved problem,
+ * ordered so that the least-confident domains come first and, within a domain,
+ * easiest first. This lets the solver/learner walk a stable teaching order
+ * instead of re-deciding one-at-a-time. Pure.
+ */
+export function curriculumQueue(
+  archive: ProblemArchive,
+  beliefs: BeliefLike[],
+  solved: string[] = [],
+  knownDomains: string[] = [],
+): Array<{ problem: RecourseProblem; difficulty: number; domain: string }> {
+  const solvedSet = new Set(solved);
+  const uncertainty = domainUncertainty(beliefs);
+  const domains = new Set<string>([...archive.list().map((p) => p.domain), ...knownDomains]);
+  const rankedDomains = [...domains].sort((a, b) => {
+    const ua = uncertainty.get(a) ?? 1;
+    const ub = uncertainty.get(b) ?? 1;
+    if (ua !== ub) return ub - ua;
+    return a < b ? -1 : a > b ? 1 : 0;
+  });
+  const out: Array<{ problem: RecourseProblem; difficulty: number; domain: string }> = [];
+  for (const domain of rankedDomains) {
+    const candidates = archive
+      .byDomain(domain)
+      .filter((p) => !solvedSet.has(p.id))
+      .map((p) => ({ problem: p, difficulty: estimateDifficulty(p), domain }))
+      .sort((x, y) => x.difficulty - y.difficulty || (x.problem.id < y.problem.id ? -1 : 1));
+    out.push(...candidates);
+  }
+  return out;
+}
