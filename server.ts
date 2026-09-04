@@ -203,6 +203,9 @@ import {
   ComposerLearner,
   defaultLearnerFile,
   composeWithLearner,
+  runBenchmark as runComposerBenchmark,
+  renderBenchmark as renderComposerBenchmark,
+  autoRateBenchmark,
 } from './src/lib/composer/index.js';
 
 const app = express();
@@ -5663,6 +5666,38 @@ app.get('/api/recourse/compose/suggest', (req, res) => {
   const style = typeof req.query.style === 'string' && listStyles().includes(req.query.style as any) ? req.query.style : 'steely-dan';
   const count = Math.min(10, Number(req.query.count) || 4);
   res.json({ success: true, style, suggestions: composerLearner.suggestNext(style as any, count) });
+});
+
+/** Objective composer benchmark (read). Grading methodology is documented in
+ *  src/lib/composer/benchmark.ts and does NOT claim to grade taste/timbre. */
+app.get('/api/recourse/compose/benchmark', (_req, res) => {
+  try {
+    const report = runComposerBenchmark();
+    res.json({ success: true, ...report, markdown: renderComposerBenchmark(report) });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message ?? String(err) });
+  }
+});
+
+/** Run the objective benchmark; optionally auto-rate winners into the learner
+ *  so recursion starts without human ears. Guarded write when autoRate is set. */
+app.post('/api/recourse/compose/benchmark', (req, res) => {
+  const autoRate = req.body?.autoRate === true;
+  if (autoRate && !requireMutationAuth(req, res)) return;
+  try {
+    const styles = Array.isArray(req.body?.styles) ? req.body.styles.filter((s: string) => listStyles().includes(s as any)) : undefined;
+    const seeds = Array.isArray(req.body?.seeds) ? req.body.seeds.map(Number).filter((n: number) => Number.isFinite(n)) : undefined;
+    const bars = [4, 8, 16].includes(req.body?.bars) ? req.body.bars : 8;
+    const report = runComposerBenchmark({ styles, seeds, bars });
+    let auto: { pushed: number; details: unknown[] } | undefined;
+    if (autoRate) {
+      const r = autoRateBenchmark(composerLearner, report, Number(req.body?.minTotal ?? 0.7));
+      auto = { pushed: r.pushed, details: r.details };
+    }
+    res.json({ success: true, ...report, auto, markdown: renderComposerBenchmark(report) });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message ?? String(err) });
+  }
 });
 
 // =========================================================================

@@ -17,6 +17,8 @@ export type { ComposeBrief, Track, Chord, NoteEvent, StyleId, ArrSection } from 
 export { STYLE_LEXICONS, GROOVES } from './lexicons.js';
 export { ComposerLearner, defaultLearnerFile } from './learner.js';
 export type { Episode, StyleLearning, Adjustment } from './learner.js';
+export { runBenchmark, scoreTrack, ratingFromScore, renderBenchmark, autoRateBenchmark } from './benchmark.js';
+export type { BenchmarkReport, BenchmarkConfig, StyleScore, TrackScore, MetricCheck } from './benchmark.js';
 
 /** Compose applying the learner's current learned biases for the style. */
 export function composeWithLearner(brief: ComposeBrief, learner?: ComposerLearner): Track {

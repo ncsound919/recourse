@@ -288,5 +288,15 @@ server.registerTool('recourse.learned', {
   } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
 });
 
+server.registerTool('recourse.benchmark', {
+  title: 'Run the objective composer benchmark',
+  description: 'Grade the composer on computed metrics (integrity, harmony, loop closure, style root-motion adherence, voice-leading, richness, nuance) across all styles. Does NOT grade taste/timbre — that needs your ears + recourse.rate_track.',
+}, async () => {
+  try {
+    const j = await apiGet('/api/recourse/compose/benchmark');
+    return text(JSON.stringify({ aggregate: j?.aggregate, grade: j?.grade, markdown: j?.markdown, styles: j?.styles }, null, 2));
+  } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
+});
+
 const transport = new StdioServerTransport();
 await server.connect(transport);
