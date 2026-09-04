@@ -298,5 +298,30 @@ server.registerTool('recourse.benchmark', {
   } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
 });
 
+server.registerTool('recourse.compose_soundlab', {
+  title: 'Emit a piece for SoundLab playback',
+  description: 'Compose a style-driven piece and emit the SoundLab bridge contract. Feed the returned JSON to a running SoundLab via window.__recourse.load(piece), then __recourse.play(). Mutating: requires RECOURSE_API_SECRET.',
+  inputSchema: {
+    style: z.enum(['steely-dan', 'jasper-ballad', 'dangelo-glasper', 'airplane']),
+    key: z.number().min(0).max(11).optional(),
+    bpm: z.number().int().min(30).max(200).optional(),
+    seed: z.number().int().optional(),
+    title: z.string().optional(),
+  },
+}, async ({ style, key, bpm, seed, title }) => {
+  const r = await apiPost('/api/recourse/compose/soundlab', { style, key, bpm, seed, title });
+  if (!r.ok) return text(`compose_soundlab failed (HTTP ${r.status}): ${r.data?.error ?? 'see server log'}`);
+  return text(JSON.stringify({
+    ok: r.data.valid === true,
+    valid: r.data.valid === true,
+    problems: r.data.problems,
+    style: r.data.style,
+    headChord: r.data.piece?.headChord,
+    layers: r.data.piece?.layers?.map((l: any) => `${l.id}:${l.role}`),
+    file: r.data.file,
+    note: 'Feed piece JSON to SoundLab: window.__recourse.load(piece); window.__recourse.play();  (audio needs a user gesture/click).',
+  }, null, 2));
+});
+
 const transport = new StdioServerTransport();
 await server.connect(transport);

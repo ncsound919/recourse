@@ -206,6 +206,9 @@ import {
   runBenchmark as runComposerBenchmark,
   renderBenchmark as renderComposerBenchmark,
   autoRateBenchmark,
+  encodeSoundlabPiece,
+  validatePiece,
+  pieceToJson,
 } from './src/lib/composer/index.js';
 
 const app = express();
@@ -5618,6 +5621,39 @@ app.post('/api/recourse/compose', (req, res) => {
 /** List supported composer styles (read-only). */
 app.get('/api/recourse/compose/styles', (_req, res) => {
   res.json({ success: true, styles: listStyles(), composeDir: COMPOSE_DIR });
+});
+
+/** Emit a piece for SoundLab playback (the window.__recourse.load contract).
+ *  Guarded write (composes + may save). Returns the JSON the bridge consumes. */
+app.post('/api/recourse/compose/soundlab', (req, res) => {
+  if (!requireMutationAuth(req, res)) return;
+  try {
+    const b = req.body ?? {};
+    const style = b.style;
+    if (!listStyles().includes(style)) return res.status(400).json({ success: false, error: 'unknown style' });
+    const brief = {
+      style,
+      key: typeof b.key === 'number' ? b.key : undefined,
+      major: typeof b.major === 'boolean' ? b.major : undefined,
+      bpm: typeof b.bpm === 'number' && b.bpm > 0 ? b.bpm : undefined,
+      bars: [4, 8, 16].includes(b.bars) ? b.bars : 8,
+      seed: typeof b.seed === 'number' ? b.seed : undefined,
+      title: typeof b.title === 'string' ? b.title : undefined,
+    };
+    const track = composeArrangement(brief);
+    const piece = encodeSoundlabPiece(track);
+    const problems = validatePiece(piece);
+    let file: string | undefined;
+    const dir = path.join(COMPOSE_DIR, safeSlug(style));
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      file = path.join(dir, `${safeSlug(brief.title || style)}-${brief.seed ?? 'x'}.soundlab.json`);
+      fs.writeFileSync(file, pieceToJson(piece));
+    } catch { /* optional write */ }
+    res.json({ success: problems.length === 0, valid: problems.length === 0, problems, style, seed: track.seed, file, piece });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message ?? String(err) });
+  }
 });
 
 // --- Composer learner loop (the honest "gets better" mechanism) ----------

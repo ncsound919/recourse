@@ -172,9 +172,19 @@ to the final section (`sections[].lift`). Arrangement output is **`.mid` only**
    rows you remap), and SoundLab's step grid is monophonic-per-step, so multi-bar
    progressions belong to the `.mid`, not the `.seq`.
 
+## SoundLab playback
+
+Recourse emits a SoundLab bridge contract (`POST /api/recourse/compose/soundlab`,
+MCP `recourse.compose_soundlab`; `encodeSoundlabPiece` in `src/lib/composer/soundlab.ts`)
+that SoundLab hydrates into its own synth layers + a playable pattern + song chain
+via `window.__recourse.load(piece)` / `__recourse.play()` (bridge added in the
+SoundLab repo). Honest limits: Web Audio needs a user gesture (load works from
+any call; audible start follows a click on the page); SoundLab cells are
+monophonic-per-layer, so the head chord is spelled across simultaneous synth
+voice layers; the full multi-bar harmony still lives in the `.mid`.
+
 ## Next increments (in order)
 1. Voice/sample sourcing guidance so SoundLab timbres approach the targets.
-2. Optional SoundLab injection seam (small Tauri/HTTP hook in soundlab) so a
-   `.seq` can be loaded live rather than by file-open.
-3. Richer section-specific arrangement (per-section tempo/groove changes, real
-   horn/solo sections over the SD per-soloist "new changes" trait).
+2. Optional real live arrangement scheduler in SoundLab (Phase 2.3) so multi-bar
+   section playback works beyond pattern-chaining.
+3. Human audition + `rate_track` over the starter batch in `composer-out/starter-batch`.
