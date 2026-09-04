@@ -1,0 +1,57 @@
+business:
+  name: Aetherdesk
+  tagline: "AI call center, rented by the hour"
+  industry: SaaS / AI Telephony
+  website: ""
+  stage: live_product
+
+customer:
+  icp: "SMBs with inbound call volume that want AI voice agents without standing up their own telephony infrastructure"
+  segments:
+    - name: Healthcare practices
+      pain: "Front desk overwhelmed by appointment scheduling, prescription refill, and insurance calls; each call ties up staff and patient flow"
+    - name: E-commerce and DTC brands
+      pain: "Order status, returns, and FAQ calls drown the support team during peak hours; scaling headcount for spikes is expensive"
+    - name: Service businesses with after-hours calls
+      pain: "Missed calls after 5pm are lost revenue; 24/7 staffing is unaffordable; current call forwarding feels impersonal"
+  buyingTrigger: "Hours of staff time lost to phone tag, after-hours calls going to voicemail, or a missed call that cost a real sale"
+  topObjections:
+    - "Will AI callers sound robotic and damage our brand?"
+    - "Setup is too complex for our small ops team"
+    - "What happens when the AI can't answer — do calls just drop?"
+    - "Compliance: HIPAA for healthcare, PCI for retail — does Aetherdesk handle that?"
+
+offering:
+  summary: "Multi-tenant AI voice agent platform: ASR + TTS + LLM intent detection, dual telephony (Twilio or self-hosted Fonoster/FreeSWITCH), real-time dashboard, call recording with PII redaction, lead management, voice cloning, agent runtime with two AI modes (DeepSeek managed or BYOK)"
+  pricing: "Prepaid rentals of concurrent AI agents, priced by time period: $2/hr, $13.30/day, $239/month, $2,239/year. BYOK $0.03/min, DeepSeek managed $0.05/min overage. Stripe Checkout, no subscriptions."
+  model: prepaid_rental
+  differentiators:
+    - "Two AI modes in one product: managed DeepSeek (zero setup) and BYOK (customer controls their own LLM)"
+    - "Dual telephony: Twilio cloud or self-hosted Fonoster/FreeSWITCH, switchable per deployment"
+    - "Per-customer deployment with isolated stack (own DB, own voice backend, own domain) — strong compliance posture"
+    - "Real-time dashboard with audio quality monitoring (MOS, jitter, packet loss)"
+    - "Developer platform: Python SDK, webhooks, API keys for custom integrations"
+    - "Voice cloning (browser recording or ElevenLabs import) for branded agents"
+
+gaps:
+  - "landing/index.html shows the OLD subscription pricing ($99/$299/$999/$5,000/mo tiers) — the approved Aug 2026 spec is the rental model; landing page must be updated"
+  - "No public case studies or testimonials"
+  - "No comparison page versus Five9, Twilio Flex, Dialpad AI, or other call center AI tools"
+  - "No content/SEO presence (no blog, no docs site beyond internal docs/)"
+  - "Compliance posture is over-claimed in places: README mentions HIPAA in progress, SOC 2 planned — do not market as compliant"
+  - ".env file is populated with secrets in the working tree — rotation event risk"
+
+voiceAndBrand:
+  tone: technical
+  prohibitedPhrases:
+    - "revolutionary AI"
+    - "human-like"
+    - "10x your calls"
+    - "guaranteed uptime"
+    - "fully HIPAA-compliant" # not yet certified
+  exampleCopy:
+    - "A multi-tenant AI voice agent platform with two AI modes and two telephony backends."
+    - "Per-customer deployment with isolated stack, PII redaction, and a real-time dashboard."
+    - "Rental pricing by concurrent agent, with included minutes and transparent overage."
+
+lastReviewedAt: 2026-09-04T00:00:00.000Z

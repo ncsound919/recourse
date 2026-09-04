@@ -1,0 +1,57 @@
+business:
+  name: Truck Buddy
+  tagline: "Less paperwork. More road."
+  industry: Trucking / Logistics SaaS
+  website: ""
+  stage: beta
+
+customer:
+  icp: "Owner-operators and small carriers (1-20 trucks) who lose hours daily to clipboard paperwork, detention claims, and inspection logs"
+  segments:
+    - name: Owner-operators (own authority)
+      pain: "Solo drivers handle everything: BOL, detention, IFTA, inspections. Each stolen hour is lost revenue; paperwork is the silent margin killer"
+    - name: Company / leased drivers
+      pain: "Need inspections, ETA, and document capture without back-office overhead; corporate systems are heavyweight and assume dispatcher support"
+    - name: Small carriers and fleets (1-20 trucks)
+      pain: "Dispatch coordination and driver management without an enterprise TMS; spreadsheets break at 5+ trucks"
+  buyingTrigger: "A failed inspection, a missed detention claim, an IFTA audit, or a load lost to poor documentation"
+  topObjections:
+    - "I already use a paper logbook and a notebook — will this actually save time?"
+    - "My phone is already full of trucking apps; adding another is friction"
+    - "I'm a solo operator, I don't have time to learn software"
+    - "Will it work offline? (cab connectivity is unreliable)"
+
+offering:
+  summary: "Trucking companion with a mobile app (Expo/React Native) for one-handed cab use and a web portal (Next.js) for load management, documents, factoring, compliance, contracts, and an AI assistant. Features: OCR document capture, OBD diagnostics, geofence arrival, detention auto-log, voice readouts, ELD-friendly pre/post-trip inspections"
+  pricing: "Subscription tiers: Basic $10/mo, Pro $30/mo, Fleet $199/mo. Stripe is configured in vercel.json but not yet wired to live payments. Beta waitlist is the active GTM."
+  model: subscription
+  differentiators:
+    - "Hands-free, one-handed cab UI designed for the seat, not the desk"
+    - "On-device OCR via ML Kit (mobile) and Tesseract.js (web) — works offline, no cloud round-trip for document capture"
+    - "OBD truck health readouts via voice — no mechanic visit for coolant/battery/fault code checks"
+    - "Compliance dashboard tailored for owner-ops: FMCSA authority, COI, IFTA, UCR, Form 2290, BOC-3, drug & alcohol, ELD, DOT inspection — with days-to-due"
+    - "Honest seams: every external integration (SMS, voice, repair tickets) is labeled mock or live; nothing fake-wired"
+
+gaps:
+  - "Current landing page at website/index.html is marked 'Demo concept' in the footer — must be replaced with honest beta-waitlist page"
+  - "Stripe is stubbed in config but no live payment — pricing page would be premature"
+  - "No waitlist capture form (current CTA is mailto:hello@truckbuddy.app)"
+  - "Backend for SMS, voice, and repair auto-ticket is documented but not implemented — UI labels them as 'mock' or 'live' seams"
+  - "No case studies or testimonials; marketing plan correctly refuses to publish paid promises"
+  - "No public docs site beyond internal docs/marketing/ and docs/superpowers/"
+  - "OCR works on native mobile only; web uses fallback/demo paths — needs honest disclosure on web pages"
+
+voiceAndBrand:
+  tone: casual
+  prohibitedPhrases:
+    - "revolutionary"
+    - "disruptive"
+    - "10x your revenue"
+    - "AI-powered" # overused in trucking space; specific features communicate better
+    - "guaranteed compliance" # FMCSA audits, not marketing claims
+  exampleCopy:
+    - "Less paperwork. More road."
+    - "A cab companion that handles BOL, detention, and inspections while you drive."
+    - "Built for owner-operators who don't have a back office."
+
+lastReviewedAt: 2026-09-04T00:00:00.000Z
