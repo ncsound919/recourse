@@ -18,6 +18,7 @@ import {
   HourlyReportView,
   AiMutatorModal,
   SelfRepairView,
+  ExternalBenchmarkView,
   DecisionEngineView,
   DreamingEngineView,
   GitHubResearchView,
@@ -28,6 +29,8 @@ import {
   SelfAssemblingLegoView,
   OllamaView,
   IntakeAndGrowthView,
+  CorpusView,
+  SkillsView,
   WebDownloadView,
   SettingsView
 } from './components';
@@ -59,6 +62,7 @@ import {
   Sparkles,
   RefreshCw,
   Wrench,
+  Target,
   Brain,
   Moon,
   GitBranch,
@@ -69,6 +73,8 @@ import {
    Server,
    Globe,
    Download,
+   FolderSearch,
+   Library,
    Settings
 } from 'lucide-react';
 
@@ -223,11 +229,14 @@ type TabKey =
   | 'github'
   | 'subagents'
   | 'self-repair'
+  | 'benchmark'
   | 'provenance'
   | 'registry'
   | 'verifier'
    | 'reports'
    | 'intake-growth'
+   | 'corpus'
+   | 'skills'
    | 'web'
    | 'settings';
 
@@ -338,9 +347,33 @@ const TABS: Array<{
     ),
   },
   {
+    key: 'benchmark',
+    label: 'BENCHMARK',
+    icon: <Target className="w-4 h-4 text-indigo-400" />,
+    badge: (status) => {
+      const rp = status.realProgress;
+      if (!rp || rp.benchmarkTotal === 0) return null;
+      return (
+        <span className="px-1.5 py-0.2 bg-indigo-950 text-indigo-300 text-[10px] rounded border border-indigo-800 font-bold">
+          {rp.benchmarkSolved}/{rp.benchmarkTotal}
+        </span>
+      );
+    },
+  },
+  {
     key: 'intake-growth',
     label: 'INTAKE & GROWTH',
     icon: <Globe className="w-4 h-4 text-emerald-400" />,
+  },
+  {
+    key: 'corpus',
+    label: 'CORPUS',
+    icon: <FolderSearch className="w-4 h-4 text-cyan-400" />,
+  },
+  {
+    key: 'skills',
+    label: 'SKILLS',
+    icon: <Library className="w-4 h-4 text-purple-400" />,
   },
   {
     key: 'web',
@@ -796,10 +829,14 @@ export default function App() {
       }).then(r => r.json());
       
       if (res.success) {
+        // Uptime is server-authoritative (wall-clock since server boot);
+        // never guess it client-side or a reload/double-tick skews it.
         setStatus(prev => ({
           ...prev,
           ...res.systemStatus,
-          uptimeSeconds: prev.uptimeSeconds + 3,
+          uptimeSeconds: typeof res.systemStatus?.uptimeSeconds === 'number'
+            ? res.systemStatus.uptimeSeconds
+            : prev.uptimeSeconds,
         }));
         
         if (res.mathResult?.loopStatus === 'optimal' || Math.random() < 0.1) {
@@ -1000,6 +1037,8 @@ export default function App() {
               />
             )}
 
+            {activeTab === 'benchmark' && <ExternalBenchmarkView />}
+
             {activeTab === 'provenance' && (
               <ProvenanceTimeline events={provenanceEvents} integrity={chainIntegrity} />
             )}
@@ -1026,6 +1065,12 @@ export default function App() {
 
             {activeTab === 'intake-growth' && (
               <IntakeAndGrowthView />
+            )}
+            {activeTab === 'corpus' && (
+              <CorpusView />
+            )}
+            {activeTab === 'skills' && (
+              <SkillsView />
             )}
             {activeTab === 'web' && (
               <WebDownloadView />

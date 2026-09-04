@@ -1,0 +1,16 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+.selfhosted/
+# Recourse runtime state (regenerated each run — not source)
+recourse_storage.json
+recourse_learner.json
+recourse_dream.json
+.recourse.lock
+data/
+

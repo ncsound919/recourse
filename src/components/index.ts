@@ -9,6 +9,7 @@ export { VerifierMatrixView } from './VerifierMatrixView';
 export { HourlyReportView } from './HourlyReportView';
 export { AiMutatorModal } from './AiMutatorModal';
 export { SelfRepairView } from './SelfRepairView';
+export { ExternalBenchmarkView } from './ExternalBenchmarkView';
 export { DecisionEngineView } from './DecisionEngineView';
 export { DreamingEngineView } from './DreamingEngineView';
 export { GitHubResearchView } from './GitHubResearchView';
@@ -20,6 +21,8 @@ export { ArchitectForgeView } from './ArchitectForgeView';
 export { SelfAssemblingLegoView } from './SelfAssemblingLegoView';
 export { OllamaView } from './OllamaView';
 export { IntakeAndGrowthView } from './IntakeAndGrowthView';
+export { CorpusView } from './CorpusView';
+export { SkillsView } from './SkillsView';
 export { WebDownloadView } from './WebDownloadView';
 export { SettingsView } from './SettingsView';
 

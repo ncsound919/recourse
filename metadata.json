@@ -1,0 +1,6 @@
+{
+  "name": "Recourse",
+  "description": "Autonomous self-developing architectural OS featuring template-driven self-learning, self-healing code repair, parametric internal component building, and a 7-layer Lego composable ML engine alongside recursive mathematical loops and dreaming engines.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
