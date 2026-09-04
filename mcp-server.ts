@@ -191,5 +191,52 @@ server.registerTool('recourse.inspect_gene', {
   } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
 });
 
+// ---------------------------------------------------------------------------
+// Full recursive-loop write tools (Phase 4 #14). These hit the /mutate routes,
+// which are now config-gated: when RECOURSE_API_SECRET is set the server enforces
+// it and these authenticate; MCP still requires the secret locally so a write is
+// never sent unauthenticated.
+// ---------------------------------------------------------------------------
+
+const VALID_DOMAINS = ['coding', 'math', 'biotech', 'systemic', 'neuro_symbolic', 'cyber_defense', 'quantum_sim'];
+
+server.registerTool('recourse.evolve', {
+  title: 'Evolve a new tool/gene',
+  description: 'Ask the mutator to propose a new capability for a domain. Promotions only land if the produced code passes the real sandbox + lint gate. Mutating: requires RECOURSE_API_SECRET.',
+  inputSchema: {
+    domain: z.enum(VALID_DOMAINS as [string, ...string[]]).describe('Tool domain to evolve in'),
+    instructions: z.string().min(4).describe('What capability to build / how to mutate'),
+    targetToolName: z.string().optional().describe('Optional existing tool name to target a mutation'),
+  },
+}, async ({ domain, instructions, targetToolName }) => {
+  const r = await apiPost('/api/recourse/mutate/evolve', { domain, instructions, targetToolName });
+  if (!r.ok) return text(`evolve failed (HTTP ${r.status}): ${r.data?.error ?? 'see server log'}`);
+  const d = r.data ?? {};
+  return text(JSON.stringify({
+    ok: d.success,
+    outcome: d.outcome,            // 'promoted' | 'rejected' | ...
+    toolName: d.toolName,
+    version: d.version,
+    engine: d.engine,
+    generation: d.generation,
+    versionHash: d.versionHash,
+    verifierPassed: d.verifierResult?.verified ?? undefined,
+    verifierSummary: d.verifierResult?.summary,
+    error: d.error,
+  }, null, 2));
+});
+
+server.registerTool('recourse.promote', {
+  title: 'Approve / promote a pending gene',
+  description: 'Promote a pending gene by its id through the approval gate. Mutating: requires RECOURSE_API_SECRET.',
+  inputSchema: { geneId: z.string().describe('Id of the pending gene to promote') },
+}, async ({ geneId }) => {
+  if (!geneId) return text('geneId is required.');
+  const r = await apiPost('/api/recourse/mutate/approve', { geneId });
+  if (!r.ok) return text(`promote failed (HTTP ${r.status}): ${r.data?.error ?? 'see server log'}`);
+  const g = r.data?.gene ?? {};
+  return text(JSON.stringify({ ok: r.data?.success, name: g.name, domain: g.domain, status: g.status, version: g.version }, null, 2));
+});
+
 const transport = new StdioServerTransport();
 await server.connect(transport);
