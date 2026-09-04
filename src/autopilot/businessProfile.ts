@@ -58,6 +58,25 @@ export const VoiceAndBrand = z.object({
   exampleCopy: z.array(z.string().min(1).max(500)).default([]),
 });
 
+export const RepoBinding = z.object({
+  localPath: z.string().min(1).max(500),
+  githubUrl: z.string().url().or(z.literal('')).default(''),
+  defaultBranch: z.string().min(1).max(100).default('main'),
+  protectedPaths: z.array(z.string().min(1).max(300)).default([
+    '.env',
+    'gh token.txt',
+    '*.env*',
+    '*secret*',
+    '*token*',
+    '*key*',
+  ]),
+  auditScheduleCron: z.string().default('0 6 * * *'),
+  autoMergeEnabled: z.boolean().default(false),
+  autoMergeVetoHours: z.number().int().min(1).max(168).default(24),
+  minSandboxScore: z.number().min(0).max(1).default(0.7),
+});
+export type RepoBindingT = z.infer<typeof RepoBinding>;
+
 export const BusinessProfile = z.object({
   business: BusinessIdentity,
   customer: Customer,
@@ -65,8 +84,23 @@ export const BusinessProfile = z.object({
   gaps: z.array(z.string().min(1).max(300)).min(0).max(20),
   voiceAndBrand: VoiceAndBrand.optional(),
   lastReviewedAt: z.string().datetime().optional(),
+  repo: RepoBinding.optional(),
 });
 export type BusinessProfileT = z.infer<typeof BusinessProfile>;
+
+// --- Repo binding helpers ---------------------------------------------------
+
+export function repoBinding(profile: BusinessProfileT): RepoBindingT | null {
+  return profile.repo ?? null;
+}
+
+export function isAutoMergeEnabled(profile: BusinessProfileT): boolean {
+  return profile.repo?.autoMergeEnabled ?? false;
+}
+
+export function isKillSwitchActive(): boolean {
+  return process.env.RECOURSE_AUTOPILOT_DISABLED === '1';
+}
 
 // --- File I/O ---------------------------------------------------------------
 
