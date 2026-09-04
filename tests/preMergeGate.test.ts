@@ -319,3 +319,84 @@ describe('preMergeGate checkProtectedPaths', () => {
     expect(checkProtectedPaths(['src/app.ts'], null).allowed).toBe(true);
   });
 });
+
+describe('preMergeGate disk-safety guarantees (review fixes)', () => {
+  it('a protected-path violation never touches disk (no file written, no executors run)', async () => {
+    const repo = makeTmpRepo();
+    fs.mkdirSync(path.join(repo, 'docs', 'locked'), { recursive: true });
+    const original = 'secret plan';
+    fs.writeFileSync(path.join(repo, 'docs', 'locked', 'plan.md'), original);
+
+    const executors = allPassingExecutors();
+    const binding = makeBinding({ protectedPaths: ['docs/locked/**'] });
+    const result = await runGate(
+      makeProposal({
+        files: [
+          { path: 'docs/locked/plan.md', action: 'modify', content: 'MUTATED' },
+          { path: 'src/new.ts', action: 'create', content: 'export const a = 1;' },
+        ],
+      }),
+      repo,
+      executors,
+      binding,
+    );
+
+    expect(result.passed).toBe(false);
+    expect(result.rejectedReason).toMatch(/Protected path/);
+    // Nothing was written or deleted.
+    expect(fs.readFileSync(path.join(repo, 'docs', 'locked', 'plan.md'), 'utf8')).toBe(original);
+    expect(fs.existsSync(path.join(repo, 'src', 'new.ts'))).toBe(false);
+    // No executor ran.
+    expect(executors.sandbox).not.toHaveBeenCalled();
+  });
+
+  it('rolls back applied files when the gate fails mid-execution', async () => {
+    const repo = makeTmpRepo();
+    fs.mkdirSync(path.join(repo, 'src'));
+    fs.writeFileSync(path.join(repo, 'src', 'kept.ts'), 'original content');
+    const binding = makeBinding({ protectedPaths: [] });
+
+    const executors = allPassingExecutors();
+    executors.sandbox.mockImplementation(async () => ({ passed: true, output: 'ok' }));
+    executors.lint.mockImplementation(async () => ({
+      passed: false,
+      output: 'lint failed',
+      error: 'lint failed',
+    }));
+
+    const result = await runGate(
+      makeProposal({
+        files: [
+          { path: 'src/kept.ts', action: 'modify', content: 'MODIFIED' },
+          { path: 'src/created.ts', action: 'create', content: 'new file' },
+          { path: 'src/gone.ts', action: 'delete', content: '' },
+        ],
+      }),
+      repo,
+      executors,
+      binding,
+    );
+
+    expect(result.passed).toBe(false);
+    // Rollback: modified restored, created removed, deleted nothing to restore.
+    expect(fs.readFileSync(path.join(repo, 'src', 'kept.ts'), 'utf8')).toBe('original content');
+    expect(fs.existsSync(path.join(repo, 'src', 'created.ts'))).toBe(false);
+  });
+
+  it('applyFiles:false (dry gate) writes nothing to disk', async () => {
+    const repo = makeTmpRepo();
+    const executors = allPassingExecutors();
+    const proposal = makeProposal({
+      files: [{ path: 'src/dry.ts', action: 'create', content: 'export const a = 1;' }],
+    });
+
+    const result = await runGate(proposal, repo, executors, null, { applyFiles: false });
+
+    expect(result.passed).toBe(true);
+    expect(fs.existsSync(path.join(repo, 'src', 'dry.ts'))).toBe(false);
+    // Executors still ran (with an empty changed-files set).
+    expect(executors.sandbox).toHaveBeenCalledTimes(1);
+    const ctx = executors.sandbox.mock.calls[0][0];
+    expect(ctx.changedFiles).toEqual([]);
+  });
+});

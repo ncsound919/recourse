@@ -127,6 +127,20 @@ describe('checkAndMerge', () => {
     expect(result.closed).toBe(true);
   });
 
+  it('does NOT treat veto-adjacent words as a veto (word boundary)', async () => {
+    const github = makeGithub({
+      getComments: vi.fn(async () => [
+        { id: 1, body: 'vetoed the earlier proposal', user: 'al', createdAt: '2026-09-04T01:00:00.000Z' },
+        { id: 2, body: 'the vetoes are counted below', user: 'be', createdAt: '2026-09-04T01:00:00.000Z' },
+      ]),
+    });
+    const result = await checkAndMerge(makeState(), github, { now: new Date('2026-09-04T12:00:00.000Z') });
+    expect(result.vetoReceived).toBe(false);
+    expect(result.closed).toBe(false);
+    expect(github.closePR).not.toHaveBeenCalled();
+    expect(github.mergePR).not.toHaveBeenCalled();
+  });
+
   it('returns the state unchanged before the deadline with no veto comment', async () => {
     const github = makeGithub();
     const state = makeState();

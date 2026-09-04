@@ -11,11 +11,14 @@
 export interface KeywireConfig {
   url: string;
   apiKey: string;
+  /** Timeout ms for the token fetch (a hung vault must not wedge the loop). */
+  timeoutMs?: number;
 }
 
 export const DEFAULT_KEYWIRE_CONFIG: KeywireConfig = {
   url: process.env.KEYWIRE_URL || 'http://localhost:3000',
   apiKey: process.env.KEYWIRE_SERVICE_TOKEN || '',
+  timeoutMs: 10_000,
 };
 
 export class KeywireError extends Error {
@@ -35,6 +38,10 @@ export async function fetchGitHubToken(
   }
 
   const url = `${config.url}/api/secrets/${encodeURIComponent(owner)}/github-token`;
+  const timeoutMs = config.timeoutMs ?? 10_000;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   let res: Response;
   try {
@@ -44,10 +51,14 @@ export async function fetchGitHubToken(
         Authorization: `Bearer ${config.apiKey}`,
         Accept: 'application/json',
       },
+      signal: controller.signal,
     });
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
-    throw new KeywireError(`Keywire token fetch unreachable: ${detail}`);
+    const reason = err instanceof Error && err.name === 'AbortError' ? 'timeout' : detail;
+    throw new KeywireError(`Keywire token fetch unreachable: ${reason}`);
+  } finally {
+    clearTimeout(timer);
   }
 
   if (!res.ok) {

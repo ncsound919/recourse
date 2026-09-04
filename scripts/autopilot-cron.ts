@@ -153,6 +153,11 @@ export async function runScheduledAudit(
 
       const outcome = (await runLoop({ profile, dryRun })) as LoopOutcomeLike;
       console.log(formatOutcome(slug, outcome));
+      // State-machine errors are returned, not thrown — surface them as exit 1
+      // so cron wrappers can detect a failed pass.
+      if (outcome && outcome.state && outcome.state.status === 'error') {
+        exitCode = 1;
+      }
     } catch (err) {
       exitCode = 1;
       const message = err instanceof Error ? err.message : String(err);

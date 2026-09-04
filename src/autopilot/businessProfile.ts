@@ -99,7 +99,8 @@ export function isAutoMergeEnabled(profile: BusinessProfileT): boolean {
 }
 
 export function isKillSwitchActive(): boolean {
-  return process.env.RECOURSE_AUTOPILOT_DISABLED === '1';
+  const val = String(process.env.RECOURSE_AUTOPILOT_DISABLED ?? '').trim().toLowerCase();
+  return val === '1' || val === 'true' || val === 'yes';
 }
 
 // --- File I/O ---------------------------------------------------------------

@@ -27,7 +27,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
 
 import { GateResult, type GateResultT, type UpgradeProposalT } from './loopTypes';
@@ -187,17 +187,20 @@ function errMsg(err: unknown): string {
   return String(err);
 }
 
-/** npm/npx are .cmd shims on win32; execFileSync needs the real name there. */
-function shellCmd(base: 'npm' | 'npx'): string {
-  return process.platform === 'win32' ? `${base}.cmd` : base;
+/** npm/npx are .cmd shims on win32; execSync (shell) resolves them correctly.
+ *  execFileSync cannot run a .cmd without a shell and throws EINVAL there. */
+function quoteArg(a: string): string {
+  return /[\s"]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a;
 }
 
-function runCapture(cmd: string, args: string[], cwd: string): { stdout: string; stderr: string } {
-  const stdout = execFileSync(cmd, args, {
+function runCapture(tokens: string[], cwd: string): { stdout: string; stderr: string } {
+  const command = tokens.map(quoteArg).join(' ');
+  const stdout = execSync(command, {
     cwd,
     stdio: ['ignore', 'pipe', 'pipe'],
     timeout: EXEC_TIMEOUT_MS,
     encoding: 'utf8',
+    shell: process.platform === 'win32' ? 'cmd.exe' : '/bin/sh',
   });
   return { stdout: typeof stdout === 'string' ? stdout : '', stderr: '' };
 }
@@ -238,7 +241,7 @@ const lint: Executor = (ctx) => {
     return { passed: true, output: 'no lintable changed files' };
   }
   try {
-    const { stdout, stderr } = runCapture(shellCmd('npx'), ['oxlint', ...lintable], ctx.repoPath);
+    const { stdout, stderr } = runCapture(['npx', 'oxlint', ...lintable], ctx.repoPath);
     const tail = [stdout.trim(), stderr.trim()].filter(Boolean).join('\n');
     return {
       passed: true,
@@ -267,7 +270,7 @@ const typecheck: Executor = (ctx) => {
     return { passed: true, output: 'no typecheck script' };
   }
   try {
-    const { stdout, stderr } = runCapture(shellCmd('npm'), ['run', 'typecheck'], ctx.repoPath);
+    const { stdout, stderr } = runCapture(['npm', 'run', 'typecheck'], ctx.repoPath);
     const tail = [stdout.trim(), stderr.trim()].filter(Boolean).join('\n');
     return { passed: true, output: `npm run typecheck passed${tail ? `\n${tail}` : ''}` };
   } catch (err) {
@@ -290,8 +293,7 @@ const tests: Executor = (ctx) => {
   }
   try {
     const { stdout, stderr } = runCapture(
-      shellCmd('npm'),
-      ['test', '--', '--run', ...changedTestFiles],
+      ['npm', 'test', '--', '--run', ...changedTestFiles],
       ctx.repoPath,
     );
     const tail = [stdout.trim(), stderr.trim()].filter(Boolean).join('\n');
@@ -311,6 +313,45 @@ export const DEFAULT_EXECUTORS: Required<GateExecutors> = { sandbox, lint, typec
 // runGate
 // ============================================================================
 
+export interface GateOptions {
+  /** When false, proposal files are NOT written to disk (read-only dry gate).
+   *  Executors still run, but against an empty changed-files set. */
+  applyFiles?: boolean;
+}
+
+/** Snapshot of every file a proposal would touch, captured before apply so a
+ *  failed gate can roll the working tree back to exactly its prior state. */
+type Snapshot = Map<string, { existed: boolean; content?: string }>;
+
+function captureSnapshot(proposal: UpgradeProposalT, repoPath: string): Snapshot {
+  const snapshot: Snapshot = new Map();
+  for (const file of proposal.files) {
+    const target = resolveTarget(repoPath, file.path);
+    if (file.action === 'delete' && !fs.existsSync(target)) continue;
+    if (fs.existsSync(target)) {
+      snapshot.set(target, { existed: true, content: fs.readFileSync(target, 'utf8') });
+    } else {
+      snapshot.set(target, { existed: false });
+    }
+  }
+  return snapshot;
+}
+
+function rollbackSnapshot(snapshot: Snapshot): void {
+  for (const [target, before] of snapshot) {
+    try {
+      if (before.existed) {
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.writeFileSync(target, before.content ?? '', 'utf8');
+      } else if (fs.existsSync(target)) {
+        fs.rmSync(target, { force: true });
+      }
+    } catch {
+      // Best-effort rollback: a restored file is better than a thrown gate.
+    }
+  }
+}
+
 function resolveExecutor(step: GateStep, executors: GateExecutors | undefined): Executor {
   // No executors object -> the full real pipeline.
   if (!executors) return DEFAULT_EXECUTORS[step];
@@ -325,23 +366,15 @@ export async function runGate(
   repoPath: string,
   executors?: GateExecutors,
   repoBindingArg: RepoBindingT | null = null,
+  options: GateOptions = {},
 ): Promise<GateResultT> {
-  // 1. Apply files.
-  let changedFiles: string[];
-  try {
-    ({ changedFiles } = applyProposalFiles(proposal, repoPath));
-  } catch (err) {
-    return GateResult.parse({
-      proposalId: proposal.id,
-      passed: false,
-      checks: [],
-      rejectedReason: `apply failed: ${errMsg(err)}`,
-    });
-  }
+  const applyFiles = options.applyFiles ?? true;
 
-  // 2. Protected-path check before any verification runs.
-  const changedRelPaths = changedFiles.map((f) => normalizeRel(repoPath, f));
-  const protectedCheck = checkProtectedPaths(changedRelPaths, repoBindingArg);
+  // 1. Protected-path check BEFORE anything touches disk. The blocked paths are
+  //    the proposal's intended paths (create/modify/delete alike). A blocked
+  //    proposal is never applied and never rolled back — nothing changed.
+  const intendedRel = proposal.files.map((f) => normalizeRel(repoPath, resolveTarget(repoPath, f.path)));
+  const protectedCheck = checkProtectedPaths(intendedRel, repoBindingArg);
   if (!protectedCheck.allowed) {
     const first = protectedCheck.violations[0] ?? '';
     return GateResult.parse({
@@ -359,7 +392,24 @@ export async function runGate(
     });
   }
 
-  // 3. Run executors in order; short-circuit on first failure.
+  // 2. Apply files (unless this is a read-only dry gate).
+  const snapshot: Snapshot | null = applyFiles ? captureSnapshot(proposal, repoPath) : null;
+  let changedFiles: string[] = [];
+  if (applyFiles) {
+    try {
+      ({ changedFiles } = applyProposalFiles(proposal, repoPath));
+    } catch (err) {
+      return GateResult.parse({
+        proposalId: proposal.id,
+        passed: false,
+        checks: [],
+        rejectedReason: `apply failed: ${errMsg(err)}`,
+      });
+    }
+  }
+
+  // 3. Run executors in order; short-circuit on first failure. On failure the
+  //    working tree is rolled back to the captured snapshot.
   const ctx: GateContext = { repoPath, changedFiles, repoBinding: repoBindingArg, proposal };
   const checks: GateResultT['checks'] = [];
   for (const step of GATE_STEPS) {
@@ -382,17 +432,19 @@ export async function runGate(
     checks.push(check);
     if (!result.passed) {
       const reason = result.error && result.error.trim() ? result.error : result.output;
-      return GateResult.parse({
+      const failed = GateResult.parse({
         proposalId: proposal.id,
         passed: false,
         checks,
         overallScore: checks.filter((c) => c.passed).length / checks.length,
         rejectedReason: `${step} failed: ${reason}`,
       });
+      if (snapshot) rollbackSnapshot(snapshot);
+      return failed;
     }
   }
 
-  // 4-6. All green.
+  // 4. All green.
   return GateResult.parse({
     proposalId: proposal.id,
     passed: true,

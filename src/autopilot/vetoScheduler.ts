@@ -60,10 +60,21 @@ export function parseOwnerRepo(githubUrl: string): { owner: string; repo: string
   return { owner, repo };
 }
 
+/** A "veto" is the standalone word, case-insensitive (the runbook tells
+ *  operators to comment the word "veto"). Word-boundary matching excludes
+ *  lookalikes like "vetoed" / "vetoes", and the check is per-comment: an
+ *  operator comment containing "veto" is treated as an instruction to close.
+ */
+const VETO_RE = /\bveto\b/i;
+
+function isVeto(body: string): boolean {
+  return VETO_RE.test(body);
+}
+
 /**
  * Advances one PR-state check. Transitions are pure:
  *   1. terminal states (vetoed / merged / closed) are returned unchanged;
- *   2. a comment whose lowercased body contains "veto" closes the PR;
+ *   2. a comment containing the standalone word "veto" closes the PR;
  *   3. once now >= vetoDeadline the PR is merged (merge failures are recorded
  *      in mergeError and the PR is left open);
  *   4. still inside the window -> returned unchanged.
@@ -76,7 +87,7 @@ export async function checkAndMerge(
   if (state.vetoReceived || state.merged || state.closed) return state;
 
   const comments = await github.getComments(state.owner, state.repo, state.prNumber);
-  const vetoHit = comments.some((c) => String(c.body ?? '').toLowerCase().includes('veto'));
+  const vetoHit = comments.some((c) => isVeto(String(c.body ?? '')));
   if (vetoHit) {
     await github.closePR(state.owner, state.repo, state.prNumber);
     return { ...state, vetoReceived: true, closed: true };

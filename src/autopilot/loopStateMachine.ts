@@ -25,6 +25,7 @@ import {
   type GitHubClient,
   type LoopContext,
   type LoopState,
+  type PRStateT,
   type UpgradeProposalT,
   type UpgradeQueueT,
 } from './loopTypes';
@@ -35,13 +36,14 @@ import {
   type BusinessProfileT,
 } from './businessProfile';
 import { runAudit, type AuditAdapters } from './auditRunner';
-import { projectScorecard, saveScorecard, slugify } from './scorecard';
+import { loadLatestScorecard, projectScorecard, saveScorecard, slugify } from './scorecard';
 import { analyzeGaps } from './gapAnalyzer';
 import { generateUpgrade } from './upgradeGenerator';
 import { runGate, type GateExecutors } from './preMergeGate';
-import { computeVetoDeadline, parseOwnerRepo, savePRState } from './vetoScheduler';
+import { checkAndMerge, computeVetoDeadline, parseOwnerRepo, savePRState } from './vetoScheduler';
 import { fetchGitHubToken } from './keywireClient';
 import { createGitHubClient } from './gitHubClient';
+import { updateGeneFitness } from './fitnessLoop';
 
 export type LoopRunOptions = {
   profile: BusinessProfileT;
@@ -68,7 +70,8 @@ function errMsg(err: unknown): string {
 
 export async function runLoop(options: LoopRunOptions): Promise<LoopOutcome> {
   const { profile } = options;
-  const context: LoopContext = emptyContext();
+  const slug = slugify(profile.business.name);
+  const context: LoopContext = { ...emptyContext(), profileSlug: slug };
 
   // 1. Kill switch.
   if (isKillSwitchActive()) {
@@ -80,13 +83,13 @@ export async function runLoop(options: LoopRunOptions): Promise<LoopOutcome> {
   if (!repo) {
     return {
       state: { status: 'error', reason: 'no_repo_binding' },
-      context: { ...context, profileSlug: slugify(profile.business.name) },
+      context,
     };
   }
   if (!isAutoMergeEnabled(profile) && !options.dryRun) {
     return {
       state: { status: 'idle' },
-      context: { ...context, profileSlug: slugify(profile.business.name) },
+      context,
     };
   }
 
@@ -94,7 +97,6 @@ export async function runLoop(options: LoopRunOptions): Promise<LoopOutcome> {
   // is honored in both modes.
   const auditDir = options.auditDir ?? (options.dryRun ? undefined : DEFAULT_AUDIT_DIR);
   const now = options.now ?? new Date();
-  context.profileSlug = slugify(profile.business.name);
 
   // 3. AUDIT.
   let statement: AuditStatementT;
@@ -132,12 +134,22 @@ export async function runLoop(options: LoopRunOptions): Promise<LoopOutcome> {
   }
   context.queue = queue;
 
-  // 6. GENERATE + GATE per gap. First gap whose gate passes is chosen.
+  // 6. GENERATE + GATE per gap. First gate-passing candidate is chosen.
+  //    Auto-merge (non-dry-run) is restricted to TIER A proposals: tier B/C
+  //    carry human-review markers and are never auto-merged, per spec §5.7.
+  //    Dry runs may select any tier because nothing is opened or merged.
   let current: UpgradeProposalT | null = null;
   try {
     for (const gap of queue.gaps) {
+      if (!options.dryRun && gap.tier !== 'A') continue;
       const proposal = await generateUpgrade(gap, profile);
-      const result = await runGate(proposal, repo.localPath, options.gateExecutors, repo);
+      const result = await runGate(
+        proposal,
+        repo.localPath,
+        options.gateExecutors,
+        repo,
+        { applyFiles: !options.dryRun },
+      );
       if (result.passed) {
         current = proposal;
         break;
@@ -154,7 +166,7 @@ export async function runLoop(options: LoopRunOptions): Promise<LoopOutcome> {
   }
   context.currentProposal = current;
 
-  // 7. PR phase (skipped in dryRun).
+  // 7. PR phase (skipped in dryRun; nothing is written to disk or opened).
   if (options.dryRun) {
     return { state: { status: 'pr_open', prNumber: -1 }, context };
   }
@@ -208,4 +220,85 @@ export async function runLoop(options: LoopRunOptions): Promise<LoopOutcome> {
       context,
     };
   }
+}
+
+// ============================================================================
+// resumeAfterVeto — closes the recursive loop after a PR has aged past (or
+// been vetoed within) its window. runLoop ends at veto_wait; a scheduler
+// tick calls this later to advance the PR. On merge, a fresh audit runs and
+// the resulting scorecard delta is folded into gene fitness (quarantining the
+// proposal id on a real regression).
+// ============================================================================
+
+export type ResumeOptions = {
+  profile: BusinessProfileT;
+  prState: PRStateT;
+  github: GitHubClient;
+  adapters?: AuditAdapters;
+  auditDir?: string;
+  ledgerRoot?: string;
+  now?: Date;
+};
+
+export async function resumeAfterVeto(options: ResumeOptions): Promise<LoopOutcome> {
+  const { profile, prState, github } = options;
+  const slug = slugify(profile.business.name);
+  const context: LoopContext = { ...emptyContext(), profileSlug: slug, prState };
+  const repo = repoBinding(profile);
+
+  let updated: PRStateT;
+  try {
+    updated = await checkAndMerge(prState, github, { now: options.now });
+  } catch (err) {
+    return {
+      state: { status: 'error', reason: `veto check failed: ${errMsg(err)}` },
+      context,
+    };
+  }
+  context.prState = updated;
+
+  if (updated.vetoReceived) {
+    return { state: { status: 'vetoed', prNumber: updated.prNumber }, context };
+  }
+  if (!updated.merged) {
+    return {
+      state: { status: 'veto_wait', prNumber: updated.prNumber, deadline: updated.vetoDeadline },
+      context,
+    };
+  }
+
+  // Merged. Re-audit post-merge and fold the delta into gene fitness.
+  if (!repo) {
+    return { state: { status: 'merged', prNumber: updated.prNumber }, context };
+  }
+  const auditDir = options.auditDir ?? DEFAULT_AUDIT_DIR;
+  try {
+    const postStatement = await runAudit({ profile, adapters: options.adapters, auditDir });
+    const post = projectScorecard(postStatement, profile);
+    saveScorecard(post, auditDir);
+    context.scorecard = post;
+
+    const pre = loadLatestScorecard(slug, auditDir);
+    if (pre) {
+      const { quarantined } = await updateGeneFitness({
+        proposalId: updated.proposalId,
+        pre,
+        post,
+        ledgerRoot: options.ledgerRoot,
+      });
+      context.currentProposal = null;
+      return {
+        state: quarantined
+          ? { status: 'error', reason: 'gene_quarantined' }
+          : { status: 'merged', prNumber: updated.prNumber },
+        context: { ...context, scorecard: post },
+      };
+    }
+  } catch (err) {
+    return {
+      state: { status: 'error', reason: `post-merge re-audit failed: ${errMsg(err)}` },
+      context,
+    };
+  }
+  return { state: { status: 'merged', prNumber: updated.prNumber }, context };
 }

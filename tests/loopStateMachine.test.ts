@@ -8,7 +8,8 @@ import {
   type BusinessProfileT,
 } from '../src/autopilot/businessProfile';
 import type { AuditAdapter } from '../src/autopilot/auditRunner';
-import { runLoop } from '../src/autopilot/loopStateMachine';
+import { resumeAfterVeto, runLoop } from '../src/autopilot/loopStateMachine';
+import { PRState, type GitHubClient, type PRStateT } from '../src/autopilot/loopTypes';
 
 const tmpRepos: string[] = [];
 
@@ -159,5 +160,86 @@ describe('runLoop when no gap passes the gate', () => {
     expect(out.context.queue!.gaps.length).toBeGreaterThan(0);
     expect(out.context.currentProposal).toBeNull();
     expect(out.context.prState).toBeNull();
+  });
+});
+
+describe('resumeAfterVeto — closing the loop', () => {
+  function makePrState(overrides: Partial<PRStateT> = {}): PRStateT {
+    return PRState.parse({
+      prNumber: 7,
+      owner: 'acme',
+      repo: 'widget',
+      branch: 'recourse/upgrade-1',
+      proposalId: 'upgrade-gap-1-1',
+      openedAt: '2026-09-04T00:00:00.000Z',
+      vetoDeadline: '2026-09-05T00:00:00.000Z',
+      ...overrides,
+    });
+  }
+
+  function makeGithub(overrides: Record<string, unknown> = {}): GitHubClient {
+    const base: GitHubClient = {
+      createBranch: vi.fn(async () => 'b'),
+      createCommit: vi.fn(async () => 'c'),
+      createDraftPR: vi.fn(async () => 7),
+      addLabel: vi.fn(async () => {}),
+      getComments: vi.fn(async () => []),
+      mergePR: vi.fn(async () => {}),
+      closePR: vi.fn(async () => {}),
+    };
+    return { ...base, ...overrides } as unknown as GitHubClient;
+  }
+
+  it('vetoes when a comment contains the word veto (returns vetoed, no re-audit)', async () => {
+    const repo = makeTmpRepo();
+    const github = makeGithub({
+      getComments: vi.fn(async () => [
+        { id: 1, body: 'veto this', user: 'op', createdAt: '2026-09-04T01:00:00.000Z' },
+      ]),
+    });
+    const out = await resumeAfterVeto({
+      profile: makeProfile({ repoPath: repo }),
+      prState: makePrState(),
+      github,
+      adapters: { grader: graderFixture },
+      auditDir: makeTmpRepo(),
+      now: new Date('2026-09-06T00:00:00.000Z'),
+    });
+    expect(out.state).toMatchObject({ status: 'vetoed', prNumber: 7 });
+    expect(github.closePR).toHaveBeenCalledTimes(1);
+  });
+
+  it('merges when the deadline passed without a veto and folds post-merge fitness', async () => {
+    const repo = makeTmpRepo();
+    const auditDir = makeTmpRepo();
+    const github = makeGithub(); // getComments -> [], mergePR ok
+    const out = await resumeAfterVeto({
+      profile: makeProfile({ repoPath: repo }),
+      prState: makePrState(),
+      github,
+      adapters: { grader: graderFixture },
+      auditDir,
+      now: new Date('2026-09-06T00:00:00.000Z'),
+    });
+    expect(github.mergePR).toHaveBeenCalledTimes(1);
+    expect(out.state).toMatchObject({ status: 'merged', prNumber: 7 });
+    expect(out.context.scorecard).not.toBeNull();
+    // Post-merge audit persisted a new scorecard.
+    const files = fs.readdirSync(path.join(auditDir, 'testbiz'), { recursive: true });
+    expect(files.some((f: unknown) => String(f).includes('scorecard-'))).toBe(true);
+  });
+
+  it('returns veto_wait unchanged while still inside the window', async () => {
+    const repo = makeTmpRepo();
+    const github = makeGithub();
+    const out = await resumeAfterVeto({
+      profile: makeProfile({ repoPath: repo }),
+      prState: makePrState(),
+      github,
+      now: new Date('2026-09-04T12:00:00.000Z'),
+    });
+    expect(out.state).toMatchObject({ status: 'veto_wait', prNumber: 7 });
+    expect(github.mergePR).not.toHaveBeenCalled();
+    expect(github.closePR).not.toHaveBeenCalled();
   });
 });
