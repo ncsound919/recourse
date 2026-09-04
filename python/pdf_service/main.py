@@ -46,6 +46,10 @@ def _is_blocked_ip(ip_str: str) -> bool:
         ip = ipaddress.ip_address(ip_str)
     except ValueError:
         return True  # not even an IP -> treat as unsafe
+    # Normalize IPv4-mapped IPv6 (e.g. ::ffff:192.168.1.1) down to its embedded
+    # IPv4 so a private address cannot hide behind the mapped form.
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
     return (
         ip.is_private
         or ip.is_loopback
