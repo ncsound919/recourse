@@ -19,6 +19,8 @@ export { ComposerLearner, defaultLearnerFile } from './learner.js';
 export type { Episode, StyleLearning, Adjustment } from './learner.js';
 export { runBenchmark, scoreTrack, ratingFromScore, renderBenchmark, autoRateBenchmark } from './benchmark.js';
 export type { BenchmarkReport, BenchmarkConfig, StyleScore, TrackScore, MetricCheck } from './benchmark.js';
+export { encodeSoundlabPiece, validatePiece, pieceToJson } from './soundlab.js';
+export type { RecoursePiece, PieceLayer, LayerRole } from './soundlab.js';
 
 /** Compose applying the learner's current learned biases for the style. */
 export function composeWithLearner(brief: ComposeBrief, learner?: ComposerLearner): Track {
