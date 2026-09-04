@@ -107,6 +107,28 @@ function rootMoves(chords: Chord[]): number[] {
   return moves;
 }
 
+/** Normalize a semitone step to the [-6..6] range used for root-motion. */
+function normStep(s: number): number {
+  let d = ((s % 12) + 12) % 12;
+  if (d > 6) d -= 12;
+  return d;
+}
+
+/** The FULL root-motion vocabulary a lexicon expresses: its weighted root-steps
+ *  PLUS the root-motion implied by its own archetypes (archetypes are style DNA,
+ *  so a move they produce is stylistic, not an adherence error). */
+function allowedRootSteps(lx: StyleLexicon): Set<number> {
+  const set = new Set<number>(lx.rootSteps.map((s) => normStep(s.step)));
+  for (const arch of lx.archetypes ?? []) {
+    arch.forEach((a, i) => {
+      set.add(normStep(a.off)); // opening move from the tonic
+      if (i > 0) set.add(normStep(arch[i].off - arch[i - 1].off));
+    });
+    if (arch.length) set.add(normStep(-arch[arch.length - 1].off)); // resolve back to tonic
+  }
+  return set;
+}
+
 // ---------------------------------------------------------------------------
 // scoring one track
 // ---------------------------------------------------------------------------
@@ -133,8 +155,9 @@ export function scoreTrack(track: Track): TrackScore {
   const closure = loopMode ? (track.chords[track.chords.length - 1]?.rootPc === track.key ? 1 : 0) : 1;
   metrics.push({ key: 'closure', label: loopMode ? 'Loop closure (resolves to tonic)' : 'Arrangement (no closure required)', value: closure, detail: loopMode ? `final=${track.chords[track.chords.length - 1]?.rootPc} tonic=${track.key}` : 'exempt' });
 
-  // style adherence: root moves fall within the lexicon's motion vocabulary.
-  const allowed = new Set(lx.rootSteps.map((s) => s.step));
+  // style adherence: root moves fall within the lexicon's FULL motion vocabulary
+  // (weighted root-steps + the moves its own archetypes imply).
+  const allowed = allowedRootSteps(lx);
   const moves = rootMoves(track.chords);
   const within = moves.filter((m) => allowed.has(m)).length;
   let adherence = moves.length ? within / moves.length : 1;

@@ -107,6 +107,26 @@ Ratings are the only signal; there is no fake autonomy:
 So the more you rate real loads of the `.mid`, the better the composer gets at
 each style — including at Steely Dan complexity.
 
+## Objective benchmark & recursion status
+
+A reproducible, computed benchmark (`src/lib/composer/benchmark.ts`) grades output
+on weighted metrics: **integrity, harmonic-model validity, loop closure, style
+root-motion adherence, voice-leading smoothness, harmonic richness, signature
+nuance presence** (0..1, summed to a total). It is **explicitly not a taste or
+timbre grade** — that remains the operator's human rating. Benchmark winners can
+be auto-rated into the learner tagged `benchmark` (`autoRateBenchmark`); human
+ratings for the same `(style,seed)` win.
+
+- Inspect: `GET /api/recourse/compose/benchmark` or MCP `recourse.benchmark`.
+- Seed the learner objectively: `POST /api/recourse/compose/benchmark { autoRate:true }`.
+
+**Results (8-bar loops, seeds 1–10):** baseline **87.4 (A)** → after improving
+style-adherence to count the lexicon's full root-motion vocabulary (archetypes are
+style DNA) **90.4 (A)**. Per-style ~89.8–91.4. Weak dimension remaining:
+**voice-leading ~44** (a naive nearest-tone smoothing attempt REGRESSED it and was
+reverted rather than shipped — proper common-tone voice-leading is the open
+improvement). Integrity/harmony/closure/richness/nuance ~99–100.
+
 ## Surfaces
 
 - **HTTP (Recourse):** `POST /api/recourse/compose` (guarded write — writes files;
