@@ -178,3 +178,81 @@ export function findRedundant(
   }
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// Islands (Phase 2 #7) — each ToolDomain is an island; QD keeps diversity
+// within an island and promotion is only ever intra-island. These helpers
+// surface the island's champion + diversity signal and, when a tool would
+// better serve a *different* island's empty niche than its own crowded one, a
+// migration candidate (exploration across islands without breaking promotion).
+// ---------------------------------------------------------------------------
+
+export interface IslandView {
+  domain: string;
+  cells: number;
+  covered: number;
+  coverage: number;
+  champion: { toolName: string; fitness: number } | null;
+}
+
+/** Champion + coverage per island (domain), for parallel, diversified search. */
+export function buildIslands(
+  tools: QDToolLike[],
+  resolution = 8
+): { islands: IslandView[]; championByDomain: Map<string, QDToolLike> } {
+  const safeRes = Math.max(2, Math.min(64, Math.floor(resolution) || 8));
+  const byDomain = new Map<string, QDToolLike[]>();
+  for (const t of tools) {
+    const d = t.domain || 'unknown';
+    if (!byDomain.has(d)) byDomain.set(d, []);
+    byDomain.get(d)!.push(t);
+  }
+  const championByDomain = new Map<string, QDToolLike>();
+  const islands: IslandView[] = [];
+  for (const [domain, members] of byDomain) {
+    let best: { tool: QDToolLike; b: QDBehavior } | null = null;
+    const filled = new Set<string>();
+    for (const t of members) {
+      const b = behaviorOf(t);
+      if (!best || b.fitness > best.b.fitness) best = { tool: t, b };
+      filled.add(`${cellCoord(b.passRate, safeRes)}:${cellCoord(b.meanScore, safeRes)}`);
+    }
+    if (best) championByDomain.set(domain, best.tool);
+    const total = safeRes * safeRes;
+    islands.push({
+      domain,
+      cells: total,
+      covered: filled.size,
+      coverage: Math.round((filled.size / total) * 1000) / 1000,
+      champion: best ? { toolName: best.tool.name ?? best.tool.currentVersion ?? 'unnamed', fitness: Math.round(best.b.fitness * 1000) / 1000 } : null,
+    });
+  }
+  return { islands, championByDomain };
+}
+
+/** Suggest cross-island migration: a tool that is redundant in its own island
+ *  but would fill an empty niche in a target island. Returns best-effort
+ *  candidates (pure; the decision to move remains a promotion-gate action). */
+export function suggestMigrations(
+  tools: QDToolLike[],
+  resolution = 8
+): Array<{ toolName: string; from: string; to: string }> {
+  const redundant = findRedundant(tools, resolution);
+  const redundantNames = new Set(redundant.map((r) => r.name));
+  const { islands } = buildIslands(tools, resolution);
+  const underfilled = [...islands].sort((a, b) => a.coverage - b.coverage);
+  const targets = underfilled.filter((i) => i.coverage < 1);
+  const out: Array<{ toolName: string; from: string; to: string }> = [];
+  for (const t of tools) {
+    const name = t.name ?? t.currentVersion ?? 'unnamed';
+    if (!redundantNames.has(name)) continue;
+    const from = t.domain || 'unknown';
+    for (const target of targets) {
+      if (target.domain !== from) {
+        out.push({ toolName: name, from, to: target.domain });
+        break;
+      }
+    }
+  }
+  return out;
+}

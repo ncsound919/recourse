@@ -131,7 +131,7 @@ import type { ProposedPatch, DevFinding, RepairSubmitResult, BrainAskResult, Pat
 // AgentBrowser web-fetch connector (download from the web through the real browser).
 import { isWebCategory, htmlFromResult, pickRenderMethod } from './src/lib/webArtifact.js';
 import { createWebChannelRouter } from './src/server/routes/webChannel.js';
-import { buildQDArchive } from './src/lib/qualityDiversity.js';
+import { buildQDArchive, buildIslands } from './src/lib/qualityDiversity.js';
 import {
   CapabilityId,
   CapabilityBacking,
@@ -180,6 +180,13 @@ import type {
 import { scanSkillLibraries } from './src/skills/scanner.js';
 import { summarize as summarizeSkills, skillDigest, searchSkills, DEFAULT_SKILL_ROOTS } from './src/skills/index.js';
 import type { SkillRoot, SkillDef, SkillSnapshot, SkillSummary } from './src/skills/types.js';
+// Skill exporter/importer (Phase 4 distribution — registry tools <-> SKILL.md)
+import {
+  exportSkillFiles,
+  candidateFromSkillText,
+  currentToolVersion,
+  isVerifiableVersion,
+} from './src/skills/exporter.js';
 
 const app = express();
 const PORT = Number(process.env.PORT || 3050);
@@ -682,6 +689,24 @@ let skillLastScan: number | null = null;
 let skillFound = 0;
 let skillPrunedTranslations = 0;
 let skillLastErrors: { root: string; error: string }[] = [];
+
+// Skill Distribution (Phase 4): where exported SKILL.md folders are written, and
+// how many verified tools have been exported / how many foreign candidates
+// ingested. Default out-root is <cwd>/skills-out; override with SKILL_EXPORT_DIR.
+let skillExportRoot = process.env.SKILL_EXPORT_DIR || path.join(process.cwd(), 'skills-out');
+let skillExports = 0;
+let skillImports = 0;
+let skillImportPending: SkillImportRecord[] = [];
+interface SkillImportRecord {
+  name: string;
+  domain: string;
+  originRoot: string;
+  originRel: string;
+  runnable: boolean;
+  outcome: string; // 'imported' | 'promoted' | 'rejected' | 'skipped'
+  importedAt: number;
+  reason?: string;
+}
 
 // Load persisted state if available
 function loadStateFromDisk() {
@@ -6019,7 +6044,7 @@ app.use(createWebChannelRouter({ appendProvenanceEvent }));
 // Quality-Diversity archive over the live registry (MAP-Elites view). Read-only.
 app.get('/api/recourse/qd', (_req, res) => {
   try {
-    res.json({ success: true, archive: buildQDArchive(registry, 8) });
+    res.json({ success: true, archive: buildQDArchive(registry, 8), islands: buildIslands(registry, 8).islands });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }

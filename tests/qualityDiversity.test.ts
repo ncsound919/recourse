@@ -4,6 +4,8 @@ import {
   buildQDArchive,
   cellCoord,
   findRedundant,
+  buildIslands,
+  suggestMigrations,
 } from '../src/lib/qualityDiversity';
 import type { QDToolLike } from '../src/lib/qualityDiversity';
 
@@ -85,5 +87,30 @@ describe('redundancy signal', () => {
     const dup = tool('dup', 'coding', [{ passed: true, score: 0.98, promoted: true }]);
     const redundant = findRedundant([a, dup], 8);
     expect(redundant.map((r) => r.name)).toContain('dup');
+  });
+});
+
+describe('islands (phase 2 #7)', () => {
+  it('reports a champion + coverage per domain island', () => {
+    const tools = [
+      tool('m1', 'math', [{ passed: true, score: 0.9, promoted: true }]),
+      tool('m2', 'math', [{ passed: true, score: 0.3, promoted: true }]),
+      tool('c1', 'coding', [{ passed: true, score: 1.0, promoted: true }]),
+    ];
+    const { islands, championByDomain } = buildIslands(tools, 4);
+    expect(championByDomain.get('math')?.name).toBe('m1');
+    expect(championByDomain.get('coding')?.name).toBe('c1');
+    const math = islands.find((i) => i.domain === 'math')!;
+    expect(math.champion?.toolName).toBe('m1');
+    expect(math.coverage).toBeGreaterThan(0);
+  });
+
+  it('suggests cross-island migration only for redundant tools into underfilled islands', () => {
+    const champ = tool('champ', 'coding', [{ passed: true, score: 1.0, promoted: true }]);
+    const dup = tool('dup', 'coding', [{ passed: true, score: 0.98, promoted: true }]);
+    const lone = tool('lone', 'math', [{ passed: true, score: 0.5, promoted: true }]);
+    const migrations = suggestMigrations([champ, dup, lone], 8);
+    // dup is redundant in coding; math is underfilled -> a migration candidate.
+    expect(migrations.some((m) => m.toolName === 'dup' && m.from === 'coding' && m.to === 'math')).toBe(true);
   });
 });
