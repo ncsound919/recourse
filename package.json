@@ -13,7 +13,10 @@
     "lint": "oxlint src tests api server.ts mcp-server.ts",
     "self-improve": "tsx scripts/nightly-self-improvement.ts",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "audit": "tsx scripts/autopilot-cron.ts --all",
+    "audit:one": "tsx scripts/autopilot-cron.ts --business",
+    "audit:dry-run": "tsx scripts/autopilot-cron.ts --all --dry-run"
   },
   "dependencies": {
     "@lancedb/lancedb": "^0.38.0",
