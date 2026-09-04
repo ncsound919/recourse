@@ -209,6 +209,7 @@ import {
   encodeSoundlabPiece,
   validatePiece,
   pieceToJson,
+  compose,
 } from './src/lib/composer/index.js';
 
 const app = express();
@@ -5651,6 +5652,24 @@ app.post('/api/recourse/compose/soundlab', (req, res) => {
       fs.writeFileSync(file, pieceToJson(piece));
     } catch { /* optional write */ }
     res.json({ success: problems.length === 0, valid: problems.length === 0, problems, style, seed: track.seed, file, piece });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message ?? String(err) });
+  }
+});
+
+/** Deterministic piece URL for a running SoundLab page to pull (CORS-open).
+ *  Read-only + reproducible per (style, seed). Example:
+ *  GET /api/recourse/compose/soundlab.json?style=jasper-ballad&seed=1 */
+app.get('/api/recourse/compose/soundlab.json', (req, res) => {
+  try {
+    const style = typeof req.query.style === 'string' && listStyles().includes(req.query.style as any) ? req.query.style : 'steely-dan';
+    const seed = Number(req.query.seed) || 1;
+    const bars = [4, 8, 16].includes(Number(req.query.bars)) ? Number(req.query.bars) : 8;
+    const track = compose({ style: style as never, seed, bars, title: `${style} pull` });
+    const piece = encodeSoundlabPiece(track);
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Cache-Control', 'no-store');
+    res.json(piece);
   } catch (err: any) {
     res.status(500).json({ success: false, error: err?.message ?? String(err) });
   }
