@@ -131,6 +131,7 @@ import type { ProposedPatch, DevFinding, RepairSubmitResult, BrainAskResult, Pat
 // AgentBrowser web-fetch connector (download from the web through the real browser).
 import { isWebCategory, htmlFromResult, pickRenderMethod } from './src/lib/webArtifact.js';
 import { createWebChannelRouter } from './src/server/routes/webChannel.js';
+import { buildQDArchive } from './src/lib/qualityDiversity.js';
 import {
   CapabilityId,
   CapabilityBacking,
@@ -6014,6 +6015,15 @@ app.post('/api/recourse/develop/autopilot/toggle', (req, res) => {
 // =========================================================================
 // Extracted to src/server/routes/webChannel.ts (Router + narrow deps pattern).
 app.use(createWebChannelRouter({ appendProvenanceEvent }));
+
+// Quality-Diversity archive over the live registry (MAP-Elites view). Read-only.
+app.get('/api/recourse/qd', (_req, res) => {
+  try {
+    res.json({ success: true, archive: buildQDArchive(registry, 8) });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 // Initialize Express + Vite Server
 async function startServer() {
