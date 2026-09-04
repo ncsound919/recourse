@@ -1,0 +1,55 @@
+business:
+  name: HempForge
+  tagline: "Compliance & research accelerator for regulated hemp data"
+  industry: Regulated Hemp / Lab Compliance SaaS
+  website: ""
+  stage: live_product
+
+customer:
+  icp: "Hemp testing labs and vertically-integrated hemp brands that need a defensible compliance audit trail and faster COA review"
+  segments:
+    - name: Hemp testing labs
+      pain: "Reviewing COAs by hand, chasing down total-THC calculations, and proving ALCOA++ audit trails during state inspections is slow and risky"
+    - name: Vertically-integrated hemp brands
+      pain: "Batch release is gated on multi-stage sign-offs and Metrc sync; manual handoffs cause delays and missed regulatory windows"
+    - name: Compliance consultants
+      pain: "Re-creating audit narratives for each client is high-effort; pulling together COA, ledger, and regulatory data takes days per engagement"
+  buyingTrigger: "A failed inspection, a delayed batch release, or a manual audit that takes longer than a week"
+  topObjections:
+    - "We already use spreadsheets and a LIMS — would this actually save time?"
+    - "Our state regulator uses different compliance rules — does HempForge handle that?"
+    - "The Total THC math and literature trend engine are not independently published — how do I trust them?"
+
+offering:
+  summary: "B2B SaaS for hemp compliance: COA intake with OCR + Gemini parsing, ALCOA++ hash-chained audit ledger, 5-stage GxP workflow, PubMed literature intelligence, optional Metrc sync"
+  pricing: "$199/mo Standard (5 seats, 5 facilities) or $1,990/yr; Enterprise custom; $500/lab anchor-client pilot"
+  model: subscription
+  differentiators:
+    - "ALCOA++ cryptographic audit chain — every COA entry is HMAC-SHA256 chained and publicly verifiable"
+    - "5-stage GxP workflow (Intake → LIMS → Compliance → Auditor → Metrc) with explicit state transitions"
+    - "Literature intelligence from PubMed, OpenAlex, Europe PMC with Mann-Kendall trend detection"
+    - "Anchor-client pilot at $500/lab so labs can validate on a real engagement before subscribing"
+    - "Open source: code is inspectable, claims can be checked"
+
+gaps:
+  - "No public website — no /, no /pricing, no /features, no /docs"
+  - "No public pricing page in the React app — Stripe billing is wired but no UI route"
+  - "No lead capture form anywhere"
+  - "No case studies or testimonials"
+  - "Decarb kinetics model uses hand-tuned constants with no published source — needs honest disclosure"
+  - "No measurement uncertainty (MU) on COA values — needs an honest disclosure banner"
+
+voiceAndBrand:
+  tone: technical
+  prohibitedPhrases:
+    - "revolutionary"
+    - "game-changing"
+    - "disruptive"
+    - "10x your"
+    - "guaranteed compliance"
+  exampleCopy:
+    - "An open-source compliance and research accelerator for hemp data."
+    - "Every COA entry is signed, chained, and independently verifiable."
+    - "Built for labs and operators who need to prove their work to a regulator, not a marketing team."
+
+lastReviewedAt: 2026-09-04T00:00:00.000Z
