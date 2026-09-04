@@ -53,6 +53,7 @@ import {
 } from './lib/mockData';
 import { useSystemVoiceMonitor } from './hooks/useSystemVoiceMonitor';
 import { verifyProvenanceChainSync } from './lib/provenance';
+import { recourseJson } from './lib/recourseClient';
 import {
   Activity,
   GitCommit,
@@ -635,11 +636,10 @@ export default function App() {
   const handleAiEvolve = useCallback(
     async (domain: ToolDomain, instructions: string, targetToolName?: string) => {
       try {
-        const res = await fetch('/api/recourse/mutate/evolve', {
+        const res = await recourseJson('/api/recourse/mutate/evolve', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ domain, instructions, targetToolName }),
-        }).then((r) => r.json());
+        });
 
         if (res.success) {
           fetchAllState(true);

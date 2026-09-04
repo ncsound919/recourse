@@ -608,6 +608,20 @@ function requireMutationAuth(req: express.Request, res: express.Response): boole
   return true;
 }
 
+/**
+ * Config-gated variant for routes the mission-control UI also drives. When
+ * RECOURSE_API_SECRET is UNSET the route stays open (backward compatible with
+ * default local runs); when it IS set the route is enforced — so MCP/scripts
+ * can authenticate full-loop writes without breaking an unconfigured local
+ * dashboard. Prefer `requireMutationAuth` (always fail-closed) for routes that
+ * must never be open (skills import/export, patch revert).
+ */
+function requireMutationAuthIfConfigured(req: express.Request, res: express.Response): boolean {
+  const secret = process.env[MUTATION_SECRET_ENV];
+  if (!secret || secret.trim() === '') return true;
+  return requireMutationAuth(req, res);
+}
+
 /** Re-derive live pass state for each tool's CURRENT promoted version at boot.
  *  Historical superseded versions are labeled as such and never re-executed;
  *  the live verdict is a fresh real execution, never a stored claim. */
@@ -3785,6 +3799,7 @@ app.get('/api/recourse/mutate/status', async (req, res) => {
 });
 
 app.post('/api/recourse/mutate/evolve', async (req, res) => {
+  if (!requireMutationAuthIfConfigured(req, res)) return;
   try {
     const { domain, instructions, targetToolName } = req.body ?? {};
     if (!domain) {
@@ -3839,6 +3854,7 @@ app.post('/api/recourse/mutate/evolve', async (req, res) => {
 });
 
 app.post('/api/recourse/mutate/approve', async (req, res) => {
+  if (!requireMutationAuthIfConfigured(req, res)) return;
   try {
     const { geneId } = req.body ?? {};
     if (!geneId || typeof geneId !== 'string') {
@@ -3885,6 +3901,7 @@ app.post('/api/recourse/mutate/approve', async (req, res) => {
 });
 
 app.post('/api/recourse/mutate/policy', async (req, res) => {
+  if (!requireMutationAuthIfConfigured(req, res)) return;
   try {
     const { policy } = req.body ?? {};
     if (policy !== 'auto_promote' && policy !== 'manual_approval') {
