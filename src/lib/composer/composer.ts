@@ -18,7 +18,7 @@
 import type { Chord, ComposeBrief, NoteEvent, StyleId, Track } from './types.js';
 import { createRng, pickWeighted } from './types.js';
 import { getLexicon, GROOVES, type StyleLexicon } from './lexicons.js';
-import { PPQ, voiceChord, bassMidi, chordTonesMidi } from './theory.js';
+import { PPQ, voiceChord, voiceMuChord, voiceRootless, DOMINANT_QUALITIES, bassMidi, chordTonesMidi } from './theory.js';
 
 const VALID_BARS = [4, 8, 16];
 
@@ -96,6 +96,16 @@ interface RealizeCtx {
 const BAR_TICKS = 4 * PPQ; // 4/4
 const STEP = PPQ / 4; // 16th
 
+/** Choose the voicing engine for a chord based on the style's voicer. Steely
+ *  uses the mu-adjacency rule and rootless dominants; other styles use spread. */
+function voiceKeys(ch: Chord, lo: number, hi: number, n: number, voicer?: string): number[] {
+  if (voicer === 'steely') {
+    if (ch.quality === 'mu') return voiceMuChord(ch.rootPc, lo, hi);
+    if (DOMINANT_QUALITIES.has(ch.quality)) return voiceRootless(ch.rootPc, ch.quality, lo, hi);
+  }
+  return voiceChord(ch.rootPc, ch.quality, lo, hi, n);
+}
+
 function realize(brief: ComposeBrief, res: { seed: number; bars: number; key: number; major: boolean; bpm: number }, chords: Chord[]): Track {
   const lx = getLexicon(brief.style);
   const rng = createRng(res.seed ^ 0x9e3779b9);
@@ -110,12 +120,12 @@ function realize(brief: ComposeBrief, res: { seed: number; bars: number; key: nu
 
     // --- Keys: spread voicing held ~90% of the bar; a lighter re-voice on beat
     // 3 gives inner motion without a new chord (a Steely-Dan trait).
-    const chordNotes = voiceChord(ch.rootPc, ch.quality, voic.lo, voic.hi, voic.n);
-    for (const midi of chordNotes) {
+    const voicingNotes = voiceKeys(ch, voic.lo, voic.hi, voic.n, lx.voicer);
+    for (const midi of voicingNotes) {
       ctx.events.push({ tick: start, dur: Math.round(barLen * 0.92), pitch: midi, velocity: 74, part: 'keys' });
     }
-    if (ctx.rng() < 0.45 && chordNotes.length) {
-      const re = voiceChord(ch.rootPc, ch.quality, voic.lo - 6, voic.hi + 3, voic.n);
+    if (ctx.rng() < 0.45 && voicingNotes.length) {
+      const re = voiceKeys(ch, voic.lo - 6, voic.hi + 3, voic.n, lx.voicer);
       for (const midi of re) {
         ctx.events.push({ tick: start + Math.round(barLen / 2), dur: Math.round(barLen * 0.4), pitch: midi, velocity: 60, part: 'keys' });
       }

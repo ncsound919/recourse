@@ -96,6 +96,61 @@ export function bassMidi(rootPc: number, octave = 2): number {
   return (octave + 1) * 12 + rootPc;
 }
 
+function firstMidiAtOrAbove(pc: number, target: number): number {
+  const pc12 = ((pc % 12) + 12) % 12;
+  let m = Math.floor(target / 12) * 12 + pc12;
+  if (m < target) m += 12;
+  return m;
+}
+
+function dedupeAscLocal(notes: number[]): number[] {
+  const sorted = [...notes].sort((a, b) => a - b);
+  const out: number[] = [];
+  for (const n of sorted) if (out[out.length - 1] !== n) out.push(n);
+  return out;
+}
+
+/**
+ * Steely Dan "mu" voicing. Rule (documented, Becker & Fagen): a major chord with
+ * an ADDED 2nd, voiced so the 2nd and 3rd sit as an adjacent WHOLE TONE — NOT a
+ * sus (the 3rd is kept) and NOT a "jazz chord." This explicit construction keeps
+ * the add2 + 3rd adjacent (2 semitones apart, same octave) rather than letting a
+ * generic spread separate them across octaves.
+ */
+export function voiceMuChord(rootPc: number, lo = 55, hi = 88): number[] {
+  const thirdPc = ((rootPc + 4) % 12 + 12) % 12;
+  const third = firstMidiAtOrAbove(thirdPc, lo + 6);
+  const two = third - 2; // added 2nd, a whole tone below the 3rd — same octave => adjacent
+  const root = firstMidiAtOrAbove(rootPc, lo);
+  const fifthPc = ((rootPc + 7) % 12 + 12) % 12;
+  const notes = [root, two, third];
+  let fifth = firstMidiAtOrAbove(fifthPc, third + 1);
+  while (fifth <= third) fifth += 12;
+  if (fifth <= hi) notes.push(fifth);
+  return dedupeAscLocal(notes.filter((n) => n >= lo && n <= hi || n === two || n === third));
+}
+
+/**
+ * Rootless voicing for dominant/altered chords: the bass owns the root, the keys
+ * layer voices only the upper-structure chord tones (so 9th/#9/#11/b13 extensions
+ * ring clearly). Returns ascending notes in [lo, hi].
+ */
+export function voiceRootless(rootPc: number, quality: ChordQuality, lo = 55, hi = 88): number[] {
+  const tones = (CHORD_TONES[quality] ?? []).filter((t) => t % 12 !== 0); // drop the root
+  if (tones.length === 0) return voiceChord(rootPc, quality, lo, hi, 3);
+  const notes: number[] = [];
+  for (const t of tones) {
+    let n = firstMidiAtOrAbove((rootPc + t) % 12, lo);
+    if (n > hi) n -= 12;
+    if (n >= lo && n <= hi) notes.push(n);
+  }
+  return dedupeAscLocal(notes);
+}
+
+/** True for dominant/altered-dominant qualities suited to rootless voicing. */
+export const DOMINANT_QUALITIES = new Set<ChordQuality>(['7', '9', '13', '7b9', '7#9', '7#11', '7b13', '7sus']);
+
+
 /** Cents/MIDI utils used by encoders. */
 export const PPQ = 480;
 export function beatsToTicks(beats: number): number {

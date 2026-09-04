@@ -1,10 +1,11 @@
 # Recourse Composer — style-driven creative generation
 
-**Status:** foundation (Phase 0) landed in `src/lib/composer/`.
+**Status:** Phase 0 foundation + learner loop + steely-dan deepening landed in
+`src/lib/composer/`.
 **Goal:** Recourse composes ORIGINAL tracks *"in the vein of"* four studied acts,
 deterministically per seed, and delivers them as a DAW-ready `.mid` + a SoundLab
-playable `.seq` pocket. Recourse should *learn from its styles and its own
-productions* to get better (see Recursive loop below).
+playable `.seq` pocket. Recourse *learns from its styles and its own productions*
+via the human-rated learner loop below.
 
 This file is the written study + the build contract. The machine-consumable form
 is the style lexicons in `src/lib/composer/lexicons.ts` (what the engine reads).
@@ -73,12 +74,47 @@ consistent. Public entry: `src/lib/composer/index.ts` (`compose`, `composeToOutc
 (determinism, bar-length, timeline bounds, MIDI parse-back validity, `.seq` schema,
 style differentiation).
 
+## Steely Dan deepening (first fidelity pass)
+
+Beyond the base lexicon, steely-dan opts into a specialized voicer
+(`lexicons.ts` `voicer: 'steely'`, `theory.ts`):
+- **mu(add2) voicing rule** — the added 2nd is voiced *adjacent* (whole tone) to
+  the 3rd in the same octave, per Becker & Fagen's documented rule, not a generic
+  spread that separates them (`voiceMuChord`).
+- **Rootless dominant/altered voicings** — 7/9/13/7b9/7#9/7#11/7b13/7sus keys
+  layer voices only the upper structure; the bass owns the root so the color
+  tensions ring (`voiceRootless`).
+- Altered-dominant color raised in the steely quality palette.
+Covered by `tests/composer/voicing.test.ts`.
+
+## Recursive improvement (the "gets better" loop) — IMPLEMENTED
+
+Ratings are the only signal; there is no fake autonomy:
+
+1. **Generate** candidates per style over varied seeds/bars (`POST /api/recourse/compose`
+   or MCP `recourse.compose`).
+2. **You rate** each produced track (`POST /api/recourse/compose/rate` or MCP
+   `recourse.rate_track`): 1–5 (+ optional tags).
+3. Recourse records an **episode** keyed by the reproducible `(style,seed,bars)`
+   and captures the exact chords/root-motion (`ComposerLearner` in `learner.ts`).
+4. The learner derives **quality-weight biases** (boost what you rate ≥4, penalize
+   ≤2) and every subsequent compose **steers toward them** via
+   `composeWithLearner` / `adjustedLexicon`. Bypass per-call with `learn:false`.
+5. **Inspect** the state: `GET /api/recourse/compose/learned` (leaderboard +
+   per-style adjustments) or MCP `recourse.learned`; `GET .../suggest` proposes
+   seeds near ones you liked. `data/composer-learner.json` persists across runs.
+
+So the more you rate real loads of the `.mid`, the better the composer gets at
+each style — including at Steely Dan complexity.
+
 ## Surfaces
 
 - **HTTP (Recourse):** `POST /api/recourse/compose` (guarded write — writes files;
-  requires `RECOURSE_API_SECRET`), `GET /api/recourse/compose/styles`. Files land
-  under `composer-out/<style>/` (override `RECOURSE_COMPOSE_DIR`).
-- **MCP:** `recourse.compose` tool (style/key/major/bpm/bars/seed/title).
+  requires `RECOURSE_API_SECRET`), `GET /api/recourse/compose/styles`,
+  `POST /api/recourse/compose/rate` (guarded), `GET /api/recourse/compose/learned`,
+  `GET /api/recourse/compose/suggest`. Files land under `composer-out/<style>/`
+  (override `RECOURSE_COMPOSE_DIR`).
+- **MCP:** `recourse.compose`, `recourse.rate_track`, `recourse.learned`.
 - **Library:** importable by any Recourse gene/forge module.
 
 ## How you turn output into productions
@@ -91,28 +127,11 @@ style differentiation).
    rows you remap), and SoundLab's step grid is monophonic-per-step, so multi-bar
    progressions belong to the `.mid`, not the `.seq`.
 
-## Recursive improvement (the real "gets better" mechanism)
-
-Autonomy without a signal is theater, so the loop is human-in-the-loop honest:
-
-1. **Generate** a batch of candidates per style over varied seeds/bars.
-2. **You rate** each produced track (load the `.mid`, judge, score 1–5 / tag).
-3. Recourse **records an episode** `{brief, seed, produced structure, your rating}`
-   — the seedable engine means any good seed is exactly reproducible.
-4. Recourse **learns** from ratings: high-rated seeds/titles/chord-motion patterns
-   are promoted as style priors; low-rated ones are down-weighted. This is where the
-   dream/learner + vector-memory already in Recourse store and recombine the
-   winning DNA ("get better at Steely Dan complexity").
-5. **Iterate.** Ratings accumulate into a per-style memory the composer consults
-   before generating, so the system improves on the styles *and its own outputs*.
-
-The seedable engine + rating signal are the scaffolding for this. The learner
-episode store + rating intake is the next increment to land on top of Phase 0.
-
 ## Next increments (in order)
-1. Rating/intake + episode store wiring (start the recursion loop for real).
-2. Fuller part model (horns/bg-vox/arrangement-section changes for the SD
-   "written charts" trait) and the jasper final-chorus *audio* key-lift.
+1. Fuller part model for the SD "written charts" trait: horn/bg-vox/string stabs,
+   and section changes (intro → A → bridge-with-new-chords → vamp outro).
+2. The jasper final-chorus *audio* key-lift + richer D'Angelo behind-the-beat
+   timing in the realize pass.
 3. Optional SoundLab injection seam (small Tauri/HTTP hook in soundlab) so a
    `.seq` can be loaded live rather than by file-open.
 4. Voice/sample sourcing guidance so SoundLab timbres approach the targets.

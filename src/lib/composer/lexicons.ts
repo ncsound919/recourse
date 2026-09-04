@@ -36,6 +36,9 @@ export interface StyleLexicon {
   /** Voicing register for the keys/chord part. */
   voicing: { lo: number; hi: number; n: number };
   bassOctave: number;
+  /** Optional specialized voicing engine. 'steely' applies the mu(add2)
+   *  adjacency rule and rootless dominant voicings (Steely Dan deepening). */
+  voicer?: 'standard' | 'steely';
   /** Signature behavior knobs. */
   signature: {
     /** whole/half-step final-chorus lift for ballads; false to disable. */
@@ -64,8 +67,8 @@ export const STYLE_LEXICONS: Record<StyleId, StyleLexicon> = {
     ],
     bpm: [84, 104],
     qualityWeights: [
-      { q: 'mu', w: 3 }, { q: 'maj7', w: 3 }, { q: 'maj7#11', w: 2 }, { q: 'm9', w: 3 }, { q: 'm11', w: 2 },
-      { q: '7#11', w: 2 }, { q: '7b9', w: 1 }, { q: 'm7', w: 2 }, { q: '6/9', w: 1 }, { q: '7#9', w: 1 }, { q: '7b13', w: 1 },
+      { q: 'mu', w: 3 }, { q: 'maj7', w: 3 }, { q: 'maj7#11', w: 2 }, { q: 'maj9', w: 2 }, { q: 'm9', w: 3 }, { q: 'm11', w: 2 },
+      { q: '7#11', w: 3 }, { q: '7b9', w: 2 }, { q: '7b13', w: 2 }, { q: 'm7', w: 2 }, { q: '6/9', w: 1 }, { q: '7#9', w: 1 }, { q: '13', w: 1 },
     ],
     rootSteps: [
       { step: -5, w: 4 }, { step: -1, w: 3 }, { step: 1, w: 2 }, { step: 2, w: 2 }, { step: -2, w: 2 },
@@ -87,6 +90,7 @@ export const STYLE_LEXICONS: Record<StyleId, StyleLexicon> = {
     ],
     voicing: { lo: 55, hi: 88, n: 5 },
     bassOctave: 2,
+    voicer: 'steely',
     signature: { holdBarChance: 0.25, drumDensity: 0.5 },
   },
 
