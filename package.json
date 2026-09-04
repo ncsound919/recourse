@@ -11,6 +11,7 @@
     "clean": "rm -rf dist server.js",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src tests api server.ts mcp-server.ts",
+    "self-improve": "tsx scripts/nightly-self-improvement.ts",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage"
   },
