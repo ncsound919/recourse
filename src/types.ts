@@ -71,6 +71,8 @@ export type ProvenanceEventType =
   | 'corpus_scanned'
   | 'corpus_dispatched'
   | 'skill_catalog_scanned'
+  | 'skill_exported'
+  | 'skill_imported'
   | 'selfuse_mismatch'
   | 'selfuse_error'
   | 'benchmark_run';

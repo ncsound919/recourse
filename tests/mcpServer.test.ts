@@ -27,6 +27,11 @@ describe('Recourse MCP server (stdio)', () => {
     expect(names).toContain('recourse.upgrade_report');
     expect(names).toContain('recourse.capabilities');
     expect(names).toContain('recourse.selfhosted');
+    // Phase 4 distribution surface.
+    expect(names).toContain('recourse.exportable');
+    expect(names).toContain('recourse.export_skill');
+    expect(names).toContain('recourse.import_skill');
+    expect(names).toContain('recourse.inspect_gene');
 
     // A tools/call round-trips regardless of whether the live Recourse API is
     // up: the handler returns an MCP text result either way (state or an
@@ -34,6 +39,12 @@ describe('Recourse MCP server (stdio)', () => {
     const res = await client.callTool({ name: 'recourse.status', arguments: {} });
     expect(Array.isArray(res.content)).toBe(true);
     expect(res.content[0]).toHaveProperty('type', 'text');
+
+    // A write tool with no secret configured reports the fail-closed state as
+    // text — it never throws and never pretends the write happened.
+    const writeRes = await client.callTool({ name: 'recourse.export_skill', arguments: { toolName: 'whatever' } });
+    expect(Array.isArray(writeRes.content)).toBe(true);
+    expect(String(writeRes.content[0].text)).toContain('RECOURSE_API_SECRET is not set');
 
     await client.close();
     transport.close();

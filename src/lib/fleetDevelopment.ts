@@ -72,8 +72,102 @@ export interface ProposedPatch {
 }
 
 export type PatchResult =
-  | { applied: true; file: string; hash: string; verified: string }
+  | { applied: true; file: string; hash: string; verified: string; revertToken?: string; bootGateNote?: string }
   | { applied: false; file: string; error: string };
+
+/** Optional gate the caller (server) supplies to make a harness patch
+ *  CI-green. The sandbox cannot verify monolith modules that import siblings or
+ *  reference process-level state, so a real compile/boot gate is the honest
+ *  substitute: it runs before any write and blocks a breaking patch. */
+export type BootGreenGate = (ctx: { file: string; source: string; root: string }) => Promise<{ ok: boolean; error?: string }> | { ok: boolean; error?: string };
+
+// ---------------------------------------------------------------------------
+// Harness-evolution journal + rollback (Phase 5 item 16)
+// ---------------------------------------------------------------------------
+// Every code patch that overwrites an existing repo file is snapshotted so the
+// operator (or a future driver) can roll it back in one step. Backups + journal
+// live under <root>/.recourse/fleet/ and are persisted so rollback survives
+// restarts. Reverts emit provenance in the caller (capability_reverted).
+
+export interface FleetPatchEntry {
+  token: string;
+  driverId: string;
+  file: string;
+  appliedHash: string;
+  prevSource: string | null; // null => file did not exist before the patch
+  prevExisted: boolean;
+  ts: number;
+  reverted: boolean;
+  revertedAt?: number;
+  note?: string;
+}
+
+export interface FleetPatchJournal {
+  entries: FleetPatchEntry[];
+}
+
+export function fleetBackupDir(root: string): string {
+  return process.env.RECOURSE_FLEET_DIR || path.join(root, '.recourse', 'fleet');
+}
+
+function journalFile(root: string): string {
+  return path.join(fleetBackupDir(root), 'journal.json');
+}
+
+export function readFleetJournal(root: string): FleetPatchJournal {
+  try {
+    const raw = fs.readFileSync(journalFile(root), 'utf-8');
+    const parsed = JSON.parse(raw);
+    if (parsed && Array.isArray(parsed.entries)) return parsed as FleetPatchJournal;
+    return { entries: [] };
+  } catch {
+    return { entries: [] };
+  }
+}
+
+function writeFleetJournal(root: string, journal: FleetPatchJournal): void {
+  fs.mkdirSync(fleetBackupDir(root), { recursive: true });
+  const tmp = journalFile(root) + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(journal, null, 2), 'utf-8');
+  fs.renameSync(tmp, journalFile(root));
+}
+
+export function listFleetPatches(root: string): FleetPatchEntry[] {
+  return readFleetJournal(root).entries;
+}
+
+/** Roll back one applied harness patch by restoring its pre-patch source.
+ *  Idempotent: an already-reverted token returns ok:false with an honest note. */
+export async function revertAppliedPatch(token: string, root: string): Promise<{ ok: boolean; file?: string; error?: string; restoredSource?: string | null }> {
+  const repo = resolveRepoRoot(root);
+  const journal = readFleetJournal(repo);
+  const entry = journal.entries.find((e) => e.token === token);
+  if (!entry) return { ok: false, error: `no applied patch with token ${token}` };
+  if (entry.reverted) return { ok: false, error: `patch ${token} already reverted`, file: entry.file };
+  const abs = path.resolve(repo, entry.file);
+  const rel = path.relative(repo, abs);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) return { ok: false, error: 'path escapes repo root', file: entry.file };
+
+  if (entry.prevExisted && entry.prevSource != null) {
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, entry.prevSource, 'utf-8');
+  } else if (fs.existsSync(abs)) {
+    // The patch created a brand-new file; reverting removes it.
+    fs.rmSync(abs, { force: true });
+    // Clean now-empty parent dirs we created, best-effort.
+    let cur = path.dirname(abs);
+    while (cur.startsWith(repo) && cur !== repo && fs.readdirSync(cur).length === 0) {
+      try { fs.rmdirSync(cur); } catch { break; }
+      cur = path.dirname(cur);
+    }
+  }
+
+  entry.reverted = true;
+  entry.revertedAt = Date.now();
+  writeFleetJournal(repo, journal);
+  return { ok: true, file: entry.file, restoredSource: entry.prevExisted ? entry.prevSource : null };
+}
+
 
 export interface FleetAuditorStatus {
   id: string;
@@ -483,7 +577,10 @@ export function isPathWithinRoot(file: string, root: string): boolean {
   return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
 }
 
-export async function verifyAndApplyPatch(patch: ProposedPatch, opts: { root?: string; lint?: boolean } = {}): Promise<PatchResult> {
+export async function verifyAndApplyPatch(
+  patch: ProposedPatch,
+  opts: { root?: string; lint?: boolean; bootGreen?: BootGreenGate } = {},
+): Promise<PatchResult> {
   const root = resolveRepoRoot(opts.root);
   if (!getFleetDriver(patch.driverId)) {
     return { applied: false, file: patch.file, error: `unknown driver "${patch.driverId}" — refused` };
@@ -511,17 +608,62 @@ export async function verifyAndApplyPatch(patch: ProposedPatch, opts: { root?: s
         return { applied: false, file: patch.file, error: `sandbox suite failed: ${run.testDetails.filter((d) => d.startsWith('[FAIL')).slice(0, 3).join('; ') || 'not passing'}` };
       }
     }
+    // Optional CI-green gate for harness (monolith) patches the sandbox cannot
+    // fully verify (they import siblings / reference module state). Runs before
+    // any write; a red gate blocks the patch entirely.
+    if (opts.bootGreen) {
+      const verdict = await Promise.resolve(opts.bootGreen({ file: patch.file, source: patch.source, root }));
+      if (!verdict.ok) {
+        return { applied: false, file: patch.file, error: `boot-green gate blocked: ${verdict.error || 'compile/boot not green'}` };
+      }
+    }
   }
 
   const abs = path.resolve(root, patch.file);
   fs.mkdirSync(path.dirname(abs), { recursive: true });
+
+  // Snapshot any prior content so the patch is revertable (harness evolution).
+  let prevSource: string | null = null;
+  let prevExisted = false;
+  if (fs.existsSync(abs)) {
+    prevExisted = true;
+    try {
+      prevSource = fs.readFileSync(abs, 'utf-8');
+    } catch {
+      prevSource = null;
+    }
+  }
+
   fs.writeFileSync(abs, patch.source, 'utf-8');
   const hash = crypto.createHash('sha256').update(patch.source).digest('hex').substring(0, 16);
+
+  let revertToken: string | undefined;
+  if (isCodeChange && (prevExisted || /\.(ts|tsx|js|jsx|mjs|cjs|mts|cts)$/i.test(patch.file))) {
+    const journal = readFleetJournal(root);
+    revertToken = crypto.randomBytes(6).toString('hex');
+    journal.entries.unshift({
+      token: revertToken,
+      driverId: patch.driverId,
+      file: patch.file,
+      appliedHash: hash,
+      prevSource,
+      prevExisted,
+      ts: Date.now(),
+      reverted: false,
+      note: patch.note,
+    });
+    if (journal.entries.length > 200) journal.entries.length = 200;
+    writeFleetJournal(root, journal);
+  }
+
+  const bootGateNote = isCodeChange && opts.bootGreen ? 'boot-green gate passed' : undefined;
   return {
     applied: true,
     file: patch.file,
     hash,
     verified: patch.suite ? 'sandbox suite + lint passed before write' : 'config/source change (no suite) written',
+    ...(revertToken ? { revertToken } : {}),
+    ...(bootGateNote ? { bootGateNote } : {}),
   };
 }
 
@@ -781,6 +923,7 @@ export async function applyDriverProposal(opts: {
   output: string;
   root?: string;
   lint?: boolean;
+  bootGreen?: BootGreenGate;
 }): Promise<DriverProposalResult> {
   if (!getFleetDriver(opts.driverId)) {
     return { applied: false, appliedCount: 0, rejectedCount: 0, skippedCount: 0, results: [] };
@@ -799,7 +942,7 @@ export async function applyDriverProposal(opts: {
   for (const c of candidates) {
     const res = await verifyAndApplyPatch(
       { driverId: opts.driverId, file: c.file, source: c.source, suite: c.suite, domain: c.domain, note: c.note },
-      { root: opts.root, lint: opts.lint },
+      { root: opts.root, lint: opts.lint, bootGreen: opts.bootGreen },
     );
     results.push(res);
   }

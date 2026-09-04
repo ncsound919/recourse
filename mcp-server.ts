@@ -1,10 +1,11 @@
 /**
- * Recourse MCP server — exposes the live Recourse system to any MCP host
- * (Claude, Cursor, opencode, DSH...) as read-only tools over stdio.
+ * Recourse MCP server �?" exposes the live Recourse system to any MCP host
+ * (Claude, Cursor, opencode, DSH...) over stdio.
  *
- * Tools talk to the Recourse HTTP API so they always reflect live state, not a
- * stale file. If Recourse is unreachable a tool returns an honest error string
- * — it never fabricates state.
+ * Read tools reflect live state; write tools (skills export/import) drive the
+ * Recourse HTTP API's GUARDED mutation routes, so they require the operator's
+ * mutation secret. If RECOURSE_API_SECRET is unset the guarded server routes
+ * fail closed (503) and the write tool reports that honestly.
  *
  * Run:   npx tsx mcp-server.ts
  * Config an MCP server with a command pointing at this file and stdio transport.
@@ -12,9 +13,11 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { z } from 'zod';
 
 const API = process.env.RECOURSE_API_URL || 'http://localhost:3050';
-const VERSION = '0.1.0';
+const SECRET = process.env.RECOURSE_API_SECRET || '';
+const VERSION = '0.2.0';
 
 async function apiGet(path: string): Promise<any> {
   const ctrl = new AbortController();
@@ -23,6 +26,33 @@ async function apiGet(path: string): Promise<any> {
     const res = await fetch(`${API}${path}`, { signal: ctrl.signal });
     if (!res.ok) throw new Error(`Recourse API ${path} -> HTTP ${res.status}`);
     return await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Mutating call against a server route that enforces RECOURSE_API_SECRET. The
+ *  secret is sent as `Authorization: Bearer` (matching api/recourse/_guard.ts
+ *  and the Express guard). A missing secret => honest failure, never a fake. */
+async function apiPost(path: string, body: unknown): Promise<{ ok: boolean; status: number; data: any }> {
+  if (!SECRET) {
+    return { ok: false, status: 503, data: { success: false, error: `RECOURSE_API_SECRET is not set in the MCP environment — cannot authenticate a write (server is fail-closed)` } };
+  }
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 15000);
+  try {
+    const res = await fetch(`${API}${path}`, {
+      method: 'POST',
+      signal: ctrl.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${SECRET}`,
+      },
+      body: JSON.stringify(body ?? {}),
+    });
+    let data: any = {};
+    try { data = await res.json(); } catch { /* non-JSON body */ }
+    return { ok: res.ok, status: res.status, data };
   } finally {
     clearTimeout(timer);
   }
@@ -98,6 +128,66 @@ server.registerTool('recourse.selfhosted', {
     const j = await apiGet('/api/recourse/selfhosted');
     const list = (j?.tools ?? []).map((t: any) => ({ name: t.name, kind: t.artifactKind ?? 'function', templateId: t.templateId, verified: t.lastVerified?.passed === true, file: t.file }));
     return text(JSON.stringify(list, null, 2));
+  } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
+});
+
+// ---------------------------------------------------------------------------
+// Distribution write tools (Phase 4). All hit GUARDED server mutation routes.
+// ---------------------------------------------------------------------------
+
+server.registerTool('recourse.exportable', {
+  title: 'Recourse tools that can be exported as skills',
+  description: 'List verified registry tools that carry real source + suite and can therefore be exported as SKILL.md folders.',
+}, async () => {
+  try {
+    const j = await apiGet('/api/recourse/skills/exportable');
+    return text(JSON.stringify({ exportRoot: j?.exportRoot, count: j?.count, tools: j?.tools }, null, 2));
+  } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
+});
+
+server.registerTool('recourse.export_skill', {
+  title: 'Export a verified tool as a SKILL.md folder',
+  description: 'Write a verified registry tool into the configured export root as an open SKILL.md folder (source + test suite embedded). Mutating: requires RECOURSE_API_SECRET.',
+  inputSchema: { toolName: z.string().describe('Name of the verified registry tool to export'), outRoot: z.string().optional().describe('Optional override directory for the export') },
+}, async ({ toolName, outRoot }) => {
+  if (!toolName) return text('toolName is required.');
+  const r = await apiPost('/api/recourse/skills/export', { toolName, outRoot });
+  if (!r.ok) return text(`export_skill failed (HTTP ${r.status}): ${r.data?.error ?? 'see server log'}`);
+  return text(JSON.stringify({ ok: true, toolName: r.data.toolName, version: r.data.version, dir: r.data.dir, files: r.data.files }, null, 2));
+});
+
+server.registerTool('recourse.import_skill', {
+  title: 'Ingest a foreign SKILL.md as an UNVERIFIED candidate',
+  description: 'Import a skill from a configured skill library (rootId + rel) through the promotion gate. If it embeds code + suite in a code domain it is verified for real; prose-only skills are recorded as pending and never fabricated into the registry. Mutating: requires RECOURSE_API_SECRET.',
+  inputSchema: {
+    rootId: z.string().describe('Configured skill library id (e.g. ecc, fleet-skills)'),
+    rel: z.string().describe('Path of the SKILL.md relative to the library root'),
+    domain: z.string().optional().describe('Tool domain to verify under (default coding)'),
+  },
+}, async ({ rootId, rel, domain }) => {
+  if (!rootId || !rel) return text('rootId and rel are required.');
+  const r = await apiPost('/api/recourse/skills/import', { rootId, rel, domain });
+  if (!r.ok) return text(`import_skill failed (HTTP ${r.status}): ${r.data?.error ?? 'see server log'}`);
+  return text(JSON.stringify({ outcome: r.data.outcome, candidate: r.data.candidate, reason: r.data.reason, registeredTool: r.data.registeredTool }, null, 2));
+});
+
+server.registerTool('recourse.inspect_gene', {
+  title: 'Inspect one registry gene/tool in detail',
+  description: 'Read the full record for a named registry tool: domain, health, current version, score, pass state, verifier notes.',
+  inputSchema: { name: z.string().describe('Exact registry tool/gene name') },
+}, async ({ name }) => {
+  if (!name) return text('name is required.');
+  try {
+    const j = await apiGet('/api/recourse/registry');
+    const tool = (j?.registry ?? []).find((t: any) => t.name === name);
+    if (!tool) return text(`No registry tool named "${name}".`);
+    const cur = tool.versions?.find((v: any) => v.version === tool.currentVersion);
+    return text(JSON.stringify({
+      name: tool.name, domain: tool.domain, health: tool.healthStatus,
+      currentVersion: tool.currentVersion, score: cur?.score, passedVerifier: cur?.passed_verifier,
+      verifierNotes: cur?.verifier_notes, entrypoint: tool.entrypoint,
+      pending: (tool.pendingVersions ?? []).length,
+    }, null, 2));
   } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
 });
 

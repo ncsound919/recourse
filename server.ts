@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process';
 import { createServer as createViteServer } from 'vite';
 import {
   ToolEntry,
+  ToolVersion,
   ProvenanceEvent,
   SystemStatus,
   HourlyReport,
@@ -125,8 +126,11 @@ import {
   callDevBrain,
   devBrainTriageWeaknesses,
   applyDriverProposal,
+  revertAppliedPatch,
+  listFleetPatches,
+  fleetBackupDir,
 } from './src/lib/fleetDevelopment.js';
-import type { ProposedPatch, DevFinding, RepairSubmitResult, BrainAskResult, PatchResult, DossierInput, AuditorDriver, DevBrainAction, DevBrainStrategy, DevBrainCandidate } from './src/lib/fleetDevelopment.js';
+import type { ProposedPatch, DevFinding, RepairSubmitResult, BrainAskResult, PatchResult, DossierInput, AuditorDriver, DevBrainAction, DevBrainStrategy, DevBrainCandidate, BootGreenGate } from './src/lib/fleetDevelopment.js';
 
 // AgentBrowser web-fetch connector (download from the web through the real browser).
 import { isWebCategory, htmlFromResult, pickRenderMethod } from './src/lib/webArtifact.js';
@@ -562,6 +566,48 @@ function lintVerdictNote(lint: LintReport): string {
     : `LINT FAILED: ${lint.errors} error(s) - ${lint.details.filter((d) => d.startsWith('[error]')).slice(0, 3).join('; ')}`;
 }
 
+// ---------------------------------------------------------------------------
+// Local mutation guard — mirrors api/recourse/_guard.ts for the Express monolith.
+// Any mutating route that writes to disk or the registry must sit behind this so
+// a caller who can reach the port cannot mutate Recourse without the secret.
+// Fail-closed: when RECOURSE_API_SECRET is unset the mutating route is disabled
+// (503) rather than silently open. GET/HEAD/OPTIONS are never gated.
+// ---------------------------------------------------------------------------
+const MUTATION_SECRET_ENV = 'RECOURSE_API_SECRET';
+
+function presentedSecret(req: express.Request): string {
+  const auth = req.headers.authorization;
+  if (auth && /^Bearer\s+/i.test(auth)) return auth.replace(/^Bearer\s+/i, '').trim();
+  const h = req.headers['x-api-secret'];
+  if (typeof h === 'string') return h.trim();
+  return '';
+}
+
+function secretsEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a, 'utf-8');
+  const bb = Buffer.from(b, 'utf-8');
+  if (ab.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ab, bb);
+}
+
+/** Express variant of requireMutationAuth. Returns true when the request is
+ *  allowed to proceed; on refusal it has already written the error response. */
+function requireMutationAuth(req: express.Request, res: express.Response): boolean {
+  const method = (req.method || 'GET').toUpperCase();
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return true;
+  const secret = process.env[MUTATION_SECRET_ENV];
+  if (!secret || secret.trim() === '') {
+    res.status(503).json({ success: false, error: `mutating API disabled: ${MUTATION_SECRET_ENV} not configured (fail-closed)` });
+    return false;
+  }
+  const presented = presentedSecret(req);
+  if (!presented || !secretsEqual(presented, secret.trim())) {
+    res.status(401).json({ success: false, error: 'unauthorized' });
+    return false;
+  }
+  return true;
+}
+
 /** Re-derive live pass state for each tool's CURRENT promoted version at boot.
  *  Historical superseded versions are labeled as such and never re-executed;
  *  the live verdict is a fresh real execution, never a stored claim. */
@@ -740,6 +786,10 @@ function loadStateFromDisk() {
       if (typeof data.skillFound === 'number') skillFound = data.skillFound;
       if (typeof data.skillPrunedTranslations === 'number') skillPrunedTranslations = data.skillPrunedTranslations;
       if (Array.isArray(data.skillLastErrors)) skillLastErrors = data.skillLastErrors;
+      if (typeof data.skillExportRoot === 'string') skillExportRoot = data.skillExportRoot;
+      if (typeof data.skillExports === 'number') skillExports = data.skillExports;
+      if (typeof data.skillImports === 'number') skillImports = data.skillImports;
+      if (Array.isArray(data.skillImportPending)) skillImportPending = data.skillImportPending;
       if (Array.isArray(data.selfUseLog)) selfUseLog = data.selfUseLog;
       if (Array.isArray(data.generationLedger)) generationLedger = data.generationLedger;
       if (Array.isArray(data.forgeLedger)) forgeLedger = data.forgeLedger;
@@ -827,6 +877,10 @@ function saveStateToDisk() {
         skillFound,
         skillPrunedTranslations,
         skillLastErrors,
+        skillExportRoot,
+        skillExports,
+        skillImports,
+        skillImportPending,
         selfUseLog,
         generationLedger,
         forgeLedger,
@@ -5214,6 +5268,231 @@ app.get('/api/recourse/skills/digest', (req, res) => {
 });
 
 // =========================================================================
+// SKILL DISTRIBUTION (Phase 4) — verified registry tools <-> open SKILL.md
+// -------------------------------------------------------------------------
+// EXPORT: turn a verified registry tool into a rescanable SKILL.md folder.
+// IMPORT: ingest a foreign SKILL.md from a configured skill library as an
+//         UNVERIFIED candidate. Nothing foreign is trusted: only code + suite
+//         the skill explicitly embeds is run through the real domain gate +
+//         oxlint. A prose-only skill is recorded as pending and never fabricated
+//         into the registry.
+// Both mutate disk/registry, so both require RECOURSE_API_SECRET (fail-closed).
+// =========================================================================
+
+/** Run the real domain gate for a code-bearing skill import; returns null when
+ *  the domain is not a plain source+suite code domain (math/biotech differ and
+ *  cannot be honestly auto-verified from an arbitrary imported suite). */
+function verifyImportedCode(
+  domain: ToolDomain,
+  source: string,
+  suite: string,
+): VerifierResult | null {
+  switch (domain) {
+    case 'coding': return verifyCodingCode(source, suite);
+    case 'systemic': return verifySystemicCode(source, suite);
+    case 'neuro_symbolic': return verifyNeuroSymbolicCode(source, suite);
+    case 'cyber_defense': return verifyCyberDefenseCode(source, suite);
+    case 'quantum_sim': return verifyQuantumSimCode(source, suite);
+    default: return null; // math / biotech need structured extras we cannot infer
+  }
+}
+
+/** Register a verified imported tool into the registry (mirrors evolve). */
+function registerImportedTool(
+  name: string,
+  domain: ToolDomain,
+  source: string,
+  suite: string | undefined,
+  verifier: VerifierResult,
+  origin: { rootId: string; rel: string },
+): { tool: ToolEntry; version: ToolVersion } {
+  const versionHash = crypto.createHash('sha256').update(source).digest('hex').substring(0, 16);
+  const version = '1.0.0';
+  const versionObj: ToolVersion = {
+    version,
+    hash: versionHash,
+    created_at: Date.now(),
+    passed_verifier: verifier.passed,
+    score: verifier.score,
+    promoted: true,
+    verifier_notes: `${verifier.summary} | imported from ${origin.rootId}:${origin.rel}`,
+    source_code: source,
+    test_suite_code: suite,
+  };
+  let toolEntry = registry.find((r) => r.name === name);
+  if (!toolEntry) {
+    toolEntry = {
+      name,
+      domain,
+      entrypoint: `src/tools/${name.replace(/[^a-zA-Z0-9_]/g, '_')}.ts`,
+      description: '',
+      versions: [],
+      pendingVersions: [],
+      healthStatus: 'healthy',
+      anomalyCount: 0,
+    };
+    registry.push(toolEntry);
+  }
+  toolEntry.versions.push(versionObj);
+  toolEntry.currentVersion = version;
+  toolEntry.healthStatus = 'healthy';
+  status.totalUpgrades += 1;
+  return { tool: toolEntry, version: versionObj };
+}
+
+/** List which registry tools are exportable (they carry verified source). */
+app.get('/api/recourse/skills/exportable', (req, res) => {
+  const items = registry
+    .filter((t) => isVerifiableVersion(currentToolVersion(t)))
+    .map((t) => {
+      const v = currentToolVersion(t)!;
+      return { name: t.name, domain: t.domain, version: v.version, score: v.score, passed: v.passed_verifier, description: t.description };
+    });
+  res.json({ success: true, exportRoot: skillExportRoot, count: items.length, tools: items });
+});
+
+/** Export a verified registry tool as a SKILL.md folder. */
+app.post('/api/recourse/skills/export', async (req, res) => {
+  if (!requireMutationAuth(req, res)) return;
+  try {
+    const { toolName } = req.body ?? {};
+    const outRoot = typeof req.body?.outRoot === 'string' ? req.body.outRoot : skillExportRoot;
+    if (!toolName || typeof toolName !== 'string') {
+      return res.status(400).json({ success: false, error: 'toolName is required' });
+    }
+    const tool = registry.find((r) => r.name === toolName);
+    if (!tool) return res.status(404).json({ success: false, error: `no tool named ${toolName}` });
+    const version = currentToolVersion(tool);
+    if (!isVerifiableVersion(version)) {
+      return res.status(409).json({
+        success: false,
+        error: `${toolName} has no verified source in its active version — nothing honest to export. Verify a real implementation first.`,
+      });
+    }
+    const result = await exportSkillFiles(tool, version, outRoot);
+    if (!result.ok) {
+      return res.status(500).json({ success: false, error: result.error || 'export failed' });
+    }
+    skillExports += 1;
+    appendProvenanceEvent('skill_exported', {
+      tool: toolName,
+      version: version.version,
+      hash: version.hash,
+      outRoot,
+      dir: result.dir,
+      files: result.files.length,
+    });
+    saveStateToDisk();
+    res.json({ success: true, ...result, totalExports: skillExports });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message ?? String(err) });
+  }
+});
+
+/** Ingest a foreign SKILL.md from a configured skill library as an UNVERIFIED
+ *  candidate. Body: { rootId, rel, domain? }. When the skill embeds code + a
+ *  suite in a code domain it is run through the real gate; otherwise it is
+ *  recorded as a pending, unverified candidate that cannot be promoted yet. */
+app.post('/api/recourse/skills/import', async (req, res) => {
+  if (!requireMutationAuth(req, res)) return;
+  try {
+    const { rootId, rel, domain = 'coding' } = req.body ?? {};
+    const allowed = ['coding', 'math', 'biotech', 'systemic', 'neuro_symbolic', 'cyber_defense', 'quantum_sim'];
+    if (!allowed.includes(domain)) return res.status(400).json({ success: false, error: 'unknown domain: ' + domain });
+    if (typeof rootId !== 'string' || typeof rel !== 'string') {
+      return res.status(400).json({ success: false, error: 'rootId and rel are required' });
+    }
+    const root = skillRoots.find((r) => r.id === rootId);
+    if (!root) return res.status(404).json({ success: false, error: `unknown skill library ${rootId}` });
+    const cleanRel = rel.replace(/\\/g, '/').replace(/^\/+/, '');
+    if (!cleanRel || cleanRel.split('/').includes('..')) {
+      return res.status(400).json({ success: false, error: 'invalid rel path' });
+    }
+    const mdRel = /SKILL\.md$/i.test(cleanRel) ? cleanRel : `${cleanRel}/SKILL.md`;
+    const mdAbs = path.join(root.root, ...mdRel.replace(/^\.\//, '').split('/'));
+    const relCheck = path.relative(root.root, mdAbs);
+    if (relCheck.startsWith('..') || path.isAbsolute(relCheck)) {
+      return res.status(400).json({ success: false, error: 'path escapes skill library root' });
+    }
+    let text: string;
+    try {
+      text = await fs.promises.readFile(mdAbs, 'utf-8');
+    } catch (err: any) {
+      return res.status(404).json({ success: false, error: `cannot read ${mdRel}: ${err?.message ?? err}` });
+    }
+    const cand = candidateFromSkillText(text, { rootId, rel: mdRel }, domain as ToolDomain);
+    const domainT = domain as ToolDomain;
+
+    let outcome = 'pending';
+    let reason = cand.reason;
+    let registered: { tool: ToolEntry; version: ToolVersion } | null = null;
+
+    if (cand.runnable && cand.source && cand.suite) {
+      const verifier = verifyImportedCode(domainT, cand.source, cand.suite);
+      if (verifier) {
+        const gate = gateWithLint(cand.source);
+        const passed = verifier.passed && (gate.allowed);
+        if (passed) {
+          registered = registerImportedTool(cand.name, domainT, cand.source, cand.suite, verifier, { rootId, rel: mdRel });
+          outcome = 'promoted';
+          reason = `verified imported code (score ${verifier.score.toFixed(2)}) ${gate.allowed ? '' : lintVerdictNote(gate.lint)}`;
+        } else {
+          outcome = 'rejected';
+          reason = `${verifier.summary}${gate.allowed ? '' : ' | ' + lintVerdictNote(gate.lint)}`;
+        }
+      } else {
+        // Code-domain gate not applicable (math/biotech). Honest pending.
+        reason = `${domain} import needs structured extras (math funcName/testCases, biotech claim) — held as unverified pending.`;
+      }
+    } else if (cand.runnable && !cand.suite) {
+      reason = `${reason} No test suite embedded — cannot pass the promotion gate.`;
+    }
+
+    skillImports += 1;
+    skillImportPending.unshift({
+      name: cand.name,
+      domain: domainT,
+      originRoot: rootId,
+      originRel: mdRel,
+      runnable: cand.runnable,
+      outcome,
+      importedAt: Date.now(),
+      reason,
+    });
+    if (skillImportPending.length > 200) skillImportPending.length = 200;
+    appendProvenanceEvent('skill_imported', {
+      skill: cand.name,
+      originRoot: rootId,
+      originRel: mdRel,
+      domain: domainT,
+      runnable: cand.runnable,
+      outcome,
+      reason,
+      registeredTool: registered ? registered.tool.name : undefined,
+    });
+    saveStateToDisk();
+    res.json({
+      success: true,
+      outcome,
+      candidate: {
+        name: cand.name,
+        description: cand.description,
+        domain: domainT,
+        runnable: cand.runnable,
+        license: cand.license,
+        origin: cand.origin,
+      },
+      reason,
+      registeredTool: registered ? { name: registered.tool.name, version: registered.version.version, score: registered.version.score } : null,
+      totalImports: skillImports,
+      recent: skillImportPending.slice(0, 20),
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message ?? String(err) });
+  }
+});
+
+// =========================================================================
 // CAPABILITY FORGE — closed autonomous self-improvement loop
 // =========================================================================
 // Picks a missing micro-capability, has the model implement it, verifies the
@@ -5776,6 +6055,51 @@ function devRepoRoot(): string {
   return path.resolve(process.env.RECOURSE_REPO || process.cwd());
 }
 
+/** True for patches that target Recourse's OWN harness source — files the in-
+ *  process sandbox cannot fully verify because they import siblings or reference
+ *  module/process state. These get the CI-green compile gate + rollback. */
+function isHarnessSource(file: string): boolean {
+  return /(^|[\\/])(server\.ts|src[\\/].*\.(ts|tsx|mts))$/.test(file) && /\.(ts|tsx|mts)$/i.test(file);
+}
+
+/** Real compile gate (tsc --noEmit) — the honest CI-green substitute for
+ *  monolith/harness modules the sandbox cannot import. Runs only when the gate
+ *  is enabled (RECOURSE_HARNESS_CI_GATE=1) so day-to-day dev is never slowed.
+ *  When enabled and the tree does not compile, the patch is refused BEFORE it
+ *  touches disk. Honest: an unavailable tsc reports as a block with a note
+ *  rather than pretending it compiled. */
+function makeHarnessBootGreenGate(): BootGreenGate {
+  const gate: BootGreenGate = async () => {
+    let out = '';
+    try {
+      const res = await new Promise<{ ok: boolean; error?: string }>((resolve) => {
+        const child = spawn('npx', ['tsc', '--noEmit', '--pretty', 'false'], { cwd: devRepoRoot(), shell: process.platform === 'win32' });
+        let stderr = '';
+        child.stdout.on('data', (d) => { out += String(d); });
+        child.stderr.on('data', (d) => { stderr += String(d); });
+        child.on('error', () => resolve({ ok: false, error: 'tsc could not be started' }));
+        child.on('close', (code) => {
+          if (code === 0) resolve({ ok: true });
+          else resolve({ ok: false, error: `tsc --noEmit failed (exit ${code})` });
+        });
+      });
+      return res;
+    } catch {
+      return { ok: false, error: 'compile gate unavailable' };
+    }
+  };
+  return gate;
+}
+
+const HARNESS_CI_GATE = process.env.RECOURSE_HARNESS_CI_GATE === '1';
+
+/** The boot-green gate to attach to a fleet patch, or undefined to skip it. Only
+ *  harness-source patches carry the gate, and only when it is enabled. */
+function bootGreenForPatch(file: string): BootGreenGate | undefined {
+  return HARNESS_CI_GATE && isHarnessSource(file) ? makeHarnessBootGreenGate() : undefined;
+}
+
+
 function devDossierInput(): DossierInput {
   const liveSH = listSelfHostedEntries().filter((e) => e.lastVerified?.passed).length;
   return {
@@ -5796,12 +6120,19 @@ function devDossierInput(): DossierInput {
 
 async function devSnapshot() {
   const dossier = computeHealthDossier(devDossierInput());
+  const root = devRepoRoot();
   return {
     dossier,
     topWeaknessScore: topWeaknessScore(dossier),
     auditors: await auditorStatuses(),
     autopilot: devAutopilotOn,
-    root: devRepoRoot(),
+    root,
+    harness: {
+      ciGate: HARNESS_CI_GATE,
+      backupDir: fleetBackupDir(root),
+      applied: listFleetPatches(root).filter((p) => !p.reverted).length,
+      reverted: listFleetPatches(root).filter((p) => p.reverted).length,
+    },
     log: devLoopLog.slice(-50),
   };
 }
@@ -5952,7 +6283,12 @@ app.post('/api/recourse/develop/intake', async (req, res) => {
     if (typeof output !== 'string') {
       return res.status(400).json({ success: false, error: 'output must be the driver response text' });
     }
-    const result = await applyDriverProposal({ driverId, output, root: devRepoRoot() });
+    const result = await applyDriverProposal({
+      driverId,
+      output,
+      root: devRepoRoot(),
+      bootGreen: HARNESS_CI_GATE ? makeHarnessBootGreenGate() : undefined,
+    });
     const detail = result.applied
       ? `intake applied ${result.appliedCount} verified patch(es), rejected ${result.rejectedCount}, skipped ${result.skippedCount}`
       : `intake applied none (rejected ${result.rejectedCount}, skipped ${result.skippedCount})`;
@@ -5960,7 +6296,13 @@ app.post('/api/recourse/develop/intake', async (req, res) => {
     if (result.applied) {
       for (const r of result.results) {
         if (r.applied) {
-          appendProvenanceEvent('capability_adopted', { driverId, file: r.file, hash: r.hash, note: 'verified patch intake' });
+          appendProvenanceEvent('capability_adopted', {
+            driverId,
+            file: r.file,
+            hash: r.hash,
+            revertToken: r.revertToken,
+            note: 'verified patch intake',
+          });
         }
       }
     }
@@ -6002,10 +6344,10 @@ app.post('/api/recourse/develop/patch', async (req, res) => {
     }
     const result = await verifyAndApplyPatch(
       { driverId, file, source, suite: typeof suite === 'string' ? suite : undefined, domain, note },
-      { root: devRepoRoot() },
+      { root: devRepoRoot(), bootGreen: bootGreenForPatch(file) },
     );
     const detail = result.applied
-      ? `applied ${result.file} (${result.verified})`
+      ? `applied ${result.file} (${result.verified})${'revertToken' in result && result.revertToken ? ` [rollback ${result.revertToken}]` : ''}`
       : `rejected ${result.file}: ${'error' in result ? result.error : ''}`;
     const hash = 'hash' in result && result.applied ? result.hash : undefined;
     recordDev('patch', result.applied, detail, { driver: driverId, file: result.file, hash });
@@ -6014,6 +6356,7 @@ app.post('/api/recourse/develop/patch', async (req, res) => {
         driverId,
         file: result.file,
         hash: 'hash' in result ? result.hash : undefined,
+        revertToken: 'revertToken' in result ? result.revertToken : undefined,
         note: note ?? null,
       });
     }
@@ -6033,6 +6376,54 @@ app.post('/api/recourse/develop/autopilot/toggle', (req, res) => {
   }
   saveStateToDisk();
   res.json({ success: true, autopilot: devAutopilotOn });
+});
+
+/** Harness-evolution ledger (Phase 5 item 16): applied patches + their one-click
+ *  rollback tokens. Read-only; mirrors the persisted journal under the repo. */
+app.get('/api/recourse/develop/patches', (_req, res) => {
+  try {
+    const root = devRepoRoot();
+    const patches = listFleetPatches(root);
+    res.json({
+      success: true,
+      root,
+      backupDir: fleetBackupDir(root),
+      applied: patches.filter((p) => !p.reverted).length,
+      reverted: patches.filter((p) => p.reverted).length,
+      harnessCiGate: HARNESS_CI_GATE,
+      patches: patches.slice(0, 200),
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/** One-click rollback: restore the pre-patch source for an applied fleet patch.
+ *  Destructive, so it requires RECOURSE_API_SECRET (fail-closed). Reverts are
+ *  provenance-tracked as capability_reverted. */
+app.post('/api/recourse/develop/revert', async (req, res) => {
+  if (!requireMutationAuth(req, res)) return;
+  try {
+    const { token } = req.body ?? {};
+    if (typeof token !== 'string' || !token) {
+      return res.status(400).json({ success: false, error: 'token is required' });
+    }
+    const result = await revertAppliedPatch(token, devRepoRoot());
+    if (!result.ok) {
+      return res.status(404).json({ success: false, error: result.error || 'revert failed' });
+    }
+    const entry = listFleetPatches(devRepoRoot()).find((p) => p.token === token);
+    appendProvenanceEvent('capability_reverted', {
+      token,
+      file: result.file,
+      driverId: entry?.driverId,
+      appliedHash: entry?.appliedHash,
+    });
+    recordDev('revert', true, `rolled back ${result.file} (${token})`);
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message ?? String(err) });
+  }
 });
 
 // =========================================================================
