@@ -50,8 +50,8 @@ export interface SandboxHostOptions {
   onGrantUse?: (record: GrantUseRecord) => void
   secretsSource?: (key: string) => string | undefined
   fsDriver?: {
-    read(path: string): MaybePromise<string>
-    write(path: string, data: string): MaybePromise<void>
+    read?(path: string): MaybePromise<string>
+    write?(path: string, data: string): MaybePromise<void>
   }
   netDriver?: (
     url: string,
@@ -76,13 +76,8 @@ export class SandboxHost {
   async execute(request: ToolExecutionRequest): Promise<ToolExecutionResult> {
     const validation = validateGrants(request.grants)
     if (!validation.ok) {
-      return failure(
-        request.toolName,
-        `invalid grants: ${validation.errors.join('; ')}`,
-        [],
-        [],
-        0,
-      )
+      const reason = 'errors' in validation ? validation.errors.join('; ') : 'unknown grant error'
+      return failure(request.toolName, `invalid grants: ${reason}`, [], [], 0)
     }
     const grants: CapabilityGrants = request.grants
     const log: string[] = []
@@ -112,13 +107,15 @@ export class SandboxHost {
       },
       readFile: (path) => {
         requireDecision('fs', 'read', path, checkPath(grants, path, 'read'))
-        if (!this.opts.fsDriver) throw new SandboxGrantError('fs driver not configured on host')
-        return this.opts.fsDriver.read(path)
+        const read = this.opts.fsDriver?.read
+        if (!read) throw new SandboxGrantError('fs read driver not configured on host')
+        return read(path)
       },
       writeFile: (path, data) => {
         requireDecision('fs', 'write', path, checkPath(grants, path, 'write'))
-        if (!this.opts.fsDriver) throw new SandboxGrantError('fs driver not configured on host')
-        return this.opts.fsDriver.write(path, data)
+        const write = this.opts.fsDriver?.write
+        if (!write) throw new SandboxGrantError('fs write driver not configured on host')
+        return write(path, data)
       },
       fetch: (url, init) => {
         const method = init?.method ?? 'GET'

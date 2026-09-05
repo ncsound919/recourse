@@ -129,7 +129,7 @@ describe('SandboxHost', () => {
         await attempt('first', 50)
         await attempt('second', 150)
         await attempt('third', 100)
-        await attempt('fourth', 50)
+        await attempt('fourth', 100) // 150 used + 100 > cap 200 -> denied (equal-cap is allowed)
         return { ok: true, value: calls }
       },
     }

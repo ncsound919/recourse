@@ -90,7 +90,10 @@ describe('failure memory biasing', () => {
   })
 
   it('ranks candidates deterministically with lexical tie-breaks', () => {
-    expect(rankByBias(episodes, ['bad', 'good', 'flat'])).toEqual(['good', 'flat', 'bad'])
+    // 'bad' is down-weighted by its losses; 'good' and 'flat' tie at weight 1
+    // (good is clamped after its win bonus), so the tie-break is ascending
+    // lexical: ['flat', 'good'] — consistent across both candidate lists.
+    expect(rankByBias(episodes, ['bad', 'good', 'flat'])).toEqual(['flat', 'good', 'bad'])
     expect(rankByBias(episodes, ['good', 'flat'])).toEqual(['flat', 'good'])
   })
 })
