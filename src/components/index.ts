@@ -24,5 +24,6 @@ export { IntakeAndGrowthView } from './IntakeAndGrowthView';
 export { CorpusView } from './CorpusView';
 export { SkillsView } from './SkillsView';
 export { WebDownloadView } from './WebDownloadView';
+export { RecourseVisualizer3D } from './RecourseVisualizer3D';
 export { SettingsView } from './SettingsView';
 

@@ -5,6 +5,7 @@ import React, {
   useMemo,
   useRef,
   useReducer,
+  Suspense,
 } from 'react';
 import {
   Header,
@@ -54,6 +55,13 @@ import {
 import { useSystemVoiceMonitor } from './hooks/useSystemVoiceMonitor';
 import { verifyProvenanceChainSync } from './lib/provenance';
 import { recourseJson } from './lib/recourseClient';
+
+// The 3D visualizer pulls in three.js (~1MB). Lazy-load it so the heavy
+// dependency is only fetched when the tab is actually opened, keeping the
+// initial dashboard bundle small.
+const RecourseVisualizer3D = React.lazy(() =>
+  import('./components/RecourseVisualizer3D').then((m) => ({ default: m.RecourseVisualizer3D }))
+);
 import {
   Activity,
   GitCommit,
@@ -76,6 +84,7 @@ import {
    Download,
    FolderSearch,
    Library,
+   Box,
    Settings
 } from 'lucide-react';
 
@@ -235,11 +244,12 @@ type TabKey =
   | 'registry'
   | 'verifier'
    | 'reports'
-   | 'intake-growth'
-   | 'corpus'
-   | 'skills'
-   | 'web'
-   | 'settings';
+  | 'intake-growth'
+  | 'corpus'
+  | 'skills'
+  | 'web'
+  | 'visualizer'
+  | 'settings';
 
 const TABS: Array<{
   key: TabKey;
@@ -380,6 +390,16 @@ const TABS: Array<{
     key: 'web',
     label: 'WEB DOWNLOAD',
     icon: <Download className="w-4 h-4 text-sky-400" />,
+  },
+  {
+    key: 'visualizer',
+    label: '3D VISUALIZER',
+    icon: <Box className="w-4 h-4 text-indigo-400" />,
+    badge: () => (
+      <span className="px-1.5 py-0.2 bg-indigo-950 text-indigo-300 text-[10px] rounded border border-indigo-800 font-bold">
+        LIVE
+      </span>
+    ),
   },
   {
     key: 'settings',
@@ -1074,6 +1094,20 @@ export default function App() {
             )}
             {activeTab === 'web' && (
               <WebDownloadView />
+            )}
+            {activeTab === 'visualizer' && (
+              <Suspense
+                fallback={
+                  <div className="h-[560px] rounded-2xl border border-slate-800 bg-slate-950/60 flex items-center justify-center">
+                    <div className="flex items-center gap-3 text-slate-400 font-mono text-sm">
+                      <RefreshCw className="w-5 h-5 text-indigo-400 animate-spin" />
+                      Bootstrapping 3D viewport…
+                    </div>
+                  </div>
+                }
+              >
+                <RecourseVisualizer3D status={status} />
+              </Suspense>
             )}
             {activeTab === 'settings' && (
               <SettingsView />

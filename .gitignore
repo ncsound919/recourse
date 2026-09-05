@@ -14,6 +14,7 @@ recourse_storage.json
 recourse_learner.json
 recourse_dream.json
 .recourse.lock
+.recourse.pid
 data/
 
 
