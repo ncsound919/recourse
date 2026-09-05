@@ -194,7 +194,7 @@ describe('resumeAfterVeto — closing the loop', () => {
     const repo = makeTmpRepo();
     const github = makeGithub({
       getComments: vi.fn(async () => [
-        { id: 1, body: 'veto this', user: 'op', createdAt: '2026-09-04T01:00:00.000Z' },
+        { id: 1, body: 'veto this', user: 'acme', createdAt: '2026-09-04T01:00:00.000Z' },
       ]),
     });
     const out = await resumeAfterVeto({

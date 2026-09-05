@@ -13,6 +13,12 @@
  *   - Businesses with autoMergeEnabled: false are skipped with a real no-op log,
  *     unless --dry-run is passed — then the audit still runs read-only so the
  *     operator can see what the loop WOULD do without opening any PR.
+ *   - H4/H5 (closing the loop): before opening a NEW PR for a business, the cron
+ *     scans that business's prs/ dir and ADVANCES any PR still in its veto
+ *     window via resumeAfterVeto (merge or veto). If a PR is still in flight
+ *     after advancing, the cron does NOT open another PR that cycle — so a PR
+ *     never stays a draft forever and a business never accumulates a second
+ *     force-pushed PR on the same cycle.
  *   - A failing business is logged and skipped; the run exits 1 so a cron
  *     wrapper can tell the run was not fully green.
  *
@@ -23,6 +29,7 @@
  *   tsx scripts/autopilot-cron.ts hempforge --dry-run
  */
 
+import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import {
@@ -30,21 +37,30 @@ import {
   isKillSwitchActive,
   listBusinessSlugs,
   loadBusinessProfile,
+  repoBinding,
+  type BusinessProfileT,
 } from '../src/autopilot/businessProfile';
+import { resumeAfterVeto, runLoop } from '../src/autopilot/loopStateMachine';
+import { slugify } from '../src/autopilot/scorecard';
+import { loadOpenPrStates, parseOwnerRepo } from '../src/autopilot/vetoScheduler';
+import { fetchGitHubToken } from '../src/autopilot/keywireClient';
+import { createGitHubClient } from '../src/autopilot/gitHubClient';
+import type { GitHubClient } from '../src/autopilot/loopTypes';
 
-// loopStateMachine.ts is authored in parallel (recursive-audit-loop phase 2,
-// task 8). Its documented export is:
-//   runLoop(options: {
-//     profile: BusinessProfileT;
-//     dryRun?: boolean;
-//     github?: GitHubClient;
-//   }): Promise<{ state: { status: string; prNumber?: number; reason?: string };
-//                  context: unknown }>
-// We type only the fields this cron reads through the local structural interface
-// below so a renamed or widened type over there cannot break this file.
-import { runLoop } from '../src/autopilot/loopStateMachine';
+const DEFAULT_AUDIT_DIR = 'data/business-profiles';
 
-/** Structural view of the documented loopStateMachine.runLoop() result. */
+/** GitHub client for a profile via the Keywire zero-trust token (PR-time only). */
+export async function githubForProfile(profile: BusinessProfileT): Promise<GitHubClient | null> {
+  const repo = repoBinding(profile);
+  if (!repo) return null;
+  const parsed = parseOwnerRepo(repo.githubUrl);
+  if (!parsed) return null;
+  const token = await fetchGitHubToken(parsed.owner);
+  return createGitHubClient({ token });
+}
+
+/** Structural view of a loopStateMachine outcome. LoopState is a discriminated
+ *  union; we only read the fields the cron prints. */
 export interface LoopOutcomeLike {
   state: {
     status: string;
@@ -146,9 +162,53 @@ export async function runScheduledAudit(
   for (const slug of slugs) {
     try {
       const profile = loadBusinessProfile(slug);
-      if (!isAutoMergeEnabled(profile) && !dryRun) {
+      const enabled = isAutoMergeEnabled(profile);
+      if (!enabled && !dryRun) {
         console.log(`[autopilot] ${slug}: auto-merge disabled, skipping`);
         continue;
+      }
+
+      // H4/H5: advance any PR still in its veto window BEFORE opening a new one.
+      // Only in a real (non-dry) run and only when auto-merge is on (a PR only
+      // exists because the loop opened it under that mode; if the operator has
+      // since disabled auto-merge, leave the draft PR alone).
+      if (!dryRun && enabled) {
+        const auditDir = DEFAULT_AUDIT_DIR;
+        const prsDir = path.join(auditDir, slugify(profile.business.name), 'prs');
+        const open = await loadOpenPrStates(prsDir);
+        if (open.length > 0) {
+          const github = await githubForProfile(profile);
+          if (!github) {
+            exitCode = 1;
+            console.error(`[autopilot] ${slug}: cannot advance PR — no github url / keywire token`);
+            continue;
+          }
+          let stillInFlight = false;
+          for (const pr of open) {
+            try {
+              const res = (await resumeAfterVeto({
+                profile,
+                prState: pr,
+                github,
+                auditDir,
+                now: new Date(),
+              })) as LoopOutcomeLike;
+              console.log(formatOutcome(slug, res));
+              if (res.state.status === 'error') exitCode = 1;
+              if (res.state.status === 'veto_wait') stillInFlight = true;
+            } catch (err) {
+              exitCode = 1;
+              const message = err instanceof Error ? err.message : String(err);
+              console.error(`[autopilot] ${slug}: advance PR #${pr.prNumber} error: ${message}`);
+            }
+          }
+          if (stillInFlight) {
+            console.log(`[autopilot] ${slug}: PR still in veto window — not opening a new one this cycle`);
+            continue;
+          }
+          // All in-flight PRs were merged/vetoed/closed — fall through and open
+          // the next upgrade PR.
+        }
       }
 
       const outcome = (await runLoop({ profile, dryRun })) as LoopOutcomeLike;

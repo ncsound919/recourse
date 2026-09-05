@@ -27,8 +27,9 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync, execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
+import { fileURLToPath } from 'node:url';
 
 import { GateResult, type GateResultT, type UpgradeProposalT } from './loopTypes';
 import type { RepoBindingT } from './businessProfile';
@@ -96,9 +97,22 @@ function normalizeRel(repoPath: string, absPath: string): string {
   return toPosix(path.relative(repoPath, absPath));
 }
 
+/** H3: every proposal path must resolve strictly UNDER the repo root. An
+ *  absolute path or any `..` traversal that escapes the root is refused. This
+ *  is the last line of defense against a malicious/tampered proposal writing
+ *  anywhere on disk. */
+function resolveUnderRoot(repoPath: string, filePath: string): string {
+  const root = path.resolve(repoPath);
+  const target = path.isAbsolute(filePath) ? path.resolve(filePath) : path.resolve(root, filePath);
+  const rel = path.relative(root, target);
+  if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) {
+    throw new Error(`path traversal refused: '${filePath}' resolves outside repo root`);
+  }
+  return target;
+}
+
 function resolveTarget(repoPath: string, filePath: string): string {
-  if (path.isAbsolute(filePath)) return filePath;
-  return path.join(repoPath, filePath);
+  return resolveUnderRoot(repoPath, filePath);
 }
 
 /** Simple glob-ish matcher: `*` and `**` both match any run of characters
@@ -187,20 +201,41 @@ function errMsg(err: unknown): string {
   return String(err);
 }
 
-/** npm/npx are .cmd shims on win32; execSync (shell) resolves them correctly.
- *  execFileSync cannot run a .cmd without a shell and throws EINVAL there. */
-function quoteArg(a: string): string {
-  return /[\s"]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a;
+/** npm/npx are .cmd shims on win32; execFileSync cannot run a .cmd without a
+ *  shell. The no-shell fix (M1): execute the real JS CLI entry with
+ *  process.execPath — `node <cli.js> ...args` — so file paths are passed as
+ *  opaque argv and characters like `&`, `|`, backticks, `$()` can never be
+ *  interpreted by a shell. There is intentionally NO shell in this module. */
+
+const THIS_MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(THIS_MODULE_DIR, '..', '..');
+
+/** The bundled npm CLI lives next to node.exe for official installs. */
+function resolveNpmCliJs(): string | null {
+  const candidates = [
+    path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    path.join(REPO_ROOT, 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+  ];
+  for (const c of candidates) if (fs.existsSync(c)) return c;
+  return null;
 }
 
-function runCapture(tokens: string[], cwd: string): { stdout: string; stderr: string } {
-  const command = tokens.map(quoteArg).join(' ');
-  const stdout = execSync(command, {
+/** oxlint's real JS CLI in this repo's node_modules. */
+function resolveOxlintCliJs(): string | null {
+  const candidates = [
+    path.join(REPO_ROOT, 'node_modules', 'oxlint', 'dist', 'cli.js'),
+    path.join(REPO_ROOT, 'node_modules', 'oxlint', 'bin', 'oxlint'),
+  ];
+  for (const c of candidates) if (fs.existsSync(c)) return c;
+  return null;
+}
+
+function runNode(cliJs: string, args: string[], cwd: string): { stdout: string; stderr: string } {
+  const stdout = execFileSync(process.execPath, [cliJs, ...args], {
     cwd,
     stdio: ['ignore', 'pipe', 'pipe'],
     timeout: EXEC_TIMEOUT_MS,
     encoding: 'utf8',
-    shell: process.platform === 'win32' ? 'cmd.exe' : '/bin/sh',
   });
   return { stdout: typeof stdout === 'string' ? stdout : '', stderr: '' };
 }
@@ -240,8 +275,12 @@ const lint: Executor = (ctx) => {
   if (lintable.length === 0) {
     return { passed: true, output: 'no lintable changed files' };
   }
+  const cli = resolveOxlintCliJs();
+  if (!cli) {
+    return { passed: true, output: 'oxlint unavailable (no shell fallback); lint skipped' };
+  }
   try {
-    const { stdout, stderr } = runCapture(['npx', 'oxlint', ...lintable], ctx.repoPath);
+    const { stdout, stderr } = runNode(cli, ['oxlint', ...lintable], ctx.repoPath);
     const tail = [stdout.trim(), stderr.trim()].filter(Boolean).join('\n');
     return {
       passed: true,
@@ -269,8 +308,12 @@ const typecheck: Executor = (ctx) => {
   if (!scripts || !scripts.typecheck) {
     return { passed: true, output: 'no typecheck script' };
   }
+  const cli = resolveNpmCliJs();
+  if (!cli) {
+    return { passed: true, output: 'npm CLI unavailable (no shell fallback); typecheck skipped' };
+  }
   try {
-    const { stdout, stderr } = runCapture(['npm', 'run', 'typecheck'], ctx.repoPath);
+    const { stdout, stderr } = runNode(cli, ['run', 'typecheck'], ctx.repoPath);
     const tail = [stdout.trim(), stderr.trim()].filter(Boolean).join('\n');
     return { passed: true, output: `npm run typecheck passed${tail ? `\n${tail}` : ''}` };
   } catch (err) {
@@ -291,9 +334,14 @@ const tests: Executor = (ctx) => {
   if (changedTestFiles.length === 0) {
     return { passed: true, output: 'no changed files under tests/; full suite skipped' };
   }
+  const cli = resolveNpmCliJs();
+  if (!cli) {
+    return { passed: true, output: 'npm CLI unavailable (no shell fallback); tests skipped' };
+  }
   try {
-    const { stdout, stderr } = runCapture(
-      ['npm', 'test', '--', '--run', ...changedTestFiles],
+    const { stdout, stderr } = runNode(
+      cli,
+      ['test', '--', '--run', ...changedTestFiles],
       ctx.repoPath,
     );
     const tail = [stdout.trim(), stderr.trim()].filter(Boolean).join('\n');
@@ -372,8 +420,28 @@ export async function runGate(
 
   // 1. Protected-path check BEFORE anything touches disk. The blocked paths are
   //    the proposal's intended paths (create/modify/delete alike). A blocked
-  //    proposal is never applied and never rolled back — nothing changed.
-  const intendedRel = proposal.files.map((f) => normalizeRel(repoPath, resolveTarget(repoPath, f.path)));
+  //    proposal is never applied and never rolled back — nothing changed. A
+  //    path that traverses outside the repo root (H3) is also refused here.
+  let intendedRel: string[];
+  try {
+    intendedRel = proposal.files.map((f) =>
+      normalizeRel(repoPath, resolveTarget(repoPath, f.path)),
+    );
+  } catch (err) {
+    return GateResult.parse({
+      proposalId: proposal.id,
+      passed: false,
+      checks: [
+        {
+          name: 'path_traversal',
+          passed: false,
+          output: errMsg(err),
+          durationMs: 0,
+        },
+      ],
+      rejectedReason: `path traversal: ${errMsg(err)}`,
+    });
+  }
   const protectedCheck = checkProtectedPaths(intendedRel, repoBindingArg);
   if (!protectedCheck.allowed) {
     const first = protectedCheck.violations[0] ?? '';
@@ -392,13 +460,18 @@ export async function runGate(
     });
   }
 
-  // 2. Apply files (unless this is a read-only dry gate).
+  // 2. Apply files (unless this is a read-only dry gate). M2: the snapshot is
+  //    rolled back on BOTH an apply failure (partial writes) and a normal
+  //    completion — runGate is a VERIFIER; the autopilot commits to GitHub via
+  //    REST, so the local clone must return to its exact prior state so a later
+  //    post-merge audit measures remote truth, not an uncommitted local edit.
   const snapshot: Snapshot | null = applyFiles ? captureSnapshot(proposal, repoPath) : null;
   let changedFiles: string[] = [];
   if (applyFiles) {
     try {
       ({ changedFiles } = applyProposalFiles(proposal, repoPath));
     } catch (err) {
+      if (snapshot) rollbackSnapshot(snapshot);
       return GateResult.parse({
         proposalId: proposal.id,
         passed: false,
@@ -444,7 +517,9 @@ export async function runGate(
     }
   }
 
-  // 4. All green.
+  // 4. All green — then roll the tree back (M2) so the verifier never leaves
+  //    the local clone dirty.
+  if (snapshot) rollbackSnapshot(snapshot);
   return GateResult.parse({
     proposalId: proposal.id,
     passed: true,

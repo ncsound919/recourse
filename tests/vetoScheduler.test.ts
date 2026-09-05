@@ -102,7 +102,7 @@ describe('checkAndMerge', () => {
   it('closes the PR and marks vetoReceived when a comment contains veto', async () => {
     const github = makeGithub({
       getComments: vi.fn(async () => [
-        { id: 1, body: 'Operator: please veto this PR', user: 'al', createdAt: '2026-09-04T01:00:00.000Z' },
+        { id: 1, body: 'Operator: please veto this PR', user: 'acme', createdAt: '2026-09-04T01:00:00.000Z' },
       ]),
     });
     const state = makeState();
@@ -119,7 +119,7 @@ describe('checkAndMerge', () => {
   it('matches veto case-insensitively', async () => {
     const github = makeGithub({
       getComments: vi.fn(async () => [
-        { id: 1, body: 'NO APPROVAL -- VETO', user: 'al', createdAt: '2026-09-04T01:00:00.000Z' },
+        { id: 1, body: 'NO APPROVAL -- VETO', user: 'acme', createdAt: '2026-09-04T01:00:00.000Z' },
       ]),
     });
     const result = await checkAndMerge(makeState(), github);

@@ -43,7 +43,7 @@ import { runGate, type GateExecutors } from './preMergeGate';
 import { checkAndMerge, computeVetoDeadline, parseOwnerRepo, savePRState } from './vetoScheduler';
 import { fetchGitHubToken } from './keywireClient';
 import { createGitHubClient } from './gitHubClient';
-import { updateGeneFitness } from './fitnessLoop';
+import { DEFAULT_LEDGER_ROOT, loadLedger, quarantinedGapIds, updateGeneFitness } from './fitnessLoop';
 
 export type LoopRunOptions = {
   profile: BusinessProfileT;
@@ -138,9 +138,15 @@ export async function runLoop(options: LoopRunOptions): Promise<LoopOutcome> {
   //    Auto-merge (non-dry-run) is restricted to TIER A proposals: tier B/C
   //    carry human-review markers and are never auto-merged, per spec §5.7.
   //    Dry runs may select any tier because nothing is opened or merged.
+  //    Gaps whose id is quarantined (M4) are skipped entirely so a regression
+  //    cannot re-select the same upgrade on the next cycle.
+  const quarantinedGaps = quarantinedGapIds(
+    loadLedger(options.ledgerRoot ?? DEFAULT_LEDGER_ROOT),
+  );
   let current: UpgradeProposalT | null = null;
   try {
     for (const gap of queue.gaps) {
+      if (quarantinedGaps.has(gap.id)) continue;
       if (!options.dryRun && gap.tier !== 'A') continue;
       const proposal = await generateUpgrade(gap, profile);
       const result = await runGate(
@@ -204,6 +210,7 @@ export async function runLoop(options: LoopRunOptions): Promise<LoopOutcome> {
       repo: repoName,
       branch,
       proposalId: current.id,
+      gapId: current.gapId,
       openedAt,
       vetoDeadline,
     });
@@ -238,6 +245,8 @@ export type ResumeOptions = {
   auditDir?: string;
   ledgerRoot?: string;
   now?: Date;
+  /** Users whose "veto" comment closes a PR. Defaults to the repo owner. */
+  authorizedVetoUsers?: string[];
 };
 
 export async function resumeAfterVeto(options: ResumeOptions): Promise<LoopOutcome> {
@@ -248,7 +257,10 @@ export async function resumeAfterVeto(options: ResumeOptions): Promise<LoopOutco
 
   let updated: PRStateT;
   try {
-    updated = await checkAndMerge(prState, github, { now: options.now });
+    updated = await checkAndMerge(prState, github, {
+      now: options.now,
+      authorizedVetoUsers: options.authorizedVetoUsers,
+    });
   } catch (err) {
     return {
       state: { status: 'error', reason: `veto check failed: ${errMsg(err)}` },
@@ -273,15 +285,20 @@ export async function resumeAfterVeto(options: ResumeOptions): Promise<LoopOutco
   }
   const auditDir = options.auditDir ?? DEFAULT_AUDIT_DIR;
   try {
+    // H1: capture the pre-merge scorecard BEFORE the post-merge audit runs and
+    // overwrites the newest scorecard file. loadLatestScorecard() after the
+    // save would return the file we just wrote (pre === post, delta always 0),
+    // which made the fitness loop inert. Loading first gives a real baseline.
+    const pre = loadLatestScorecard(slug, auditDir);
     const postStatement = await runAudit({ profile, adapters: options.adapters, auditDir });
     const post = projectScorecard(postStatement, profile);
     saveScorecard(post, auditDir);
     context.scorecard = post;
 
-    const pre = loadLatestScorecard(slug, auditDir);
     if (pre) {
       const { quarantined } = await updateGeneFitness({
         proposalId: updated.proposalId,
+        gapId: updated.gapId,
         pre,
         post,
         ledgerRoot: options.ledgerRoot,

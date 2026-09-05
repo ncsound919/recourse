@@ -113,15 +113,22 @@ A merge candidate is a **draft PR** created by `runLoop` and labeled
 (default 24h).
 
 - **No veto:** when the deadline passes, `resumeAfterVeto` merges the PR
-  automatically and then re-audits + folds the fitness delta.
+  automatically and then re-audits + folds the fitness delta. The cron advances
+  any in-flight PR at the start of every cycle, and **skips opening a new PR
+  for a business while one is still in its veto window** — so a PR never sits
+  as a draft forever and a business never accumulates a second PR on the same
+  branch.
 - **Veto:** posting a PR comment containing the standalone word `veto`
-  (case-insensitive) makes `resumeAfterVeto` close the PR instead. One comment
-  is enough — the check reads comments before merging.
+  (case-insensitive) by an **authorized user** makes `resumeAfterVeto` close the
+  PR instead. The default authorized user is the repo owner; override per
+  resume with `authorizedVetoUsers`. One comment is enough — the check reads
+  comments before merging, and re-reads them immediately before the merge so a
+  veto posted in the final gap still wins.
 
 Veto is the operator's one-click kill for a single change. It does not stop the
-next cycle. Note the trigger is the word `veto` anywhere in a comment; a comment
-like "we considered a veto but decided no" will still close the PR, so comment
-the bare word only when you actually want to veto.
+next cycle. Note the trigger is the word `veto` anywhere in an authorized
+comment; a comment like "we considered a veto but decided no" will still close
+the PR, so comment the bare word only when you actually want to veto.
 
 ## 7. Kill switches
 
@@ -132,7 +139,7 @@ already opened stay open for the operator to merge or close manually.
 |---|---|---|
 | Global | environment | `RECOURSE_AUTOPILOT_DISABLED=1` (or `true`/`yes`) → cron logs `[autopilot] KILL_SWITCH active, aborting` and exits `2`. |
 | Per-business | profile YAML | `repo.autoMergeEnabled: false` → the cron skips that business (or runs it read-only under `--dry-run`). |
-| Per-gene | `recourse_learner.json` | The fitness loop quarantines a proposal id when the post-merge scorecard **regressed ≥ 10 composite points**; the id is appended to the `quarantined` array. v1 quarantine is append-only — re-selection suppression that consults `quarantined` is a follow-up. |
+| Per-gene | `recourse_learner.json` | The fitness loop quarantines a proposal id (and its **gap id**, into `quarantinedGaps`) when the post-merge scorecard **regressed ≥ 10 composite points**; the loop skips gaps whose id is quarantined, so a regression cannot re-select the same upgrade next cycle. |
 
 ## 8. Reading outputs
 
@@ -158,7 +165,7 @@ Honesty labels: every statement records in `disclosures` which auditors were
 `excluded`, with the reason. Treat `ai-generated` numbers as opinions and
 `deterministic` numbers as measurements.
 
-## 9. Protected paths
+## 9. Protected paths & disk safety
 
 By default the pre-merge gate refuses any change touching: `.env`,
 `gh token.txt`, `*.env*`, `*secret*`, `*token*`, `*key*`. The list is
@@ -167,10 +174,21 @@ configurable per business via `repo.protectedPaths` in the profile.
 A proposal that touches a protected path is **blocked at the gate before
 anything is written to disk** — the gate reports `protected_paths` as the
 failing check, and the proposal is never applied, rolled back, or PR'd. The gate
-also snapshots every file it applies and **rolls the working tree back** if a
-later verification step fails, so a rejected proposal leaves the local clone
-exactly as it found it. `--dry-run` runs the gate with `applyFiles: false`,
-which writes nothing at all.
+also refuses any proposal path that **traverses outside the repo root**
+(`../` or an absolute path escaping the clone) — reported as `path_traversal`
+before any write.
+
+The gate is a **verifier, not a stager**: it snapshots every file a proposal
+would touch, applies them, runs the checks, and then **rolls the working tree
+back** whether the gate passed or failed. A rejected proposal leaves the local
+clone exactly as it found it, and a passing gate does not leave an uncommitted
+local edit behind — the autopilot commits to GitHub via REST, so a later
+post-merge audit measures remote truth, not a stale local tree. `--dry-run` runs
+the gate with `applyFiles: false`, which writes nothing at all.
+
+The gate's real tool executors run WITHOUT a shell (`node <cli.js> …`), so file
+paths containing shell metacharacters are passed as literal argv and can never
+become command injection.
 
 ## 10. Auto-merge scope
 
@@ -190,6 +208,9 @@ tier because nothing is opened or merged.
   The gate reports `requires_sandbox_not_available` rather than a fake pass.
 - **No shipped live auditor adapters yet** — see §2. `npm run audit` fails
   honestly until adapters are wired; the unit/dry-run path exercises the loop.
-- **v1 quarantine is append-only** (no re-selection guard yet) — see §7.
+- Quarantine re-selection suppression is active for **gap ids** recorded by the
+  fitness loop (`quarantinedGaps` in the learner ledger). The v1 veto window
+  merge decision is poll-based over REST, so the close-vs-merge final window is
+  narrowed (re-fetch before merge) but not atomically eliminated.
 - AI-scored dimensions (market, compliance, valuation from Grader; RepoRank
   grade) are model opinions, not measurements — see §8 honesty labels.

@@ -39,7 +39,10 @@ export const DEFAULT_LEDGER_ROOT: string = path.resolve(process.cwd());
 
 export interface LearnerLedger {
   geneFitnessUpdates?: FitnessDeltaT[];
+  /** Proposal ids quarantined on a real regression (backward-compatible shape). */
   quarantined?: string[];
+  /** Gap ids quarantined on a real regression — the re-selection guard key. */
+  quarantinedGaps?: string[];
 }
 
 function ledgerFilePath(root: string): string {
@@ -56,6 +59,7 @@ export function loadLedger(root: string = DEFAULT_LEDGER_ROOT): LearnerLedger {
     const ledger = parsed as LearnerLedger;
     if (ledger.geneFitnessUpdates !== undefined && !Array.isArray(ledger.geneFitnessUpdates)) return {};
     if (ledger.quarantined !== undefined && !Array.isArray(ledger.quarantined)) return {};
+    if (ledger.quarantinedGaps !== undefined && !Array.isArray(ledger.quarantinedGaps)) return {};
     return ledger;
   } catch {
     return {};
@@ -106,6 +110,8 @@ export async function updateGeneFitness(opts: {
   pre: BusinessScorecardT;
   post: BusinessScorecardT;
   ledgerRoot: string;
+  /** When present, the quarantined GAP id (re-selection guard) is recorded. */
+  gapId?: string;
 }): Promise<{ delta: FitnessDeltaT; quarantined: boolean }> {
   const delta = computeFitnessDelta(opts.pre, opts.post, opts.proposalId);
   const ledger = loadLedger(opts.ledgerRoot);
@@ -115,7 +121,21 @@ export async function updateGeneFitness(opts: {
   if (quarantined) {
     ledger.quarantined ??= [];
     if (!ledger.quarantined.includes(opts.proposalId)) ledger.quarantined.push(opts.proposalId);
+    if (opts.gapId) {
+      ledger.quarantinedGaps ??= [];
+      if (!ledger.quarantinedGaps.includes(opts.gapId)) ledger.quarantinedGaps.push(opts.gapId);
+    }
   }
   saveLedger(opts.ledgerRoot, ledger);
   return { delta, quarantined };
+}
+
+/** Gap ids currently quarantined in a ledger (the re-selection guard set). */
+export function quarantinedGapIds(ledger: LearnerLedger): Set<string> {
+  return new Set(ledger.quarantinedGaps ?? []);
+}
+
+/** True when gapId is quarantined in the ledger at root. Missing/corrupt ledger → false. */
+export function isGapQuarantined(gapId: string, root: string = DEFAULT_LEDGER_ROOT): boolean {
+  return quarantinedGapIds(loadLedger(root)).has(gapId);
 }

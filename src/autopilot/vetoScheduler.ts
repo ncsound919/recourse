@@ -62,8 +62,8 @@ export function parseOwnerRepo(githubUrl: string): { owner: string; repo: string
 
 /** A "veto" is the standalone word, case-insensitive (the runbook tells
  *  operators to comment the word "veto"). Word-boundary matching excludes
- *  lookalikes like "vetoed" / "vetoes", and the check is per-comment: an
- *  operator comment containing "veto" is treated as an instruction to close.
+ *  lookalikes like "vetoed" / "vetoes", and the check is per-comment: a
+ *  comment containing "veto" is treated as an instruction to close.
  */
 const VETO_RE = /\bveto\b/i;
 
@@ -71,24 +71,38 @@ function isVeto(body: string): boolean {
   return VETO_RE.test(body);
 }
 
+/** M3: only an AUTHORIZED commenter's veto counts. Defaults to the repo owner
+ *  (state.owner) so an anonymous commenter on a public repo cannot close the
+ *  autopilot's PRs. */
+function isAuthorizedVeto(c: { user?: string; body?: unknown }, allowed: string[]): boolean {
+  return Boolean(c.user) && allowed.includes(String(c.user)) && isVeto(String(c.body ?? ''));
+}
+
 /**
  * Advances one PR-state check. Transitions are pure:
  *   1. terminal states (vetoed / merged / closed) are returned unchanged;
- *   2. a comment containing the standalone word "veto" closes the PR;
- *   3. once now >= vetoDeadline the PR is merged (merge failures are recorded
- *      in mergeError and the PR is left open);
+ *   2. a comment by an AUTHORIZED user (default: the repo owner) containing the
+ *      standalone word "veto" closes the PR;
+ *   3. once now >= vetoDeadline the PR is merged — but only after a FINAL
+ *      comment re-fetch, so a veto posted between the deadline check and the
+ *      merge still closes the PR (narrows the check-then-merge race; a fully
+ *      atomic guarantee is impossible over REST);
  *   4. still inside the window -> returned unchanged.
  */
 export async function checkAndMerge(
   state: PRStateT,
   github: GitHubClient,
-  opts: { now?: Date; vetoHours?: number } = {},
+  opts: { now?: Date; vetoHours?: number; authorizedVetoUsers?: string[] } = {},
 ): Promise<PRStateT> {
   if (state.vetoReceived || state.merged || state.closed) return state;
 
-  const comments = await github.getComments(state.owner, state.repo, state.prNumber);
-  const vetoHit = comments.some((c) => isVeto(String(c.body ?? '')));
-  if (vetoHit) {
+  const allowed = opts.authorizedVetoUsers ?? [state.owner];
+  const fetchComments = () => github.getComments(state.owner, state.repo, state.prNumber);
+  const vetoedBy = (comments: { user?: string; body?: unknown }[]): boolean =>
+    comments.some((c) => isAuthorizedVeto(c, allowed));
+
+  const comments = await fetchComments();
+  if (vetoedBy(comments)) {
     await github.closePR(state.owner, state.repo, state.prNumber);
     return { ...state, vetoReceived: true, closed: true };
   }
@@ -99,6 +113,12 @@ export async function checkAndMerge(
     deadlineMs = new Date(state.openedAt).getTime() + opts.vetoHours * 60 * 60 * 1000;
   }
   if (Number.isFinite(deadlineMs) && (opts.now ?? new Date()).getTime() >= deadlineMs) {
+    // Final re-fetch before merging (M3 race window).
+    const finalComments = await fetchComments();
+    if (vetoedBy(finalComments)) {
+      await github.closePR(state.owner, state.repo, state.prNumber);
+      return { ...state, vetoReceived: true, closed: true };
+    }
     try {
       await github.mergePR(state.owner, state.repo, state.prNumber);
       return { ...state, merged: true };
@@ -107,6 +127,35 @@ export async function checkAndMerge(
     }
   }
   return state;
+}
+
+// ============================================================================
+// H4/H5 helpers — scan a business's prs/ dir so a scheduler can advance open
+// PRs and avoid opening a second PR while one is still in its veto window.
+// ============================================================================
+
+export function isTerminal(state: PRStateT): boolean {
+  return state.vetoReceived || state.merged || state.closed;
+}
+
+export function isInFlight(state: PRStateT): boolean {
+  return !isTerminal(state);
+}
+
+/** Reads every `pr-*.json` under prsDir and returns only IN-FLIGHT PR states.
+ *  Missing directories and unparseable files are skipped (never throws). */
+export async function loadOpenPrStates(prsDir: string): Promise<PRStateT[]> {
+  if (!fs.existsSync(prsDir)) return [];
+  const files = fs
+    .readdirSync(prsDir)
+    .filter((f) => /^pr-\d+\.json$/.test(f))
+    .sort();
+  const open: PRStateT[] = [];
+  for (const file of files) {
+    const state = await loadPRState(path.join(prsDir, file));
+    if (state && isInFlight(state)) open.push(state);
+  }
+  return open;
 }
 
 /** Persists PR state to an explicit file path (creates parent directories). */

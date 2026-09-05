@@ -234,6 +234,8 @@ export const PRState = z.object({
   repo: z.string(),
   branch: z.string(),
   proposalId: z.string(),
+  /** Gap that produced this PR, so a quarantined gene can suppress re-selection. */
+  gapId: z.string().optional(),
   openedAt: z.string().datetime(),
   vetoDeadline: z.string().datetime(),
   vetoReceived: z.boolean().default(false),
