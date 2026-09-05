@@ -123,7 +123,7 @@ export const DEFAULT_RSS_FEEDS: RssFeedSpec[] = [
   { url: 'https://blog.research.google/feeds/posts/default', topics: ['research', 'google'] },
 ];
 
-const SOURCES: SourceKind[] = ['arxiv', 'github', 'hackernews', 'agentbrowser'];
+const SOURCES: SourceKind[] = ['arxiv', 'github', 'hackernews', 'agentbrowser', 'kaggle', 'news'];
 
 export function topicsForName(name: string): string[] {
   return name.toLowerCase().split(/[\s,_-]+/).filter(Boolean);

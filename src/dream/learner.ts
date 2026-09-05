@@ -335,6 +335,13 @@ export function createLearnerStore(): LearnerStore {
 /* ------------------------------ engine ------------------------------ */
 
 export class RecursiveLearner {
+  /** Most recent episode report. The dream engine signal provider reads from
+   *  here to surface `learnerEpisode` / `learnerCalibration` in
+   *  `lastSignalSnapshot`. Set by every `runEpisode()` / `learnRealTools()` /
+   *  `synthesizeDirective()` call so a rehydrated learner shows the right
+   *  value on the first tick after a process restart. */
+  lastReport: EpisodeReport | null = null;
+
   constructor(
     private store: LearnerStore,
     private geneRegistry: GeneRegistryStore = createGeneRegistryStore(),
@@ -354,7 +361,9 @@ export class RecursiveLearner {
     const next = this.execute(state, genes, externalScore);
     await this.store.saveState(next.state);
     await this.store.appendLedger(next.entry);
-    return this.toReport(next.state, next.entry, genes.length);
+    const report = this.toReport(next.state, next.entry, genes.length);
+    this.lastReport = report;
+    return report;
   }
 
   async runEpisodes(n: number): Promise<EpisodeReport[]> {
@@ -403,6 +412,17 @@ export class RecursiveLearner {
       means[t.name] = b.meanReward;
     }
     await this.store.saveState(state);
+    this.lastReport = {
+      episode: state.episode,
+      genesEvaluated: tools.length,
+      avgReward: Object.values(means).reduce((a, b) => a + b, 0) / Math.max(1, Object.keys(means).length),
+      calibrationError: state.calibrationError,
+      selfScore: state.selfScore,
+      meta: { ...state.meta },
+      directives: [...state.directives],
+      stateHash: state.ledgerHead,
+      replayable: true,
+    };
     return means;
   }
 

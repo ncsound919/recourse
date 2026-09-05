@@ -4,6 +4,7 @@ import { pollHackerNews } from './hackernews';
 import { pollRssFeeds, type RssFeedSpec } from './rss';
 import { pollGitHub } from './github';
 import { pollAgentBrowserUrl } from './agentbrowser';
+import { pollBrainKaggle, pollBrainNews } from './brain';
 
 /**
  * Poll orchestrator — fans out a set of topic queries + RSS feeds across the
@@ -15,6 +16,13 @@ export async function pollAllSources(opts: {
   feeds?: RssFeedSpec[];
   perQuery?: number;
   webUrls?: string[];
+  /** Optional deterministic-brain sources (Kaggle + news), enabled by caller. */
+  brain?: {
+    url?: string;
+    kaggleQueries?: string[];
+    news?: boolean;
+    newsLimit?: number;
+  };
 }): Promise<{ signals: ExternalSignal[]; results: SourcePollResult[] }> {
   const queries = (opts.queries ?? []).filter(Boolean);
   const feeds = opts.feeds ?? [];
@@ -56,6 +64,25 @@ export async function pollAllSources(opts: {
       results.push(result);
       signals.push(...s);
     });
+  }
+
+  // Optional deterministic-brain sources: Kaggle datasets + news media.
+  if (opts.brain) {
+    const kQueries = (opts.brain.kaggleQueries ?? []).filter(Boolean);
+    if (kQueries.length > 0) {
+      run(async () => {
+        const { signals: s, result } = await pollBrainKaggle({ url: opts.brain!.url, queries: kQueries });
+        results.push(result);
+        signals.push(...s);
+      });
+    }
+    if (opts.brain.news) {
+      run(async () => {
+        const { signals: s, result } = await pollBrainNews({ url: opts.brain!.url, limit: opts.brain!.newsLimit });
+        results.push(result);
+        signals.push(...s);
+      });
+    }
   }
 
   await Promise.all(jobs);

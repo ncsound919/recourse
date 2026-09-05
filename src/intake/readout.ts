@@ -16,12 +16,16 @@ export interface ReadoutContext {
   chainIntegrity: boolean;
   /** Optional old-vs-new upgrade delta summary (see systemDiff.ts). */
   upgrade?: { added: number; removed: number; upgraded: number; capabilityChanges: number; netTools: number };
+  /** Optional plain-language explanation of the upgrade (what changed in
+   *  everyday terms). Rendered verbatim so the operator can read the report
+   *  without decoding hashes/scores. */
+  plainUpgrade?: string | null;
 }
 
 const DOMAIN_ORDER: ToolDomain[] = ['math', 'coding', 'biotech', 'systemic', 'neuro_symbolic', 'cyber_defense', 'quantum_sim'];
 
 export function buildDevelopmentReadout(ctx: ReadoutContext): string {
-  const { status, registry, provenanceEvents, intake, benchmark, generation, chainIntegrity, upgrade } = ctx;
+  const { status, registry, provenanceEvents, intake, benchmark, generation, chainIntegrity, upgrade, plainUpgrade } = ctx;
   const now = new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
   const healthy = registry.filter((t) => t.healthStatus === 'healthy').length;
   const degraded = registry.length - healthy;
@@ -86,6 +90,11 @@ export function buildDevelopmentReadout(ctx: ReadoutContext): string {
     L.push('### Upgrade delta vs boot baseline (old → new system)');
     L.push(`- Tools: ${upgrade.netTools > 0 ? '+' : ''}${upgrade.netTools} net (${upgrade.added} added, ${upgrade.removed} removed, ${upgrade.upgraded} upgraded)`);
     if (upgrade.capabilityChanges) L.push(`- Capability (dogfood) changes: ${upgrade.capabilityChanges}`);
+    if (plainUpgrade) {
+      L.push('');
+      L.push('**In plain terms:**');
+      L.push(...plainUpgrade.split('\n').map((l) => l.replace(/^#{1,6}\s*/, '### ')));
+    }
   }
   return L.join('\n');
 }

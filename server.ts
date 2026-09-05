@@ -132,6 +132,22 @@ import {
 } from './src/lib/fleetDevelopment.js';
 import type { ProposedPatch, DevFinding, RepairSubmitResult, BrainAskResult, PatchResult, DossierInput, AuditorDriver, DevBrainAction, DevBrainStrategy, DevBrainCandidate, BootGreenGate } from './src/lib/fleetDevelopment.js';
 
+// Genome-council client: Recourse -> deterministic-brain /genome-council/*.
+// Consult the council over a problem, read what it has learned, and record a
+// real outcome (post-mortem) so it compounds leader believability.
+import { buildCouncilProblem, councilDecide, councilLessons, councilPostMortem, councilState } from './src/lib/genomeCouncil.js';
+
+// Recourse dormant-capability activator: swarm auto-dispatch, failure-bias,
+// learner lastReport, autopilot probe, and benchmark refresh.
+import {
+  autoDispatchSwarmTasks,
+  applyFailureBias,
+  recordEpisode,
+  probeAutopilotOnce,
+  maybeRefreshBenchmark,
+  episodicStore,
+} from './src/lib/recourseActivator.js';
+
 // AgentBrowser web-fetch connector (download from the web through the real browser).
 import { isWebCategory, htmlFromResult, pickRenderMethod } from './src/lib/webArtifact.js';
 import { createWebChannelRouter } from './src/server/routes/webChannel.js';
@@ -149,6 +165,7 @@ import {
   diffSnapshots,
   snapshotFingerprint,
   renderUpgradeMarkdown,
+  renderPlainLanguageSummary,
 } from './src/lib/systemDiff.js';
 import {
   resolveKind,
@@ -1821,7 +1838,12 @@ app.post('/api/ollama/status', async (req, res) => {
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 2000);
-      const r = await fetch(`${cfg.baseUrl}/api/tags`, { signal: controller.signal });
+      // Native Ollama serves its model list at the ROOT (/api/tags), not under
+      // the OpenAI shim (/v1/api/tags). Strip a trailing /v1 so live state
+      // resolves for both local Ollama and remote /v1 proxies that still speak
+      // native tags.
+      const tagsBase = cfg.baseUrl.replace(/\/v1\/?$/, '');
+      const r = await fetch(`${tagsBase}/api/tags`, { signal: controller.signal });
       clearTimeout(timer);
       if (r.ok) {
         const data: any = await r.json();
@@ -2471,10 +2493,24 @@ app.get('/api/recourse/system/snapshots', (req, res) => {
 });
 
 // Differential upgrade report: upgraded (current) system vs the boot baseline.
-app.get('/api/recourse/system/upgrade-report', (req, res) => {
-  const report = upgradeReport();
-  res.json({ success: true, ...report });
+app.get('/api/recourse/system/upgrade-report', async (req, res) => {
+  try {
+    const report = await buildUpgradeReport();
+    res.json({ success: true, ...report });
+  } catch (err: any) {
+    // Never block the report on a model hiccup — fall back to deterministic.
+    res.json({ success: true, ...upgradeReport() });
+  }
 });
+
+// Warm the plain-language rephrase cache so the first report is not slow.
+void (async () => {
+  await new Promise((r) => setTimeout(r, 2000));
+  try {
+    const rep = upgradeReport();
+    if (rep.topChanged.length > 0) await rephraseToolDescriptions(rep.topChanged);
+  } catch { /* warm-up optional */ }
+})();
 
 // Capability adoption status (which generated tools back internal ops).
 app.get('/api/recourse/capabilities', (req, res) => {
@@ -2561,8 +2597,79 @@ function recordSystemChange(reason: string): void {
   saveStateToDisk();
 }
 
+/** Build a "describe" mapper from registry tool descriptions → human phrasing.
+ *  Strips provenance noise ("Crystallized from dream:") and keeps the first
+ *  clause so bullets stay short. Never fabricates: returns the real (cleaned)
+ *  description or falls back to a generic label. */
+function registryDescribe(name: string): string {
+  const byName = new Map(registry.map((t) => [t.name, t.description]));
+  const desc = (byName.get(name) || '').trim();
+  if (desc) {
+    let clean = desc.replace(/^(crystallized from dream|dream|generated|auto-promoted|synthesized)\s*:\s*/i, '');
+    clean = clean.replace(/\s*\.+$/, '');
+    const clause = clean.split(/[.;]/)[0].trim();
+    const core = clause.replace(/^(a|an|the)\s+/i, '');
+    return core ? core : 'a new tool';
+  }
+  return 'a new tool';
+}
+
+// Async plain-language rephrasing of tool descriptions via the local model.
+// Cached per tool-name so repeated readouts don't re-hit the model, and only
+// the top few changed tools are sent (never the whole 900+ registry). The
+// model output is used ONLY to rephrase the real description into everyday
+// words — never to invent capabilities — and any offline/failure falls back to
+// the deterministic registryDescribe() so the report always renders.
+const plainRephraseCache = new Map<string, string>();
+
+async function rephraseToolDescriptions(
+  entries: Array<{ name: string; description: string }>,
+  limit = 8,
+): Promise<void> {
+  const toSend = entries
+    .filter((e) => e.description && !plainRephraseCache.has(e.name))
+    .slice(0, limit);
+  if (toSend.length === 0) return;
+  // Honesty guardrail: give the model the REAL description and ask for a plain
+  // restatement only — never a capability the description doesn't support.
+  const system = [
+    'You are Recourse\'s plain-language reporter.',
+    'For each tool I give you, rewrite its description into one short, everyday sentence a non-expert can understand.',
+    'Rules:',
+    '- Do NOT invent capabilities or behaviours that are not in the original description.',
+    '- No jargon, no hashes, no version numbers.',
+    '- Reply ONLY with valid JSON: an object mapping the exact tool name to its plain sentence.',
+  ].join('\n');
+  const user = toSend
+    .map((e) => `${e.name}: ${e.description}`)
+    .join('\n');
+  try {
+    const result = await chatComplete(
+      [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+      { temperature: 0.2, json: true },
+    );
+    if (!result.ok || !result.content) return; // fall back to deterministic
+    const block = extractJsonBlock(result.content);
+    if (!block) return;
+    const parsed = JSON.parse(block);
+    for (const e of toSend) {
+      const plain = typeof parsed?.[e.name] === 'string' ? parsed[e.name].trim() : '';
+      if (plain && plain.length > 3 && plain.length < 400) {
+        plainRephraseCache.set(e.name, plain);
+      }
+    }
+  } catch { /* model unavailable — keep deterministic descriptions */ }
+}
+
+function describeWithRephrase(name: string): string {
+  return plainRephraseCache.get(name) || registryDescribe(name);
+}
+
 /** Diff the current (upgraded) system against the boot baseline. */
-function upgradeReport(): { diff: SystemDiff; baseline: SystemSnapshot; current: SystemSnapshot; markdown: string } {
+function upgradeReport(): { diff: SystemDiff; baseline: SystemSnapshot; current: SystemSnapshot; markdown: string; plain: string; topChanged: Array<{ name: string; description: string }> } {
   const baseline = systemBaseline ?? currentSystemSnapshot('boot-baseline');
   const current = currentSystemSnapshot('current');
   const diff = diffSnapshots(baseline, current);
@@ -2571,7 +2678,26 @@ function upgradeReport(): { diff: SystemDiff; baseline: SystemSnapshot; current:
     baseline,
     current,
     markdown: renderUpgradeMarkdown(diff, { fromLabel: 'boot-baseline', toLabel: 'current' }),
+    plain: renderPlainLanguageSummary(diff, { describe: describeWithRephrase, maxItems: 10 }),
+    topChanged: [...diff.addedTools, ...diff.upgradedTools, ...diff.healthChangedTools]
+      .map((c) => {
+        const nm = c.next?.name ?? c.name;
+        const tool = registry.find((t) => t.name === nm);
+        return { name: nm, description: tool?.description ?? '' };
+      })
+      .filter((x) => x.description)
+      .slice(0, 8),
   };
+}
+
+/** Async upgrade report that first lets the local model rephrase the top
+ *  changed tools into plain language (bounded + cached), then renders. */
+async function buildUpgradeReport() {
+  const rep = upgradeReport();
+  await rephraseToolDescriptions(rep.topChanged);
+  // Re-render plain now that the cache may hold model-rephrased sentences.
+  const refreshed = upgradeReport();
+  return refreshed;
 }
 
 // Boot baseline snapshot (captured once reconcile + self-host verify settle).
@@ -4571,6 +4697,12 @@ async function applyRealToolLearning(): Promise<void> {
   }
 }
 
+// Autopilot probe tick counter — declared at module scope ABOVE runServerTick
+// so an early boot tick never hits the temporal dead zone of a `let` declared
+// later in the file (which previously spammed "[activator] autopilot probe
+// failed: Cannot access 'autopilotProbeTickCounter' before initialization").
+let autopilotProbeTickCounter = 0;
+
 /** Advance one full autonomous generation of the system (math → learner →
  *  swarm → dream → axioms → forge/lego → ledger → capability adoption sweep).
  *  Extracted from the /tick HTTP route so it can be driven by the server
@@ -4746,6 +4878,112 @@ async function runServerTick() {
     // fingerprint moved). Keeps the upgrade-report baseline diff meaningful.
     try { recordSystemChange('tick'); } catch { /* non-fatal */ }
 
+    // 10-13. Activator sweep: failure-bias decision, swarm auto-dispatch,
+    //        benchmark refresh, autopilot probe. None of these block the tick.
+    try {
+      if (lastGrowthDecision) {
+        const { decision: rebiased } = applyFailureBiasToDecision(lastGrowthDecision);
+        lastGrowthDecision = rebiased;
+        status.lastDecision = rebiased;
+      }
+    } catch (err: any) { console.warn('[activator] failure-bias failed:', err?.message || err); }
+
+    try { maybeAutoDispatchSwarm(dreamState); } catch (err: any) { console.warn('[activator] swarm dispatch failed:', err?.message || err); }
+
+    try { maybeRefreshBenchmarks(); } catch (err: any) { console.warn('[activator] benchmark refresh failed:', err?.message || err); }
+
+    try { await maybeRunAutopilotProbe(); } catch (err: any) { console.warn('[activator] autopilot probe failed:', err?.message || err); }
+
+// 10. Failure-bias re-ranking: penalise candidate actions whose domain has
+//     recently failed in the episodic store. Bounds penalty at 0.4 so
+//     utility never reaches zero — epsilon exploration is preserved.
+function applyFailureBiasToDecision(decision: GrowthDecisionReport): {
+  decision: GrowthDecisionReport;
+  biasResult: import('./src/lib/recourseActivator.js').FailureBiasResult;
+} {
+  const fps: Record<string, string> = {};
+  for (const a of decision.candidateActions) {
+    fps[a.id] = `${a.targetDomain ?? ''}/${a.title}/${a.description}`;
+  }
+  const biasResult = applyFailureBias(
+    decision.candidateActions.map((a) => a.id),
+    fps,
+  );
+  const penalized = decision.candidateActions.map((a) => ({
+    ...a,
+    computedUtilityScore: Number(
+      Math.max(0, a.computedUtilityScore - (biasResult.penalties[a.id] ?? 0)).toFixed(4),
+    ),
+  }));
+  penalized.sort((a, b) => b.computedUtilityScore - a.computedUtilityScore || a.id.localeCompare(b.id));
+  penalized.forEach((a, i) => { a.rank = i + 1; });
+  const selectedPenalty = biasResult.penalties[decision.selectedAction.id] ?? 0;
+  return {
+    decision: {
+      ...decision,
+      candidateActions: penalized,
+      selectedAction: penalized[0] ?? decision.selectedAction,
+    },
+    biasResult: { ...biasResult, selectedPenalty },
+  };
+}
+
+// 11. Swarm auto-dispatch: when the swarm autopilot is on and the task queue
+//     has drained (no queued/running work outstanding), anchor a task to the
+//     most crystallizable dream thought. Deterministic: 1 task per drain, so
+//     the queue never stacks faster than the pump can work it.
+function maybeAutoDispatchSwarm(dream: DreamState) {
+  const outstanding = swarmStatus.activeTaskQueue.filter(
+    (t) => t.status === 'queued' || t.status === 'running',
+  );
+  if (outstanding.length > 0) return;
+  const toDispatch = autoDispatchSwarmTasks({
+    swarmStatus,
+    dreamState: dream,
+    maxPerCycle: 1,
+  });
+  for (const task of toDispatch) {
+    const result = dispatchSubAgentTask(task.agentType, task.title, task.domain, swarmStatus);
+    swarmStatus = result.updatedSwarm;
+    console.log(`[swarm:auto] dispatched ${task.agentType} for "${task.title.slice(0, 60)}"`);
+  }
+  if (toDispatch.length > 0) {
+    pumpSwarmQueue(1).catch(() => {});
+  }
+}
+
+// 12. Benchmark refresh: when 15/15 is reached, append one new problem from the
+//     synthesis corpus so the external-capability signal is not a flat line.
+//     The new problem is honest: real domain, real acceptance test.
+function maybeRefreshBenchmarks() {
+  const lastBench = benchmarkHistory[benchmarkHistory.length - 1];
+  if (!lastBench) return;
+  if (lastBench.solved < lastBench.total) return;
+  const result = maybeRefreshBenchmark({ history: benchmarkHistory });
+  if (result.refreshed && result.added) {
+    console.log(`[benchmark:refresh] added "${result.added.id}" (${result.added.domain}) — total now ${result.currentTotal}`);
+  }
+}
+
+// 13. Autopilot probe: every 10 ticks, run a dry-run audit against all
+//     registered business profiles so the operator sees loop state without
+//     opening any PR. Silent when no profiles exist. The tick counter is
+//     declared at module scope above runServerTick (see the note there).
+async function maybeRunAutopilotProbe() {
+  autopilotProbeTickCounter += 1;
+  if (autopilotProbeTickCounter % 10 !== 0) return;
+  const results = await probeAutopilotOnce();
+  for (const r of results) {
+    if (!r.ran) {
+      if (r.reason === 'no_profiles') {
+        console.log('[autopilot:probe] no business profiles found — create data/business-profiles/<name>.yaml to activate');
+      }
+    } else {
+      console.log(`[autopilot:probe] ${r.business} → ${r.status}`);
+    }
+  }
+}
+
     return {
       success: true,
       mathResult,
@@ -4865,6 +5103,15 @@ const INTAKE_AUTOPILOT_MS = Number(process.env.INTAKE_AUTOPILOT_MS || 6 * 60 * 1
 const INTAKE_MAX_POLL = Number(process.env.INTAKE_MAX_POLL || 6); // queries per poll
 let intakeAutopilotTimer: NodeJS.Timeout | null = null;
 
+// Deterministic-brain intake sources (Kaggle + news). Enabled only when both a
+// BRAIN_URL and the matching RECOURSE_INTAKE_BRAIN_* flag are set, so a poll
+// never hammers an unconfigured brain or fabricates sources.
+const INTAKE_BRAIN_URL = (process.env.BRAIN_URL || '').trim().replace(/\/+$/, '');
+const INTAKE_BRAIN_KAGGLE_QUERIES = (process.env.RECOURSE_INTAKE_BRAIN_KAGGLE_QUERIES || '')
+  .split(',').map((s) => s.trim()).filter(Boolean);
+const INTAKE_BRAIN_NEWS = process.env.RECOURSE_INTAKE_BRAIN_NEWS === '1';
+const INTAKE_BRAIN_NEWS_LIMIT = Number(process.env.INTAKE_BRAIN_NEWS_LIMIT || 10);
+
 function intakeSnapshot(): IntakeSnapshot {
   return signalStore.snapshot(lastPollResults, lastGroundAt, lastGroundSummary);
 }
@@ -4890,6 +5137,10 @@ async function runIntakeCycle(queries: string[] = DEFAULT_TOPIC_QUERIES): Promis
     feeds: DEFAULT_RSS_FEEDS,
     perQuery: 4,
     webUrls,
+    brain:
+      INTAKE_BRAIN_URL && (INTAKE_BRAIN_KAGGLE_QUERIES.length > 0 || INTAKE_BRAIN_NEWS)
+        ? { url: INTAKE_BRAIN_URL, kaggleQueries: INTAKE_BRAIN_KAGGLE_QUERIES, news: INTAKE_BRAIN_NEWS, newsLimit: INTAKE_BRAIN_NEWS_LIMIT }
+        : undefined,
   });
   lastPollResults = results;
   const { added, dupes } = signalStore.ingest(signals);
@@ -5022,6 +5273,40 @@ app.post('/api/recourse/intake/poll', async (req, res) => {
   }
 });
 
+/** Pull deterministic-brain sources (Kaggle datasets + news) into the store
+ *  now, regardless of the autopilot env flags. Honest: brain offline/empty is
+ *  reported per-source, never fabricated. */
+app.post('/api/recourse/intake/brain', async (req, res) => {
+  try {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const url = typeof b.url === 'string' && b.url.trim() ? b.url.trim().replace(/\/+$/, '') : INTAKE_BRAIN_URL;
+    if (!url) return res.status(400).json({ success: false, error: 'BRAIN_URL not configured (pass url or set BRAIN_URL)' });
+    const queries = Array.isArray(b.queries) && (b.queries as unknown[]).length
+      ? (b.queries as string[]).map(String).slice(0, INTAKE_MAX_POLL)
+      : (INTAKE_BRAIN_KAGGLE_QUERIES.length ? INTAKE_BRAIN_KAGGLE_QUERIES : DEFAULT_TOPIC_QUERIES);
+    const news = typeof b.news === 'boolean' ? b.news : INTAKE_BRAIN_NEWS || true;
+    const newsLimit = Number(b.newsLimit) || INTAKE_BRAIN_NEWS_LIMIT;
+
+    const { signals, results } = await pollAllSources({
+      queries: queries.slice(0, INTAKE_MAX_POLL),
+      brain: { url, kaggleQueries: queries, news, newsLimit },
+    });
+    lastPollResults = results;
+    const { added, dupes } = signalStore.ingest(signals);
+    saveStateToDisk();
+    if (added > 0) {
+      appendProvenanceEvent('intake_brain', {
+        added,
+        dupes,
+        sources: results.map((r) => ({ source: r.source, ok: r.ok, count: r.count, error: r.error ?? undefined })),
+      });
+    }
+    res.json({ success: true, added, dupes, signals: signals.slice(0, 20), results, intake: intakeSnapshot() });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.post('/api/recourse/intake/ground', async (req, res) => {
   try {
     const { signalId } = req.body ?? {};
@@ -5057,11 +5342,12 @@ app.post('/api/recourse/benchmark/run', (req, res) => {
   }
 });
 
-app.get('/api/recourse/readout', (req, res) => {
+app.get('/api/recourse/readout', async (req, res) => {
   const chain = verifyChainIntegrity();
   let upgrade: ReadoutContext['upgrade'] = undefined;
+  let plainUpgrade: string | null = null;
   try {
-    const rep = upgradeReport();
+    const rep = await buildUpgradeReport();
     upgrade = {
       added: rep.diff.addedTools.length,
       removed: rep.diff.removedTools.length,
@@ -5069,6 +5355,7 @@ app.get('/api/recourse/readout', (req, res) => {
       capabilityChanges: rep.diff.capabilityChanges.length,
       netTools: rep.diff.totals.after - rep.diff.totals.before,
     };
+    plainUpgrade = rep.plain ?? null;
   } catch { /* upgrade section optional */ }
   const ctx: ReadoutContext = {
     status,
@@ -5079,8 +5366,9 @@ app.get('/api/recourse/readout', (req, res) => {
     generation: status.generation,
     chainIntegrity: chain.valid,
     upgrade,
+    plainUpgrade,
   };
-  res.json({ success: true, markdown: buildDevelopmentReadout(ctx), generatedAt: new Date().toISOString() });
+  res.json({ success: true, markdown: buildDevelopmentReadout(ctx), plain: plainUpgrade, generatedAt: new Date().toISOString() });
 });
 
 // =========================================================================
@@ -6488,6 +6776,112 @@ async function runBrainGateway(body: {
   return { ok: res.ok, brain, action, ...res };
 }
 
+// ---------------------------------------------------------------------------
+// GENOME COUNCIL — deterministic-brain /genome-council/* (compounding control)
+// ---------------------------------------------------------------------------
+// The deterministic brain hosts an LLM-free genome-council whose leader
+// believability compounds from recorded outcomes. Recourse consults it for
+// advisory strategy guidance on its next repair and can record a real outcome
+// (post-mortem) back so the brain learns which lenses actually work on
+// Recourse. Honest scope: council output is strategy guidance — Recourse's own
+// sandbox verifier + lint gate remain the only promotion gate. Offline brain =>
+// honest ok:false, never a fabricated council.
+
+async function councilBase(): Promise<{ base: string; online: boolean }> {
+  const drv = getFleetDriver('deterministic-brain');
+  const base = drv?.baseUrl();
+  if (!drv || !base) return { base: '', online: false };
+  return { base, online: await probeDriverOnline(drv) };
+}
+
+function councilProblemForDossier(): string {
+  const dossier = computeHealthDossier(devDossierInput());
+  return buildCouncilProblem(dossier.findings.length > 0 ? dossier.findings[0] : undefined);
+}
+
+async function runCouncilDecide(body: {
+  problem?: string;
+  selectedGenomes?: string[];
+  activeSectors?: string[];
+}): Promise<Record<string, unknown>> {
+  const { base, online } = await councilBase();
+  if (!base) return { ok: false, error: 'deterministic-brain not configured (BRAIN_URL unset)' };
+  if (!online) return { ok: false, error: `deterministic-brain unreachable at ${base}` };
+  const problem = body.problem && body.problem.trim() ? body.problem : councilProblemForDossier();
+  const res = await councilDecide({
+    url: base,
+    problem,
+    selectedGenomes: body.selectedGenomes,
+    activeSectors: body.activeSectors,
+  });
+  recordDev('council', res.ok, res.ok ? 'genome council returned an approach' : `genome council failed: ${res.error}`, { driver: 'deterministic-brain' });
+  return { ok: res.ok, problem, council: res.result, error: res.error };
+}
+
+async function runCouncilState(): Promise<Record<string, unknown>> {
+  const { base, online } = await councilBase();
+  if (!base) return { ok: false, error: 'deterministic-brain not configured (BRAIN_URL unset)' };
+  if (!online) return { ok: false, error: `deterministic-brain unreachable at ${base}` };
+  const res = await councilState({ url: base });
+  recordDev('council-state', res.ok, res.ok ? 'read genome-council ledger' : `genome-council state failed: ${res.error}`, { driver: 'deterministic-brain' });
+  return { ok: res.ok, overview: res.overview, learnedWeights: res.learnedWeights, error: res.error };
+}
+
+async function runCouncilLessons(limit?: number): Promise<Record<string, unknown>> {
+  const { base, online } = await councilBase();
+  if (!base) return { ok: false, error: 'deterministic-brain not configured (BRAIN_URL unset)' };
+  if (!online) return { ok: false, error: `deterministic-brain unreachable at ${base}` };
+  const res = await councilLessons({ url: base, limit });
+  recordDev('council-lessons', res.ok, res.ok ? `read ${res.total ?? 0} council lesson(s)` : `genome-council lessons failed: ${res.error}`, { driver: 'deterministic-brain' });
+  return { ok: res.ok, total: res.total, lessons: res.lessons, error: res.error };
+}
+
+async function runCouncilPostMortem(body: {
+  decisionTitle?: string;
+  sector?: string;
+  chosenOption?: string;
+  predictedProbability?: number;
+  actualOutcome?: string;
+  leaderIds?: string[];
+  rootCauses?: string[];
+  keyLessons?: string[];
+  retrospectiveSummary?: string;
+}): Promise<Record<string, unknown>> {
+  const { base, online } = await councilBase();
+  if (!base) return { ok: false, error: 'deterministic-brain not configured (BRAIN_URL unset)' };
+  if (!online) return { ok: false, error: `deterministic-brain unreachable at ${base}` };
+  const outcome = body.actualOutcome;
+  if (outcome !== 'success' && outcome !== 'partial' && outcome !== 'failure') {
+    return { ok: false, error: 'actualOutcome must be success | partial | failure' };
+  }
+  const res = await councilPostMortem({
+    url: base,
+    input: {
+      decisionTitle: body.decisionTitle ?? '',
+      sector: body.sector,
+      chosenOption: body.chosenOption,
+      predictedProbability: body.predictedProbability ?? 0.5,
+      actualOutcome: outcome,
+      leaderIds: body.leaderIds ?? [],
+      rootCauses: body.rootCauses,
+      keyLessons: body.keyLessons,
+      retrospectiveSummary: body.retrospectiveSummary,
+    },
+  });
+  recordDev('council-pm', res.ok, res.ok
+    ? `recorded ${outcome}: ${res.adjustmentsApplied ?? 0} believability adjustment(s), ${res.lessonsStored ?? 0} lesson(s)`
+    : `council post-mortem failed: ${res.error}`, { driver: 'deterministic-brain' });
+  return {
+    ok: res.ok,
+    record: res.record,
+    adjustmentsApplied: res.adjustmentsApplied,
+    lessonsStored: res.lessonsStored,
+    durable: res.durable,
+    overview: res.overview,
+    error: res.error,
+  };
+}
+
 function ensureDevAutopilot(): void {
   if (!devAutopilotOn) return;
   if (devTimer) return;
@@ -6587,6 +6981,61 @@ app.post('/api/recourse/develop/brain', async (req, res) => {
       problem: typeof problem === 'string' ? problem : undefined,
       candidates: Array.isArray(candidates) ? candidates as DevBrainCandidate[] : undefined,
       strategy: strategy as DevBrainStrategy | undefined,
+    });
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/** Genome council: consult the deterministic brain's council over a problem. */
+app.post('/api/recourse/develop/council', async (req, res) => {
+  try {
+    const { problem, selectedGenomes, activeSectors } = req.body ?? {};
+    const result = await runCouncilDecide({
+      problem: typeof problem === 'string' ? problem : undefined,
+      selectedGenomes: Array.isArray(selectedGenomes) ? selectedGenomes as string[] : undefined,
+      activeSectors: Array.isArray(activeSectors) ? activeSectors as string[] : undefined,
+    });
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/** Genome council: read the brain's learned believability ledger. */
+app.get('/api/recourse/develop/council/state', async (_req, res) => {
+  try {
+    res.json(await runCouncilState());
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/** Genome council: read lessons the brain has learned from recorded outcomes. */
+app.get('/api/recourse/develop/council/lessons', async (req, res) => {
+  try {
+    const limit = Number(req.query.limit);
+    res.json(await runCouncilLessons(Number.isFinite(limit) ? limit : undefined));
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/** Genome council: record a real Recourse outcome so the brain compounds. */
+app.post('/api/recourse/develop/council/post-mortem', async (req, res) => {
+  try {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const result = await runCouncilPostMortem({
+      decisionTitle: typeof b.decisionTitle === 'string' ? b.decisionTitle : undefined,
+      sector: typeof b.sector === 'string' ? b.sector : undefined,
+      chosenOption: typeof b.chosenOption === 'string' ? b.chosenOption : undefined,
+      predictedProbability: typeof b.predictedProbability === 'number' ? b.predictedProbability : undefined,
+      actualOutcome: typeof b.actualOutcome === 'string' ? b.actualOutcome : undefined,
+      leaderIds: Array.isArray(b.leaderIds) ? (b.leaderIds as string[]) : undefined,
+      rootCauses: Array.isArray(b.rootCauses) ? (b.rootCauses as string[]) : undefined,
+      keyLessons: Array.isArray(b.keyLessons) ? (b.keyLessons as string[]) : undefined,
+      retrospectiveSummary: typeof b.retrospectiveSummary === 'string' ? b.retrospectiveSummary : undefined,
     });
     res.json(result);
   } catch (err: any) {

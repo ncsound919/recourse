@@ -9,7 +9,7 @@ import type { ToolDomain } from '../types';
 /** Where a signal was fetched from. github reuses githubResearchEngine.
  *  agentbrowser = a web page downloaded through AgentBrowser.
  *  corpus = a local research artifact scanned from a sibling project. */
-export type SourceKind = 'arxiv' | 'hackernews' | 'rss' | 'github' | 'agentbrowser' | 'corpus';
+export type SourceKind = 'arxiv' | 'hackernews' | 'rss' | 'github' | 'agentbrowser' | 'corpus' | 'kaggle' | 'news';
 
 export interface ExternalSignal {
   id: string;             // sha256(url + title), stable dedupe key

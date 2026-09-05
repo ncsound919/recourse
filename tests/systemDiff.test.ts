@@ -4,6 +4,9 @@ import {
   diffSnapshots,
   snapshotFingerprint,
   renderUpgradeMarkdown,
+  renderPlainLanguageSummary,
+  plainToolLine,
+  toolKindLabel,
 } from '../src/lib/systemDiff';
 
 function tool(name: string, hash: string, extra: any = {}): any {
@@ -93,5 +96,45 @@ describe('system diff', () => {
     const md = renderUpgradeMarkdown(diff, { fromLabel: 'boot', toLabel: 'now' });
     expect(md).toContain('Upgraded tools');
     expect(md).toContain('x');
+  });
+});
+
+describe('plain-language upgrade summary', () => {
+  it('explains additions and upgrades in everyday terms with no hashes/scores', () => {
+    const oldS = snap({ tools: [tool('solver', 'h1', { domain: 'math', version: '1.0.0' })], benchmarkSolved: 4 });
+    const newS = snap({
+      tools: [
+        tool('solver', 'h2', { domain: 'math', version: '1.0.1' }),
+        tool('CODI_CYCLOMATIC_481c', 'h3', { domain: 'coding' }),
+        tool('BIOT_GC_9e0f', 'h4', { domain: 'biotech', passed: false, healthStatus: 'degraded' }),
+      ],
+      benchmarkSolved: 5,
+      selfhostedHealthy: 2,
+      selfhostedTotal: 2,
+    });
+    const diff = diffSnapshots(oldS, newS);
+    const describe = (n: string) =>
+      ({ solver: 'a root-finding solver', CODI_CYCLOMATIC_481c: 'a code-complexity checker', BIOT_GC_9e0f: 'a DNA sequence analyzer' })[n] ?? n;
+    const out = renderPlainLanguageSummary(diff, { describe });
+    expect(out).toContain('plain terms');
+    expect(out).toContain('Added');
+    expect(out).toContain('a code-complexity checker');
+    expect(out).toContain('biology / drug-discovery logic');
+    expect(out).toContain('a DNA sequence analyzer');
+    expect(out).toContain('Improved');
+    expect(out).toContain('a root-finding solver');
+    expect(out).not.toMatch(/h[1-4]/);
+    expect(out).toContain('1 more external benchmark problem');
+  });
+
+  it('says plainly when nothing material changed', () => {
+    const s = snap({ tools: [tool('x', 'h1')] });
+    const out = renderPlainLanguageSummary(diffSnapshots(s, s));
+    expect(out).toContain('no measurable change');
+  });
+
+  it('derives a human tool label from the name kind when no description given', () => {
+    expect(plainToolLine('added', 'QUAN_QUBIT_8f62', 'quantum_sim')).toContain('quantum-computing simulations');
+    expect(toolKindLabel('CODI_CYCLOMATIC_481c')).toContain('code-complexity');
   });
 });

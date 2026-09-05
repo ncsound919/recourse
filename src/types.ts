@@ -68,6 +68,7 @@ export type ProvenanceEventType =
   | 'loop_error'
   | 'signal_grounded'
   | 'intake_poll'
+  | 'intake_brain'
   | 'corpus_scanned'
   | 'corpus_dispatched'
   | 'skill_catalog_scanned'
