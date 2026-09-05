@@ -22,6 +22,7 @@ import {
   PRState,
   type AuditStatementT,
   type BusinessScorecardT,
+  type CheckpointT,
   type GitHubClient,
   type LoopContext,
   type LoopState,
@@ -44,6 +45,7 @@ import { checkAndMerge, computeVetoDeadline, parseOwnerRepo, savePRState } from 
 import { fetchGitHubToken } from './keywireClient';
 import { createGitHubClient } from './gitHubClient';
 import { DEFAULT_LEDGER_ROOT, loadLedger, quarantinedGapIds, updateGeneFitness } from './fitnessLoop';
+import { FileCheckpointStore, buildCheckpoint, evaluateCheckpointTimeout, resolveCheckpoint } from './checkpoint';
 
 export type LoopRunOptions = {
   profile: BusinessProfileT;
@@ -54,6 +56,10 @@ export type LoopRunOptions = {
   github?: GitHubClient;
   ledgerRoot?: string;
   gateExecutors?: GateExecutors;
+  /** If true, create a checkpoint after opening PR and pause for review. */
+  requireCheckpoint?: boolean;
+  /** Checkpoint store for testing. Defaults to FileCheckpointStore. */
+  checkpointStore?: import('./checkpoint').CheckpointStore;
 };
 
 export type LoopOutcome = { state: LoopState; context: LoopContext };
@@ -61,7 +67,7 @@ export type LoopOutcome = { state: LoopState; context: LoopContext };
 const DEFAULT_AUDIT_DIR = 'data/business-profiles';
 
 function emptyContext(): LoopContext {
-  return { profileSlug: '', scorecard: null, queue: null, currentProposal: null, prState: null };
+  return { profileSlug: '', scorecard: null, queue: null, currentProposal: null, prState: null, checkpoint: null };
 }
 
 function errMsg(err: unknown): string {
@@ -214,13 +220,32 @@ export async function runLoop(options: LoopRunOptions): Promise<LoopOutcome> {
       openedAt,
       vetoDeadline,
     });
-    context.prState = prState;
+     context.prState = prState;
 
-    if (auditDir) {
-      const prFilePath = path.join(auditDir, context.profileSlug, 'prs', `pr-${prNumber}.json`);
-      await savePRState(prState, prFilePath);
-    }
-    return { state: { status: 'veto_wait', prNumber, deadline: vetoDeadline }, context };
+     if (auditDir) {
+       const prFilePath = path.join(auditDir, context.profileSlug, 'prs', `pr-${prNumber}.json`);
+       await savePRState(prState, prFilePath);
+     }
+
+     // Interactive-veto checkpoint: if required, pause the loop and wait for
+     // human approval before the PR enters its 24h auto-merge window.
+     if (options.requireCheckpoint) {
+       const store = options.checkpointStore ?? new FileCheckpointStore(auditDir ?? DEFAULT_AUDIT_DIR);
+       const now = options.now ?? new Date();
+       const vetoHours = repo.autoMergeVetoHours ?? 24;
+       const checkpoint = buildCheckpoint({
+         id: `ckpt_${prNumber}_${now.getTime()}`,
+         profileSlug: slug,
+         prNumber,
+         proposalId: current.id,
+         expiresAt: new Date(now.getTime() + vetoHours * 3600_000).toISOString(),
+       });
+       await store.save(checkpoint);
+       context.checkpoint = checkpoint;
+       return { state: { status: 'checkpoint', checkpointId: checkpoint.id }, context };
+     }
+
+     return { state: { status: 'veto_wait', prNumber, deadline: vetoDeadline }, context };
   } catch (err) {
     return {
       state: { status: 'error', reason: `pr failed: ${errMsg(err)}` },
@@ -247,6 +272,8 @@ export type ResumeOptions = {
   now?: Date;
   /** Users whose "veto" comment closes a PR. Defaults to the repo owner. */
   authorizedVetoUsers?: string[];
+  /** Checkpoint store for resolving checkpoint state. */
+  checkpointStore?: import('./checkpoint').CheckpointStore;
 };
 
 export async function resumeAfterVeto(options: ResumeOptions): Promise<LoopOutcome> {
@@ -254,6 +281,41 @@ export async function resumeAfterVeto(options: ResumeOptions): Promise<LoopOutco
   const slug = slugify(profile.business.name);
   const context: LoopContext = { ...emptyContext(), profileSlug: slug, prState };
   const repo = repoBinding(profile);
+
+  // If a checkpoint exists for this PR, resolve it first.
+  if (options.checkpointStore) {
+    const checkpoints = await options.checkpointStore.list(slug);
+    const matching = checkpoints.find((c) => c.prNumber === prState.prNumber);
+    if (matching && matching.status === 'pending') {
+      if (evaluateCheckpointTimeout(matching, options.now)) {
+        await options.checkpointStore.remove(matching.id);
+        context.checkpoint = { ...matching, status: 'expired' };
+        return {
+          state: { status: 'error', reason: `checkpoint expired for PR #${prState.prNumber}` },
+          context,
+        };
+      }
+      // Checkpoint still pending — do not advance.
+      context.checkpoint = matching;
+      return {
+        state: { status: 'checkpoint', checkpointId: matching.id },
+        context,
+      };
+    }
+    if (matching && matching.status === 'rejected') {
+      await options.checkpointStore.remove(matching.id);
+      context.checkpoint = matching;
+      return {
+        state: { status: 'vetoed', prNumber: prState.prNumber },
+        context,
+      };
+    }
+    // Approved: clear the checkpoint and proceed with the veto window.
+    if (matching && matching.status === 'approved') {
+      await options.checkpointStore.remove(matching.id);
+      context.checkpoint = { ...matching, status: 'approved' };
+    }
+  }
 
   let updated: PRStateT;
   try {
@@ -319,3 +381,17 @@ export async function resumeAfterVeto(options: ResumeOptions): Promise<LoopOutco
   }
   return { state: { status: 'merged', prNumber: updated.prNumber }, context };
 }
+
+// ============================================================================
+// resolveCheckpoint — re-exported from checkpoint.ts for convenience.
+// ============================================================================
+
+export type ResolveCheckpointOptions = {
+  checkpointId: string;
+  action: 'approve' | 'reject';
+  reviewerNotes?: string;
+  store: import('./checkpoint').CheckpointStore;
+  now?: Date;
+};
+
+export { resolveCheckpoint };

@@ -110,6 +110,7 @@ import path from 'node:path';
 import yaml from 'yaml';
 
 export const BUSINESS_PROFILES_DIR = 'data/business-profiles';
+export const DEFAULT_CHECKPOINTS_DIR = 'data/business-profiles';
 
 export class BusinessProfileError extends Error {
   constructor(message: string) {

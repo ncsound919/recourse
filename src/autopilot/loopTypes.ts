@@ -263,23 +263,32 @@ export const FitnessDelta = z.object({
 export type FitnessDeltaT = z.infer<typeof FitnessDelta>;
 
 // ============================================================================
-// Loop state machine
+// Checkpoint schema for interactive veto / manual review pauses
 // ============================================================================
 
-export const LoopStatus = z.enum([
-  'idle',
-  'auditing',
-  'analyzing',
-  'generating',
-  'gating',
-  'pr_open',
-  'veto_wait',
-  'merged',
-  'vetoed',
-  'error',
+export const CheckpointStatus = z.enum([
+  'pending',
+  'approved',
+  'rejected',
+  'expired',
 ]);
-export type LoopStatusT = z.infer<typeof LoopStatus>;
+export type CheckpointStatusT = z.infer<typeof CheckpointStatus>;
 
+export const Checkpoint = z.object({
+  id: z.string(),
+  profileSlug: z.string(),
+  prNumber: z.number(),
+  proposalId: z.string(),
+  status: CheckpointStatus,
+  createdAt: z.string().datetime(),
+  expiresAt: z.string().datetime().optional(),
+  reviewerNotes: z.string().optional(),
+  approvedAt: z.string().datetime().optional(),
+  rejectedAt: z.string().datetime().optional(),
+});
+export type CheckpointT = z.infer<typeof Checkpoint>;
+
+// Add checkpoint state to LoopState
 export type LoopState =
   | { status: 'idle' }
   | { status: 'auditing' }
@@ -288,14 +297,17 @@ export type LoopState =
   | { status: 'gating'; proposalId: string }
   | { status: 'pr_open'; prNumber: number }
   | { status: 'veto_wait'; prNumber: number; deadline: string }
+  | { status: 'checkpoint'; checkpointId: string }
   | { status: 'merged'; prNumber: number }
   | { status: 'vetoed'; prNumber: number }
   | { status: 'error'; reason: string };
 
+// Extend LoopContext with checkpoint data
 export interface LoopContext {
   profileSlug: string;
   scorecard: BusinessScorecardT | null;
   queue: UpgradeQueueT | null;
   currentProposal: UpgradeProposalT | null;
   prState: PRStateT | null;
+  checkpoint: CheckpointT | null;
 }

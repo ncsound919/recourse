@@ -6,7 +6,14 @@
 import crypto from 'crypto';
 import { chatComplete, extractJsonBlock } from '../lib/modelProvider';
 import { lintSource } from '../lib/lintGate';
+import {
+  avoidGuidance,
+  biasWeightForGene,
+  episodeFromMutation,
+  fingerprintForMutation,
+} from './failureBias';
 import type {
+  EvolveMemory,
   GeneStatus,
   MutationCandidate,
   MutationOutcome,
@@ -397,15 +404,28 @@ Return ONLY valid JSON: {"description": "...", "source": "<the full javascript s
 
 export async function evolveGene(
   store: GeneRegistryStore,
-  params: { domain: ToolDomain; instructions: string; targetToolName?: string },
+  params: { domain: ToolDomain; instructions: string; targetToolName?: string; memory?: EvolveMemory },
 ): Promise<MutationResult> {
   const currentGen = ++globalGeneration;
   let candidate: MutationCandidate | null = null;
   let engine: 'local_model' | 'deterministic_fallback' = 'deterministic_fallback';
 
+  // Failure-memory steering: attach similar past failures as avoid-guidance.
+  // Guidance only — synthesis is never blocked, so the epsilon exploration
+  // floor from failureMemory holds by construction.
+  const fingerprint = params.memory
+    ? fingerprintForMutation(params.domain, params.instructions, params.targetToolName)
+    : undefined;
+  const avoidLines = params.memory && fingerprint
+    ? avoidGuidance(params.memory.episodes, fingerprint, { maxLines: params.memory.maxAvoidLines })
+    : [];
+  const guidedInstructions = avoidLines.length > 0
+    ? `${params.instructions}\n\nPast failures to avoid on similar problems:\n${avoidLines.map((l) => `- ${l}`).join('\n')}`
+    : params.instructions;
+
   // Prefer the configured open-source model provider.
   try {
-    candidate = await synthesizeWithLocalModel(params.domain, params.instructions, params.targetToolName);
+    candidate = await synthesizeWithLocalModel(params.domain, guidedInstructions, params.targetToolName);
     if (candidate) {
       engine = 'local_model';
     } else {
@@ -419,7 +439,7 @@ export async function evolveGene(
     if (process.env.ALLOW_DETERMINISTIC_FALLBACK === '0') {
       throw new Error('model provider offline and deterministic fallback disabled (ALLOW_DETERMINISTIC_FALLBACK=0)');
     }
-    candidate = synthesizeFallback(params.domain, params.instructions, params.targetToolName);
+    candidate = synthesizeFallback(params.domain, guidedInstructions, params.targetToolName);
     engine = 'deterministic_fallback';
   }
 
@@ -465,6 +485,34 @@ export async function evolveGene(
 
   await store.save(newGene);
 
+  // Failure-memory accounting: hand the caller a recordable episode so future
+  // rounds can steer away from this outcome when it was a loss.
+  let memory: MutationResult['memory'];
+  if (params.memory && fingerprint) {
+    const verified = verifierResult.verified;
+    memory = {
+      fingerprint,
+      avoidedCount: avoidLines.length,
+      ...(params.targetToolName
+        ? {
+            biasWeight: biasWeightForGene(
+              params.memory.episodes,
+              params.targetToolName.replace(/[^a-zA-Z0-9_$]/g, '_'),
+              params.memory.bias,
+            ),
+          }
+        : {}),
+      episode: episodeFromMutation({
+        fingerprint,
+        toolName: candidate.toolName,
+        geneIds: [newGene.id],
+        outcome: verified ? 'win' : 'loss',
+        score: verified ? 1 : 0,
+        summary: candidate.description,
+      }),
+    };
+  }
+
   return {
     success: verifierResult.verified,
     outcome,
@@ -475,6 +523,7 @@ export async function evolveGene(
     verifierResult,
     geneId,
     engine,
+    ...(memory ? { memory } : {}),
   };
 }
 
