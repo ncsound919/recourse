@@ -112,7 +112,9 @@ Three linked gaps:
 
 ## 5. Workstream B — Music-Therapy Tuning-Contrast Research Layer
 
-### B.1 New `src/lib/musicTherapyTuning.ts`
+### B.1 Extend `src/lib/musicTherapyTuning.ts` (already wired to `/tuning` + publish path)
+
+> Pre-execution note: an earlier session built a working coarse tuning layer (3-metric contrast, benchmark, caveats, publish path). This section EXTENDS it additively — every existing export and behavior is preserved; the seeded per-trial records and 12-parameter detailed contrast are added alongside.
 
 **Seeded head-to-head evidence** (real published records, tuned-source attributed, no
 fabrication). Shape:
@@ -195,8 +197,7 @@ readout.
 
 ### B.3 Server routes
 
-- New `GET /api/recourse/music-therapy/tuning` → `{ success, source, records, contrast:
-  { 432, 440, 443, 415 }, benchmark, caveats, honestNote }`.
+- Extend the existing `GET /api/recourse/music-therapy/tuning` (do not duplicate it) → `{ success, source, grid, contrasts, detailedContrast, records, benchmark, benchmarkRows, benchmarkNote, caveats, render, report, honestNote }`.
 - `POST /api/recourse/music-therapy/design` response: each trial gains `tuningContrast`
   and `tuningNote`.
 
@@ -262,8 +263,11 @@ Tab relabeled **AI PROVIDER**. Content:
 
 ## 9. File Inventory
 
-**New:** `src/lib/musicTherapyTuning.ts`, `src/components/MusicTherapyView.tsx`,
+**New:** `src/components/MusicTherapyView.tsx`,
 `src/components/ProviderView.tsx`, `tests/musicTherapyTuning.test.ts`.
+
+**Extended (pre-existing, additive only):** `src/lib/musicTherapyTuning.ts`
+(seeded records + detailed contrast alongside the existing 3-metric API).
 
 **Modified:** `src/lib/capabilityForge.ts`, `src/lib/vectorMemory.ts`,
 `src/lib/musicTherapyResearch.ts`, `src/dream/mutator.ts`, `src/dream/mutator-types.ts`,

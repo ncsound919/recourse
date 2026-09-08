@@ -14,6 +14,24 @@
 
 ---
 
+## ADDENDUM (2026-09-07, pre-execution): Pre-existing tuning layer — EXTEND, DO NOT REPLACE
+
+Plan verification discovered an earlier session already built and wired a working tuning layer:
+
+- `src/lib/musicTherapyTuning.ts` exports `TuningHz`, `TUNING_GRID`, `TuningMetric`, `TuningContrast`, `tuningContrastModel(hz)`, `benchmarkComparison()`, `TUNING_CAVEATS` (7 items), `renderTuningContrast()` — consumed by `server.ts` (static import + `GET /api/recourse/music-therapy/tuning`), `src/lib/musicTherapyFindings.ts`, and `tests/musicTherapyPublish.test.ts` (asserts HR −2 @432 significant, PWV −0.5, 415 untested, benchmark values).
+
+RULE: preserve every existing export and behavior. `tests/musicTherapyPublish.test.ts` must keep passing UNMODIFIED. All additions are ADDITIVE (no export-name collisions exist).
+
+Supersessions (this addendum wins on any conflict with the task text below):
+
+- Task 1: EXTEND the existing module — append the new exports; prepend ONE small-samples string to the existing `TUNING_CAVEATS` array (it becomes 8 items). Do NOT create, replace, or redefine the file or any existing export. Task 1 Step 2's expected failure is a missing-export error (`TUNING_RECORDS`), not a missing module.
+- Task 2: the detailed model is named `tuningContrastDetailed(tuningHz: number, comparator: TuningComparator = '443'): TuningContrastResult[]` — NOT `tuningContrastModel`, which already exists with a different 3-metric shape. Task 2 Step 2's expected failure is `tuningContrastDetailed is not a function`.
+- Task 3: import and call `tuningContrastDetailed` (not `tuningContrastModel`); everything else in Task 3 stands.
+- Task 4 Step 1: the `/tuning` route ALREADY EXISTS (find it by the comment `// --- Music Therapy Tuning Contrast ---`). EXTEND its `res.json` with `detailedContrast` (432/440/443/415 via `tuningContrastDetailed`), `records: TUNING_RECORDS`, `benchmarkRows: musicVsControlBenchmark()`, `benchmarkNote: BENCHMARK_NOTE`, `report: renderTuningSummary(...)`, and extend the existing static import at the top of `server.ts` — do NOT register a second route. Task 4 Step 2 (`/design` gains `tuningContrast`/`tuningNote`) is unchanged and still new work.
+- Task 9 `loadTuning`: read `j.detailedContrast` (not `j.contrast`), `j.records`, `j.benchmarkRows` (not `j.benchmark.rows`), `j.benchmarkNote` (not `j.benchmark.note`), `j.caveats`.
+
+---
+
 ## File Map
 
 **New files:**
