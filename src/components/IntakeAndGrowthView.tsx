@@ -2,16 +2,12 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   Radio,
   Zap,
-  TrendingUp,
   Globe,
   Database,
   BrainCircuit,
-  Play,
   ShieldCheck,
   Clock,
-  ChevronRight,
   BookOpen,
-  Terminal,
   BarChart3,
   RefreshCw,
 } from 'lucide-react';
@@ -35,18 +31,6 @@ interface BenchmarkState {
   lastRun: { at: number; solved: number; total: number; solvedIds: string[] } | null;
 }
 
-interface Signal {
-  id: string;
-  source: string;
-  title: string;
-  summary: string;
-  url: string;
-  fetchedAt: number;
-  consumed: boolean;
-  groundedTool?: string;
-  topics: string[];
-}
-
 interface IntakeAndGrowthViewProps {
   onNotify?: (msg: string) => void;
 }
@@ -54,7 +38,6 @@ interface IntakeAndGrowthViewProps {
 export const IntakeAndGrowthView: React.FC<IntakeAndGrowthViewProps> = ({ onNotify }) => {
   const [intake, setIntake] = useState<IntakeState | null>(null);
   const [benchmark, setBenchmark] = useState<BenchmarkState | null>(null);
-  const [signals, setSignals] = useState<Signal[]>([]);
   const [modelOnline, setModelOnline] = useState<boolean | null>(null);
   const [readout, setReadout] = useState<string | null>(null);
   const [polling, setPolling] = useState(false);
@@ -63,7 +46,7 @@ export const IntakeAndGrowthView: React.FC<IntakeAndGrowthViewProps> = ({ onNoti
   const [readoutLoading, setReadoutLoading] = useState(false);
   const [pollResults, setPollResults] = useState<Array<{ source: string; ok: boolean; count: number; error?: string }>>([]);
   const [lastGroundResult, setLastGroundResult] = useState<{ grounded: boolean; toolName?: string; reason?: string; signalTitle?: string } | null>(null);
-  const [pollStart, setPollStart] = useState<number | null>(null);
+  const [_pollStart, setPollStart] = useState<number | null>(null);
   const [pollDuration, setPollDuration] = useState<number | null>(null);
   const [groundDuration, setGroundDuration] = useState<number | null>(null);
   const [autopilotOn, setAutopilotOn] = useState(false);
@@ -186,7 +169,7 @@ export const IntakeAndGrowthView: React.FC<IntakeAndGrowthViewProps> = ({ onNoti
     { key: 'rss', label: 'RSS Feeds', color: 'text-blue-400', bg: 'bg-blue-950 border-blue-800', icon: '◎' },
   ];
 
-  const getSourceColor = (ok: boolean) => ok ? 'text-emerald-400' : 'text-red-400';
+  const _getSourceColor = (ok: boolean) => ok ? 'text-emerald-400' : 'text-red-400';
 
   return (
     <div className="space-y-6">

@@ -8,7 +8,7 @@ import {
   type BusinessProfileT,
 } from '../src/autopilot/businessProfile';
 import type { AuditAdapter } from '../src/autopilot/auditRunner';
-import { resolveCheckpoint, resumeAfterVeto, runLoop } from '../src/autopilot/loopStateMachine';
+import { resumeAfterVeto, runLoop } from '../src/autopilot/loopStateMachine';
 import { FileCheckpointStore, buildCheckpoint } from '../src/autopilot/checkpoint';
 import { PRState, type GitHubClient, type PRStateT } from '../src/autopilot/loopTypes';
 

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Terminal, Play, CheckCircle2, XCircle, Code, ShieldCheck, Cpu, RefreshCw, Sparkles } from 'lucide-react';
+import { Terminal, Play, CheckCircle2, XCircle, RefreshCw } from 'lucide-react';
 import { ToolDomain, VerifierResult } from '../types';
 
 interface VerifierMatrixViewProps {

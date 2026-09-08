@@ -26,7 +26,7 @@ export async function pollAgentBrowserUrl(
       .trim();
     const title = (lines.slice(0, 120) || url).trim();
     const summary = lines.slice(0, 2000);
-    const topics = title.toLowerCase().split(/[\s,_\-]+/).filter((w) => w.length > 3).slice(0, 8);
+    const topics = title.toLowerCase().split(/[\s,_-]+/).filter((w) => w.length > 3).slice(0, 8);
     const signal = makeSignal('agentbrowser', url, title, summary, topics);
     return { signals: [signal], result: { source: 'agentbrowser', ok: true, count: 1 } };
   } catch (err: any) {

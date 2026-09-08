@@ -103,8 +103,8 @@ const CODE_EXT = /\.(ts|tsx|js|jsx|mjs|cjs)$/i;
 function scorePath(p: string): number {
   const lower = p.toLowerCase();
   let s = 0;
-  if (/^src\//.test(lower)) s += 3;
-  if (/^lib\//.test(lower)) s += 2;
+  if (lower.startsWith('src/')) s += 3;
+  if (lower.startsWith('lib/')) s += 2;
   if (/index\.(ts|js)$/.test(lower)) s += 2;
   if (/\.(ts|js)$/.test(lower)) s += 1;
   return s;

@@ -114,3 +114,51 @@ describe('capability adoption picker', () => {
     expect(owningGeneScore(entry, [])).toBeNull();
   });
 });
+
+describe('verification-depth tiebreaker (R6)', () => {
+  const forgeCap: CapabilityDef = {
+    id: 'dedupe',
+    label: 'Stable array deduplication',
+    backableTemplateId: 'capability_forge',
+    method: 'dedupeStable',
+    args: (ctx: { items: unknown[] }) => [ctx.items],
+    builtin: (ctx: { items: unknown[] }) => [...new Set(ctx.items.map((x) => String(x)))],
+  };
+
+  it('prefers the deeper-verified candidate when scores tie', () => {
+    const shallow = shEntry({ name: 'd1', templateId: 'capability_forge', methods: [{ method: 'dedupeStable', label: 'd' }], lastVerified: { passed: true, detail: 'Module import OK' } });
+    const deep = shEntry({ name: 'd2', templateId: 'capability_forge', methods: [{ method: 'dedupeStable', label: 'd' }], lastVerified: { passed: true, detail: 'Module import OK + 7 stored assertions green' } });
+    const g1 = gene({ name: 'd1' });
+    const g2 = gene({ name: 'd2' });
+    g1.versions[0].score = 1;
+    g2.versions[0].score = 1;
+    const backing = selectBestBacking(forgeCap, [shallow, deep], [g1, g2]);
+    expect(backing.source).toBe('selfhosted');
+    expect(backing.toolName).toBe('d2'); // deeper verify wins the tie
+  });
+
+  it('adopts a forge-template tool for the dedupe capability', () => {
+    const entry = shEntry({
+      name: 'dedupeStable',
+      templateId: 'capability_forge',
+      methods: [{ method: 'dedupeStable', label: 'dedupe' }],
+      lastVerified: { passed: true, detail: 'Module import OK + 4 stored assertions green' },
+    });
+    const g = gene({ name: 'dedupeStable' });
+    g.versions[0].score = 0.95;
+    const backing = selectBestBacking(forgeCap, [entry], [g]);
+    expect(backing.source).toBe('selfhosted');
+    expect(backing.toolName).toBe('dedupeStable');
+  });
+
+  it('falls back to builtin when the forge tool lacks the capability method', () => {
+    const entry = shEntry({
+      name: 'chunkArray',
+      templateId: 'capability_forge',
+      methods: [{ method: 'chunkArray', label: 'chunk' }], // wrong method
+      lastVerified: { passed: true, detail: 'ok' },
+    });
+    const backing = selectBestBacking(forgeCap, [entry], [gene({ name: 'chunkArray' })]);
+    expect(backing.source).toBe('builtin');
+  });
+});

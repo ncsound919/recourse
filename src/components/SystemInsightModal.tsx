@@ -95,7 +95,7 @@ function timeAgo(ts?: number): string {
   return `${Math.floor(secs / 86400)}d ago`;
 }
 
-function fmtClock(ts?: number): string {
+function _fmtClock(ts?: number): string {
   if (!ts) return '—';
   return new Date(ts).toLocaleTimeString();
 }

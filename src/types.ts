@@ -71,12 +71,14 @@ export type ProvenanceEventType =
   | 'intake_brain'
   | 'corpus_scanned'
   | 'corpus_dispatched'
+  | 'corpus_refilled'
   | 'skill_catalog_scanned'
   | 'skill_exported'
   | 'skill_imported'
   | 'selfuse_mismatch'
   | 'selfuse_error'
-  | 'benchmark_run';
+  | 'benchmark_run'
+  | 'global_lens_publish';
 
 export interface ProvenanceEvent {
   prev: string;

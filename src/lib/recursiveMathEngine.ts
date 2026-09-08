@@ -18,8 +18,7 @@ import type {
   SchrodingerEvolution,
   BellmanValue,
   BayesianUpdate,
-  ChainRuleGradient,
-  CoreArchitecture
+  ChainRuleGradient
 } from '../types';
 
 export const DEFAULT_LOOP_CONFIG: RecursiveLoopParameters = {
@@ -394,7 +393,7 @@ export function computeChainRuleGradient(
   weights: number[],
   input: number,
   target: number,
-  eta: number = 0.1
+  _eta: number = 0.1
 ): ChainRuleGradient {
   // Simple forward pass: h1 = x*w1, h2 = h1*w2, y = h2*w3
   const h1 = input * weights[0];
@@ -452,7 +451,7 @@ export function createInitialLoopState(
   const derivative = computeDerivativeUpdate(
     initialParams,
     config.targetInvariantVector,
-    new Array(N).fill(0),
+    Array.from({ length: N }, () => 0),
     config.learningRateEta,
     config.momentumMu
   );

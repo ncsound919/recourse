@@ -156,7 +156,7 @@ export const PPQ = 480;
 export function beatsToTicks(beats: number): number {
   return Math.round(beats * PPQ);
 }
-export function barTicks(bpm: number): number {
+export function barTicks(_bpm: number): number {
   return Math.round(4 * PPQ);
 }
 /** MIDI microseconds-per-quarter for a tempo (SMF tempo meta). */

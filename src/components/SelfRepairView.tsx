@@ -10,11 +10,6 @@ import {
   RefreshCw,
   Cpu,
   ShieldAlert,
-  ArrowRight,
-  Code2,
-  Atom,
-  Lock,
-  Binary,
   Clock,
   ShieldCheck,
   Sparkles

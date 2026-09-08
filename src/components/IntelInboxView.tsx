@@ -5,7 +5,6 @@ import {
   RefreshCw,
   ArrowUpDown,
   CheckCircle,
-  XCircle,
   ExternalLink,
   Tag,
   AlertCircle,
@@ -42,12 +41,6 @@ interface IntelProposal {
   status: ProposalStatus;
   adoptedSpecId?: string;
   adoptedAt?: number;
-}
-
-interface IntelSnapshot {
-  proposals: IntelProposal[];
-  top: IntelProposal | null;
-  agendaSize: number;
 }
 
 interface IntelView {

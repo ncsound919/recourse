@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ShieldCheck, ShieldAlert, GitCommit, Search, Code, CheckCircle, XCircle, Clock, AlertCircle, Sparkles } from 'lucide-react';
+import { ShieldCheck, ShieldAlert, GitCommit, Search, Code, Clock } from 'lucide-react';
 import { ProvenanceEvent, ChainVerificationResult } from '../types';
 
 interface ProvenanceTimelineProps {

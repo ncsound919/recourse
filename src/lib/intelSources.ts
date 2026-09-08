@@ -3,7 +3,7 @@
  * ecosystem intel that feeds Recourse's invention proposals.
  */
 import { callDevBrain } from './fleetDevelopment';
-import type { IntelIdea, IntelProposal, IntelSourceId, IntelSourceStatus } from './intelInvention';
+import type { IntelIdea, IntelProposal, IntelSourceStatus } from './intelInvention';
 
 function bbtchConfig() {
   return {

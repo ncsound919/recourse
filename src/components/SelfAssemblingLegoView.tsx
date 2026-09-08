@@ -2,33 +2,24 @@
 // Visualizer and interactive workbench for the 5 Layers of Self-Assembling Learning Systems.
 
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Layers, 
-  Cpu, 
-  Sparkles, 
-  ShieldCheck, 
-  GitBranch, 
-  RefreshCw, 
-  Play, 
-  CheckCircle2, 
-  AlertTriangle, 
-  Clock, 
-  Terminal, 
-  Binary, 
-  ArrowRight, 
-  Compass, 
-  Zap, 
-  Maximize2,
+import {
+  ShieldCheck,
+  GitBranch,
+  RefreshCw,
+  Play,
+  CheckCircle2,
+  AlertTriangle,
+  Terminal,
+  ArrowRight,
+  Compass,
+  Zap,
   Box,
   Puzzle,
   Network
 } from 'lucide-react';
-import type { 
-  LegoSystemState, 
-  BrickOperator, 
-  StudContract, 
-  AssembledDAG,
-  BenchmarkReport 
+import type {
+  LegoSystemState,
+  BrickOperator
 } from '../lego/types';
 import { validateStudConnection } from '../lego/contracts';
 

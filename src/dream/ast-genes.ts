@@ -128,6 +128,7 @@ function replaceNode(node: IrNode, target: IrNode, replacement: IrNode): IrNode 
     case 'cond': return {
       ...node,
       test: replaceNode(node.test, target, replacement),
+      // oxlint-disable-next-line unicorn/no-thenable -- `then` is the IrNode conditional-arm field, not a promise thenable
       then: replaceNode(node.then, target, replacement),
       else: replaceNode(node.else, target, replacement),
     };
@@ -335,7 +336,9 @@ function randomExpr(fields: FieldSpec[], rng: () => number, depth: number, kind:
   switch (Math.floor(rng() * 7)) {
     case 0: return { t: 'bin', op: pickT(rng, ARITH_OPS), a: randomExpr(fields, rng, depth - 1, 'number'), b: randomExpr(fields, rng, depth - 1, 'number') };
     case 1: return { t: 'un', op: '-', a: randomExpr(fields, rng, depth - 1, 'number') };
-    case 2: return { t: 'cond', test: randomExpr(fields, rng, depth - 1, 'number'), then: randomExpr(fields, rng, depth - 1, 'number'), else: randomExpr(fields, rng, depth - 1, 'number') };
+    case 2:
+      // oxlint-disable-next-line unicorn/no-thenable -- `then` is the IrNode conditional-arm field, not a promise thenable
+      return { t: 'cond', test: randomExpr(fields, rng, depth - 1, 'number'), then: randomExpr(fields, rng, depth - 1, 'number'), else: randomExpr(fields, rng, depth - 1, 'number') };
     case 3: return { t: 'call', fn: pickT(rng, ONE_ARG_FNS), args: [randomExpr(fields, rng, depth - 1, 'number')] };
     case 4: return { t: 'call', fn: rng() < 0.5 ? 'Math.max' : 'Math.min', args: [randomExpr(fields, rng, depth - 1, 'number'), randomExpr(fields, rng, depth - 1, 'number')] };
     case 5: return { t: 'len', arr: randomExpr(fields, rng, Math.min(depth - 1, 1), 'array') };
@@ -397,7 +400,7 @@ export function mutateIr(spec: GeneIrSpec, rng: () => number): GeneIrSpec {
       if (mutated) return mutated;
     }
   } else {
-    const target = pickNode((n): n is IrNode => true);
+    const target = pickNode((_n): _n is IrNode => true);
     if (target) {
       const regrown = randomExpr(spec.fields, rng, 3, kindOf(target));
       const mutated = trySpec(replaceNode(spec.body, target, regrown));

@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  mapKaggleItems,
-  mapNewsItems,
   pollBrainKaggle,
   pollBrainNews,
   toKaggleSignal,

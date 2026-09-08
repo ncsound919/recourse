@@ -30,13 +30,15 @@ describe('model provider profile switching', () => {
   it('defaults to the api profile and lists both profiles', () => {
     expect(activeProviderProfile()).toBe('api');
     const ps = providerProfiles();
-    expect(ps.map((p) => p.id)).toEqual(['local', 'api']);
+    expect(ps.map((p) => p.id)).toEqual(['api', 'local']);
     const api = ps.find((p) => p.id === 'api')!;
     expect(api.baseUrl).toBe('https://api.example.test/v1');
     expect(api.model).toBe('api-model');
+    expect(api.label).toBe('Phoenix Grove');
     const local = ps.find((p) => p.id === 'local')!;
     expect(local.baseUrl).toBe('http://localhost:11434/v1');
     expect(local.model).toBe('qwen-local');
+    expect(local.label).toBe('Local (disabled)');
   });
 
   it('switches the live provider endpoint between local and api', () => {

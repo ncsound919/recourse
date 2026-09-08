@@ -73,7 +73,7 @@ function toneRow(chord: Chord, octave: number): number[] {
 }
 
 /** 16-step groove rows for the drum layers (GM notes). */
-function drumRows(): Record<string, SeqCell[]> {
+function _drumRows(): Record<string, SeqCell[]> {
   const out: Record<string, SeqCell[]> = {};
   out.kick = emptyRow();
   out.snare = emptyRow();

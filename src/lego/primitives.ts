@@ -2,37 +2,8 @@
 // Curated atomic, independently trainable, pure & deterministic operators.
 
 import { Value } from '../dream/autograd';
-import { BrickOperator, BrickCategory } from './types';
+import { BrickOperator } from './types';
 import { STANDARD_STUDS } from './contracts';
-
-// ============================================================================
-// Helper: Pure Matrix Multiplication with Autograd Values
-// ============================================================================
-
-function matmulValues(A: Value[][], B: Value[][]): Value[][] {
-  const rowsA = A.length;
-  const colsA = A[0].length;
-  const rowsB = B.length;
-  const colsB = B[0].length;
-
-  if (colsA !== rowsB) {
-    throw new Error(`Dimension mismatch in MatMul: A[${rowsA}x${colsA}] vs B[${rowsB}x${colsB}]`);
-  }
-
-  const result: Value[][] = [];
-  for (let r = 0; r < rowsA; r++) {
-    const rowOut: Value[] = [];
-    for (let c = 0; c < colsB; c++) {
-      let sum: Value = new Value(0);
-      for (let k = 0; k < colsA; k++) {
-        sum = sum.add(A[r][k].mul(B[k][c]));
-      }
-      rowOut.push(sum);
-    }
-    result.push(rowOut);
-  }
-  return result;
-}
 
 // ============================================================================
 // Brick 1: Dense Projection & Non-linear Transform (MLP)

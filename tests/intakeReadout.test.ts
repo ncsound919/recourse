@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildDevelopmentReadout } from '../src/intake/readout';
 import type { ReadoutContext } from '../src/intake/readout';
-import { makeSignal } from '../src/intake/util';
 import { BENCHMARK_PROBLEMS } from '../src/benchmark/benchmark';
 
 function ctx(): ReadoutContext {
@@ -30,7 +29,6 @@ function ctx(): ReadoutContext {
     registry: [{ name: 'a', domain: 'math', entrypoint: '', description: '', currentVersion: '1', healthStatus: 'healthy', versions: [] }],
     provenanceEvents: [{ prev: '0', hash: '1', type: 'tool_promoted', ts: 1, data: {} }, { prev: '1', hash: '2', type: 'signal_grounded', ts: 2, data: {} }],
     intake: (() => {
-      const sig = makeSignal('arxiv', 'https://arxiv.org/abs/1', 'A paper', 'abs', ['math']);
       return {
         total: 1,
         unconsumed: 0,

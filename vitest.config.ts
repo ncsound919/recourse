@@ -7,6 +7,10 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
+    // Real service probes in science/orchestrator tests need room under
+    // full-suite parallel load (vitest default 5s was flaky).
+    testTimeout: 30000,
+    hookTimeout: 30000,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],

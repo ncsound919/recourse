@@ -65,7 +65,6 @@ export function renderUpgradeReport(opts: {
 }): string {
   const d = diffSnapshots(opts.before, opts.after);
   const lines: string[] = [];
-  const pos = (x: number) => x > 0;
   const anyGain =
     d.registryTools.delta > 0 ||
     d.liveSelfHosted.delta > 0 ||

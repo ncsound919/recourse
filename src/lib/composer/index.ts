@@ -5,10 +5,10 @@
  */
 import type { ComposeBrief, Track } from './types.js';
 import { compose, listStyles } from './composer.js';
-import { encodeToSeq, seqToJson, type SeqV2 } from './encode/seq.js';
+import { encodeToSeq, type SeqV2 } from './encode/seq.js';
 import { toMidiBytes } from './encode/midi.js';
 import { pcName } from './theory.js';
-import { ComposerLearner, defaultLearnerFile } from './learner.js';
+import { ComposerLearner } from './learner.js';
 
 export { compose, composeArrangement, listStyles } from './composer.js';
 export { toMidiBytes } from './encode/midi.js';

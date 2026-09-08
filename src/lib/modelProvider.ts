@@ -1,9 +1,10 @@
 /**
- * Model Provider — an OpenAI-compatible chat-completions client.
+ * Model Provider — single-provider OpenAI-compatible chat-completions client.
  *
- * Targets any local/remote endpoint that speaks the OpenAI protocol:
- * Ollama (`http://localhost:11434/v1`), llama.cpp server, LM Studio,
- * vLLM, etc. Configured purely through environment variables.
+ * Phoenix Grove (https://api.pgsgrove.com/v1, model deepseek-v4-flash-0731)
+ * is the sole generation target. The 'local' profile is preserved as an
+ * option that reports offline when no LOCAL_MODEL_BASE_URL is set — there
+ * is no in-process local model, the operator's CPU is too weak.
  *
  * Honesty contract: when the endpoint is unreachable this module reports
  * `online: false` with the underlying error. It NEVER fabricates a response,
@@ -17,8 +18,6 @@ export interface ProviderConfig {
   model: string;
   apiKey: string;
   requestTimeoutMs: number;
-  /** True when the endpoint is an Ollama instance (native /api/chat API). */
-  nativeOllama: boolean;
   numCtx: number;
   thinking: boolean;
 }
@@ -30,8 +29,6 @@ export interface ChatMessage {
 
 export interface ChatCompleteOptions {
   temperature?: number;
-  /** Ask the model to return strict JSON (via prompt instruction; not all
-   *  local servers support response_format enforcement). */
   json?: boolean;
 }
 
@@ -45,9 +42,7 @@ export interface ChatCompleteResult {
 }
 
 /** Strip markdown fences and pull the first JSON object/array out of a model
- *  response. Local reasoning models often add a "thinking" preamble around the
- *  actual JSON, so we locate the outermost `{...}`/`[...]` block rather than
- *  requiring a clean payload. */
+ *  response. */
 export function extractJsonBlock(content: string | null | undefined): string | null {
   if (!content) return null;
   let text = content.replace(/```(?:json)?/gi, '').trim();
@@ -84,41 +79,45 @@ export interface ProviderStatus {
   checkedAt?: number;
 }
 
+/** Single active profile id — always 'api'. The 'local' option remains
+ *  exposed so the UI does not crash, but it reports offline when no
+ *  LOCAL_MODEL_BASE_URL is configured. */
 export type ProviderProfileId = 'local' | 'api';
 
-/* Active provider profile — 'local' (Ollama) or 'api' (remote LLM API). The
- * default is 'api' so un-configured installs behave exactly as before. The
- * switch is a runtime branch (not env mutation): every readConfig() call honors
- * it, so generative features (dream/swarm/chat) pick up the change immediately.
- * The server persists the choice and reapplies it at boot. */
 let activeProvider: ProviderProfileId = 'api';
+
+const onlineCache: Record<ProviderProfileId, { online: boolean | null; at: number; error: string | undefined }> = {
+  local: { online: null, at: 0, error: undefined },
+  api: { online: null, at: 0, error: undefined },
+};
+const STATUS_TTL_MS = 5000;
 
 function profileFor(id: ProviderProfileId): { baseUrl: string; model: string; apiKey: string; numCtx: number; thinking: boolean } {
   if (id === 'local') {
+    const localUrl = (process.env.LOCAL_MODEL_BASE_URL || '').replace(/\/+$/, '');
+    if (!localUrl) {
+      return { baseUrl: '', model: '', apiKey: '', numCtx: 0, thinking: false };
+    }
     return {
-      baseUrl: (process.env.LOCAL_MODEL_BASE_URL || 'http://localhost:11434/v1').replace(/\/+$/, ''),
-      model: process.env.LOCAL_MODEL_NAME || 'qwen3.8-4b-distill:q4_k_m',
-      apiKey: process.env.LOCAL_MODEL_API_KEY || 'ollama',
+      baseUrl: localUrl,
+      model: process.env.LOCAL_MODEL_NAME || 'unconfigured',
+      apiKey: process.env.LOCAL_MODEL_API_KEY || '',
       numCtx: Number(process.env.LOCAL_MODEL_NUM_CTX || process.env.MODEL_NUM_CTX || 4096),
       thinking: (process.env.LOCAL_MODEL_THINKING ?? process.env.MODEL_THINKING) === '1',
     };
   }
   return {
-    baseUrl: (process.env.API_MODEL_BASE_URL || process.env.MODEL_BASE_URL || process.env.OLLAMA_BASE_URL || 'http://localhost:11434/v1').replace(/\/+$/, ''),
-    model: process.env.API_MODEL_NAME || process.env.MODEL_NAME || 'qwen3.8-4b-distill:q4_k_m',
-    apiKey: process.env.API_MODEL_API_KEY || process.env.MODEL_API_KEY || 'ollama',
+    baseUrl: (process.env.API_MODEL_BASE_URL || process.env.MODEL_BASE_URL || 'https://api.pgsgrove.com/v1').replace(/\/+$/, ''),
+    model: process.env.API_MODEL_NAME || process.env.MODEL_NAME || 'deepseek-v4-flash-0731',
+    apiKey: process.env.API_MODEL_API_KEY || process.env.MODEL_API_KEY || '',
     numCtx: Number(process.env.MODEL_NUM_CTX || 4096),
     thinking: process.env.MODEL_THINKING === '1',
   };
 }
 
-/** Set the active provider profile ('local' | 'api'). Resets the online cache so
- *  the next probe hits the newly selected endpoint. Returns the applied id. */
 export function setActiveProviderProfile(id: ProviderProfileId): ProviderProfileId {
   activeProvider = id === 'local' ? 'local' : 'api';
-  cachedOnline = null;
-  cachedAt = 0;
-  cachedError = undefined;
+  onlineCache[activeProvider] = { online: null, at: 0, error: undefined };
   return activeProvider;
 }
 
@@ -126,102 +125,57 @@ export function activeProviderProfile(): ProviderProfileId {
   return activeProvider;
 }
 
-/** Resolved descriptors for the UI (which endpoints each profile points at). */
+export type ChatRoute = 'local' | 'api' | 'auto';
+
+/** Always routes to 'api' — local generation is disabled. The 'auto' branch
+ *  remains in the type so existing call sites compile but always resolves to api. */
+export function pickProfileForRoute(
+  _route: ChatRoute,
+  _messages: ChatMessage[],
+  _explicit: ProviderProfileId = activeProvider,
+): ProviderProfileId {
+  return 'api';
+}
+
 export function providerProfiles(): Array<{ id: ProviderProfileId; label: string; baseUrl: string; model: string }> {
-  const l = profileFor('local');
   const a = profileFor('api');
+  const l = profileFor('local');
   return [
-    { id: 'local', label: 'Local (Ollama)', baseUrl: l.baseUrl, model: l.model },
-    { id: 'api', label: 'LLM API', baseUrl: a.baseUrl, model: a.model },
+    { id: 'api', label: 'Phoenix Grove', baseUrl: a.baseUrl, model: a.model },
+    { id: 'local', label: 'Local (disabled)', baseUrl: l.baseUrl || 'http://127.0.0.1:8091/v1', model: l.model || 'no local model' },
   ];
 }
 
-function readConfig(): ProviderConfig {
-  const p = profileFor(activeProvider);
-  const driver = process.env.MODEL_DRIVER;
-  const isOllamaHost =
-    activeProvider === 'local' || driver === 'ollama' || /(localhost|127\.0\.0\.1|\[::1\]):11434/i.test(p.baseUrl);
+function readConfig(profileId: ProviderProfileId = activeProvider): ProviderConfig {
+  const p = profileFor(profileId);
   return {
     kind: 'openai_compatible',
     baseUrl: p.baseUrl,
     model: p.model,
     apiKey: p.apiKey,
     requestTimeoutMs: Number(process.env.MODEL_TIMEOUT_MS || 60_000),
-    nativeOllama: isOllamaHost,
     numCtx: p.numCtx,
     thinking: p.thinking,
   };
 }
 
-/* Module-level online cache so the UI never hammers the endpoint. */
-let cachedOnline: boolean | null = null;
-let cachedAt = 0;
-let cachedError: string | undefined;
-const STATUS_TTL_MS = 5000;
-
-async function rawFetch(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/** Probe GET {base}/models. Cached for STATUS_TTL_MS. */
-export async function checkOnline(force = false): Promise<boolean> {
-  const now = Date.now();
-  if (!force && cachedOnline !== null && now - cachedAt < STATUS_TTL_MS) {
-    return cachedOnline;
-  }
-  const cfg = readConfig();
-  try {
-    const res = await rawFetch(`${cfg.baseUrl}/models`, { method: 'GET' }, 2000);
-    const ok = res.ok;
-    cachedOnline = ok;
-    cachedAt = now;
-    cachedError = ok ? undefined : `GET /models -> HTTP ${res.status}`;
-    return ok;
-  } catch (err: any) {
-    cachedOnline = false;
-    cachedAt = now;
-    cachedError = err?.message || 'unreachable';
-    return false;
-  }
-}
-
-export function providerStatus(): ProviderStatus {
-  const cfg = readConfig();
-  return {
-    kind: cfg.kind,
-    baseUrl: cfg.baseUrl,
-    model: cfg.model,
-    online: cachedOnline === true,
-    lastError: cachedError,
-    checkedAt: cachedOnline === null ? undefined : cachedAt,
-  };
-}
-
-/**
- * One chat completion against the OpenAI-compatible endpoint.
- * Returns a result object — it never throws for offline/HTTP conditions.
- */
-export async function chatComplete(
+async function chatCompleteFor(
+  profileId: ProviderProfileId,
   messages: ChatMessage[],
   opts: ChatCompleteOptions = {},
 ): Promise<ChatCompleteResult> {
-  const cfg = readConfig();
+  const cfg = readConfig(profileId);
   const started = Date.now();
 
-  const online = await checkOnline();
+  const online = await checkOnline(false, profileId);
   if (!online) {
+    const slot = onlineCache[profileId];
     return {
       ok: false,
       content: null,
       status: 'offline',
       model: cfg.model,
-      error: cachedError || 'model endpoint unreachable',
+      error: slot.error || 'model endpoint unreachable',
       latencyMs: Date.now() - started,
     };
   }
@@ -233,11 +187,9 @@ export async function chatComplete(
   };
   if (typeof opts.temperature === 'number') body.temperature = opts.temperature;
 
-  // Ollama native API: supports options (num_ctx, think) that the /v1 shim
-  // may ignore. Thinking models default to NO thinking for speed; enable with
-  // MODEL_THINKING=1.
   let endpoint = `${cfg.baseUrl}/chat/completions`;
-  if (cfg.nativeOllama) {
+  const isNativeOllama = cfg.baseUrl.includes(':11434') || cfg.baseUrl.includes('localhost') && !cfg.baseUrl.includes('v1');
+  if (isNativeOllama && cfg.baseUrl) {
     const nativeBase = cfg.baseUrl.replace(/\/v1$/, '');
     endpoint = `${nativeBase}/api/chat`;
     body.options = {
@@ -261,29 +213,31 @@ export async function chatComplete(
 
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      cachedError = `POST ${endpoint} -> HTTP ${res.status}: ${text.slice(0, 200)}`;
+      const errMsg = `POST ${endpoint} -> HTTP ${res.status}: ${text.slice(0, 200)}`;
+      onlineCache[profileId].error = errMsg;
       return {
         ok: false,
         content: null,
         status: 'error',
         model: cfg.model,
-        error: cachedError,
+        error: errMsg,
         latencyMs: Date.now() - started,
       };
     }
 
     const data: any = await res.json();
-    const content: string | null = cfg.nativeOllama
+    const isNativeOllama = cfg.baseUrl.includes(':11434') || (cfg.baseUrl.includes('localhost') && !cfg.baseUrl.includes('v1'));
+    const content: string | null = isNativeOllama && cfg.baseUrl
       ? (data?.message?.content ?? null)
       : (data?.choices?.[0]?.message?.content ?? null);
     if (typeof content !== 'string' || content.trim().length === 0) {
-      cachedError = 'model returned empty content';
+      onlineCache[profileId].error = 'model returned empty content';
       return {
         ok: false,
         content: null,
         status: 'error',
         model: cfg.model,
-        error: cachedError,
+        error: 'model returned empty content',
         latencyMs: Date.now() - started,
       };
     }
@@ -298,19 +252,118 @@ export async function chatComplete(
     };
   } catch (err: any) {
     const aborted = err?.name === 'AbortError';
-    // A timeout/abort is NOT an offline condition - the endpoint may simply be
-    // slow. Only network/HTTP failures flip the online cache to false.
     if (!aborted) {
-      cachedOnline = false;
-      cachedError = err?.message || 'request failed';
+      onlineCache[profileId].online = false;
+      onlineCache[profileId].error = err?.message || 'request failed';
     }
     return {
       ok: false,
       content: null,
       status: aborted ? 'error' : 'offline',
       model: cfg.model,
-      error: (aborted ? 'request timed out after ' + cfg.requestTimeoutMs + 'ms' : cachedError),
+      error: (aborted ? `request timed out after ${cfg.requestTimeoutMs}ms` : onlineCache[profileId].error),
       latencyMs: Date.now() - started,
     };
   }
+}
+
+async function rawFetch(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Probe GET {base}/models. Cached for STATUS_TTL_MS.
+ *  `profileId` defaults to the active profile; pass 'local' or 'api' to probe
+ *  a specific endpoint independently. */
+export async function checkOnline(
+  force = false,
+  profileId: ProviderProfileId = activeProvider,
+): Promise<boolean> {
+  const slot = onlineCache[profileId];
+  const now = Date.now();
+  if (!force && slot.online !== null && now - slot.at < STATUS_TTL_MS) {
+    return slot.online;
+  }
+  const p = profileFor(profileId);
+  const baseUrl = p.baseUrl;
+  if (!baseUrl) {
+    slot.online = false;
+    slot.at = now;
+    slot.error = 'local model disabled';
+    return false;
+  }
+  try {
+    const res = await rawFetch(`${baseUrl}/models`, { method: 'GET' }, 2000);
+    const ok = res.ok;
+    slot.online = ok;
+    slot.at = now;
+    slot.error = ok ? undefined : `GET /models -> HTTP ${res.status}`;
+    return ok;
+  } catch (err: any) {
+    slot.online = false;
+    slot.at = now;
+    slot.error = err?.message || 'unreachable';
+    return false;
+  }
+}
+
+export function providerStatus(profileId?: ProviderProfileId): ProviderStatus {
+  const id = profileId ?? activeProvider;
+  const p = profileFor(id);
+  const slot = onlineCache[id];
+  return {
+    kind: 'openai_compatible',
+    baseUrl: p.baseUrl,
+    model: p.model,
+    online: slot.online === true,
+    lastError: slot.error,
+    checkedAt: slot.online === null ? undefined : slot.at,
+  };
+}
+
+/** Status for both profiles — used by UI to show local+api independently. */
+export function providerStatuses(): Record<ProviderProfileId, ProviderStatus> {
+  return { local: providerStatus('local'), api: providerStatus('api') };
+}
+
+/** Chat completion against the active provider profile. Backwards compatible.
+ *  Returns a result object — it never throws for offline/HTTP conditions.
+ *  Callers that need explicit profile targeting should use chatCompleteProfile
+ *  or chatCompleteRoute instead. */
+export async function chatComplete(
+  messages: ChatMessage[],
+  opts: ChatCompleteOptions = {},
+): Promise<ChatCompleteResult> {
+  return chatCompleteFor(activeProvider, messages, opts);
+}
+
+/** Chat completion against a specific profile ('local' or 'api'), regardless of
+ *  what the active profile is. Use this when the caller knows which endpoint
+ *  should answer. */
+export async function chatCompleteProfile(
+  profileId: ProviderProfileId,
+  messages: ChatMessage[],
+  opts: ChatCompleteOptions = {},
+): Promise<ChatCompleteResult> {
+  return chatCompleteFor(profileId === 'local' ? 'local' : 'api', messages, opts);
+}
+
+/** Chat completion routed by policy. `route`:
+ *   - 'local' forces the qwen3 0.6B endpoint
+ *   - 'api'   forces the Phoenix Grove / remote API endpoint
+ *   - 'auto'  picks local for small messages (<= LOCAL_AUTO_MAX_CHARS total),
+ *             api otherwise. Conservative default for callers that don't care.
+ *  The result reports the actual profile that answered in `model` / `error`. */
+export async function chatCompleteRoute(
+  route: ChatRoute,
+  messages: ChatMessage[],
+  opts: ChatCompleteOptions = {},
+): Promise<ChatCompleteResult> {
+  const profile = pickProfileForRoute(route, messages);
+  return chatCompleteFor(profile, messages, opts);
 }

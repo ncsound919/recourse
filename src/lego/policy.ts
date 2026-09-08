@@ -223,7 +223,7 @@ export class MoERuntimeRouter {
       expertBrickIds,
       topK: Math.min(2, numExperts),
       gatingWeights,
-      lastRoutingProbabilities: new Array(numExperts).fill(1 / numExperts),
+      lastRoutingProbabilities: Array.from({ length: numExperts }, () => 1 / numExperts),
       activeExperts: expertBrickIds.slice(0, 2),
     };
   }
@@ -240,7 +240,7 @@ export class MoERuntimeRouter {
     routingProbabilities: number[];
   } {
     const numExperts = this.state.expertBrickIds.length;
-    const logits: number[] = new Array(numExperts).fill(0);
+    const logits: number[] = Array.from({ length: numExperts }, () => 0);
 
     for (let e = 0; e < numExperts; e++) {
       for (let i = 0; i < Math.min(inputVector.length, this.state.gatingWeights.length); i++) {

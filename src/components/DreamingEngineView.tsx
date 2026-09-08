@@ -8,13 +8,8 @@ import {
 import {
   Moon,
   Sparkles,
-  Zap,
-  Play,
-  RotateCcw,
   CheckCircle2,
   BrainCircuit,
-  Layers,
-  Flame,
   Code,
   ArrowRight,
   Lightbulb,
@@ -29,7 +24,7 @@ export const DreamingEngineView: React.FC<DreamingEngineViewProps> = ({
   onDreamCrystallize
 }) => {
   const [dreamState, setDreamState] = useState<DreamState | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [_loading, setLoading] = useState<boolean>(true);
   const [isTicking, setIsTicking] = useState<boolean>(false);
   const [selectedThought, setSelectedThought] = useState<DreamThought | null>(null);
   const [crystallizingId, setCrystallizingId] = useState<string | null>(null);

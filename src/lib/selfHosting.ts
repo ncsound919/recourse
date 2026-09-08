@@ -65,8 +65,8 @@ export interface SelfHostedModuleInput {
 }
 
 export type SelfHostWriteResult =
-  | { success: true; entry: SelfHostedManifestEntry }
-  | { success: false; error: string };
+  | { readonly success: true; entry: SelfHostedManifestEntry }
+  | { readonly success: false; error: string };
 
 export type SelfHostVerifyVerdict = {
   passed: boolean;
@@ -519,8 +519,6 @@ export interface StatelessSelfHostInput {
   testSuiteCode: string;
   summary: string;
 }
-
-const JSON_HELPER_FNS = RUNTIME_IMPORT;
 
 function generateStatelessSelfHostedModuleSource(input: StatelessSelfHostInput): string {
   const { sourceCode, entrypointName } = input;

@@ -5,7 +5,6 @@ import {
   GrowthFactorWeights,
   CandidateGrowthAction,
   GrowthDecisionReport,
-  GrowthActionType,
   DreamThought,
   GitHubRepoBlueprint
 } from '../types';

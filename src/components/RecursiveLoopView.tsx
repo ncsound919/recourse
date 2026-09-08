@@ -6,22 +6,17 @@ import {
   Pause,
   RotateCcw,
   Sliders,
-  CheckCircle2,
-  AlertTriangle,
   ArrowRight,
   Radio,
   Cpu,
   Compass,
   Atom,
-  ChevronRight,
   Info,
   ShieldCheck,
-  TrendingDown,
-  Sparkles
+  TrendingDown
 } from 'lucide-react';
 import type {
   RecursiveLoopState,
-  RecursiveIterationResult,
   RecursiveLoopParameters,
 } from '../types';
 import {

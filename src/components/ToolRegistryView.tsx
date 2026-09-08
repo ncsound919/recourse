@@ -3,20 +3,15 @@ import {
   Layers,
   CheckCircle2,
   AlertTriangle,
-  XCircle,
-  Code2,
-  Clock,
-  ShieldCheck,
   ChevronRight,
   UserCheck,
   Terminal,
   Search,
   FileCode,
   Play,
-  RefreshCw,
-  Sparkles
+  RefreshCw
 } from 'lucide-react';
-import { ToolEntry, ToolVersion, ToolDomain } from '../types';
+import { ToolEntry, ToolDomain } from '../types';
 
 interface ToolRegistryViewProps {
   registry: ToolEntry[];

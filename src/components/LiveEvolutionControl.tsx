@@ -1,5 +1,5 @@
 import React from 'react';
-import { Play, Pause, FastForward, Shield, Sparkles, Sliders, RefreshCw, Layers } from 'lucide-react';
+import { Play, Pause, FastForward, Shield, Sliders, RefreshCw } from 'lucide-react';
 import { SystemStatus, PromotionPolicy, ToolDomain } from '../types';
 
 interface LiveEvolutionControlProps {
@@ -14,7 +14,7 @@ export const LiveEvolutionControl: React.FC<LiveEvolutionControlProps> = ({
   status,
   onToggleAuto,
   onStepEvolution,
-  onPolicyChange,
+  _onPolicyChange,
   isStepping
 }) => {
   return (

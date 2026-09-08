@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Cpu, ShieldCheck, Activity, Zap, Play, Pause, RefreshCw, FileText, Sparkles, Volume2, VolumeX, Volume1, Globe } from 'lucide-react';
+import { ShieldCheck, Activity, Zap, Play, Pause, FileText, Sparkles, Volume2, VolumeX, Volume1, Globe } from 'lucide-react';
 import { SystemStatus, PromotionPolicy } from '../types';
 import { isVoiceEnabled, setVoiceEnabled, speak, playChirp } from '../lib/voice';
 import { getNarrationLevel, setNarrationLevel, NarrationLevel } from '../lib/narration';
@@ -71,10 +71,12 @@ export const Header: React.FC<HeaderProps> = ({
           
           {/* Logo & Brand */}
           <div className="flex items-center space-x-3">
-            <div className="relative flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 via-purple-600 to-cyan-500 p-[1px] shadow-lg shadow-indigo-500/20">
-              <div className="w-full h-full bg-slate-950 rounded-[11px] flex items-center justify-center">
-                <Cpu className="w-5 h-5 text-indigo-400 animate-pulse" />
-              </div>
+            <div className="relative flex items-center justify-center w-10 h-10 rounded-xl overflow-hidden bg-slate-950 border border-indigo-500/30 shadow-lg shadow-indigo-500/20">
+              <img
+                src="/overlay-recourse-logo.png"
+                alt="Overlay Recourse logo"
+                className="w-full h-full object-cover"
+              />
               <span className="absolute -top-1 -right-1 flex h-3 w-3">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>

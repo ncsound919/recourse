@@ -1,7 +1,7 @@
 // src/lego/contracts.ts — Layer 1: The Studs (Typed Contracts)
 // Standardized, machine-readable interfaces enabling safe, autonomous component snapping.
 
-import { StudContract, StudValidationResult, TensorShape, TensorDType } from './types';
+import { StudContract, StudValidationResult } from './types';
 
 // ============================================================================
 // Standard Library of Stud Contracts

@@ -1,5 +1,5 @@
 import React from 'react';
-import { FileText, Clock, Sparkles, CheckCircle2, ShieldCheck, ChevronRight, RefreshCw } from 'lucide-react';
+import { FileText, Clock, ShieldCheck, RefreshCw } from 'lucide-react';
 import { HourlyReport } from '../types';
 
 interface HourlyReportViewProps {

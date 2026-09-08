@@ -100,7 +100,7 @@ const STEP = PPQ / 4; // 16th
 
 /** Choose the voicing engine for a chord based on the style's voicer. Steely
  *  uses the mu-adjacency rule and rootless dominants; other styles use spread. */
-function voiceKeys(ch: Chord, lo: number, hi: number, n: number, voicer?: string): number[] {
+function _voiceKeys(ch: Chord, lo: number, hi: number, n: number, voicer?: string): number[] {
   if (voicer === 'steely') {
     if (ch.quality === 'mu') return voiceMuChord(ch.rootPc, lo, hi);
     if (DOMINANT_QUALITIES.has(ch.quality)) return voiceRootless(ch.rootPc, ch.quality, lo, hi);
@@ -201,7 +201,7 @@ function assignCost(a: number[], b: number[]): number {
     }
   };
   void idx;
-  perm([], new Array(b.length).fill(false));
+  perm([], Array.from({ length: b.length }, () => false));
   return best;
 }
 
@@ -219,8 +219,8 @@ function chooseVoicings(chords: Chord[], lx: StyleLexicon): number[][] {
   const cost: number[][] = [];
   const prev: number[][] = [];
   for (let i = 0; i < nBars; i++) {
-    cost.push(new Array(nodes[i].length).fill(Infinity));
-    prev.push(new Array(nodes[i].length).fill(-1));
+    cost.push(Array.from({ length: nodes[i].length }, () => Infinity));
+    prev.push(Array.from({ length: nodes[i].length }, () => -1));
   }
   nodes[0].forEach((v, j) => { cost[0][j] = regCost(v, lx); });
   for (let i = 1; i < nBars; i++) {
@@ -241,7 +241,7 @@ function chooseVoicings(chords: Chord[], lx: StyleLexicon): number[][] {
   let bestK = 0;
   let bestEnd = Infinity;
   cost[nBars - 1].forEach((c, k) => { if (c < bestEnd) { bestEnd = c; bestK = k; } });
-  const path: number[] = new Array(nBars).fill(0);
+  const path: number[] = Array.from({ length: nBars }, () => 0);
   path[nBars - 1] = bestK;
   for (let i = nBars - 1; i > 0; i--) path[i - 1] = prev[i][path[i]];
   return path.map((k, i) => nodes[i][k]);

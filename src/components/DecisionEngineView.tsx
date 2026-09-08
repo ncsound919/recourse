@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
   GrowthFactorWeights,
-  CandidateGrowthAction,
   GrowthDecisionReport,
   ToolDomain
 } from '../types';
@@ -11,7 +10,6 @@ import {
   Zap,
   TrendingUp,
   ShieldCheck,
-  Cpu,
   Brain,
   Award,
   CheckCircle2,
@@ -321,7 +319,7 @@ export const DecisionEngineView: React.FC<DecisionEngineViewProps> = ({
           </div>
 
           <div className="space-y-3">
-            {decision?.candidateActions.map((action, idx) => {
+            {decision?.candidateActions.map((action, _idx) => {
               const isTop = action.rank === 1;
               return (
                 <div

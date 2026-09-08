@@ -25,8 +25,7 @@
 //     created_at timestamptz not null default now());
 
 import type { ToolDomain } from '../types';
-import { compileGenome, geneVectors, generateGenome } from './genomes';
-import { hashString, mulberry32 } from './engine';
+import { hashString } from './engine';
 import { scoreGeneWithProperties } from './property-harness';
 import { createGeneRegistryStore } from './mutator';
 import fs from 'node:fs';
@@ -41,12 +40,6 @@ import type {
   ReplayReport,
 } from './learner-types';
 
-const ALL_DOMAINS: ToolDomain[] = [
-  'math', 'coding', 'biotech', 'systemic',
-  'neuro_symbolic', 'cyber_defense', 'quantum_sim',
-];
-
-const GENESIS_SEED = 0x9e3779b9;
 const MAX_DIRECTIVES = 20;
 const MAX_REPLAY = 500;
 
@@ -83,55 +76,6 @@ function canonicalState(s: LearnerState): unknown {
   };
 }
 
-/* --------------------------- gene execution ------------------------- */
-
-function sandboxEval(source: string): (input: unknown) => unknown {
-  const tryCompile = (code: string) => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const vm: any = typeof require === 'function' ? require('node:vm') : null;
-    if (vm && vm.Script) {
-      const script = new vm.Script(`(${code})`);
-      return script.runInContext(vm.createContext({}), { timeout: 500 });
-    }
-    return new Function(`return (${code})`)();
-  };
-  try {
-    return tryCompile(source);
-  } catch (err) {
-    if (err instanceof SyntaxError) {
-      // Gene is written in TypeScript — transpile it with esbuild (same honest
-      // path as the execution sandbox) and try again before giving up.
-      const { prepareExecutableCode } = require('../lib/executionSandbox');
-      return tryCompile(prepareExecutableCode(source));
-    }
-    throw err;
-  }
-}
-
-function collectNumbers(value: unknown, out: number[] = []): number[] {
-  if (typeof value === 'number') out.push(value);
-  else if (Array.isArray(value)) value.forEach((v) => collectNumbers(v, out));
-  else if (value && typeof value === 'object')
-    Object.values(value as Record<string, unknown>).forEach((v) => collectNumbers(v, out));
-  return out;
-}
-
-const clone = (v: unknown): unknown => JSON.parse(JSON.stringify(v));
-
-/** Deterministic stress mutation: scale numbers by seeded jitter. */
-function stressVector(v: unknown, rng: () => number, magnitude: number): unknown {
-  if (typeof v === 'number') return v * (1 + (rng() - 0.5) * magnitude);
-  if (Array.isArray(v)) return v.map((x) => stressVector(x, rng, magnitude));
-  if (v && typeof v === 'object') {
-    const out: Record<string, unknown> = {};
-    for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
-      out[k] = stressVector(val, rng, magnitude);
-    }
-    return out;
-  }
-  return v;
-}
-
 interface EvalGene {
   id: string;
   name: string;
@@ -139,62 +83,6 @@ interface EvalGene {
   code: string;
   vectors: unknown[];
   versionHash?: string;
-}
-
-/** Reward in [0,1]: 50% clean-run quality on declared vectors,
- *  50% robustness under seeded stress mutations. */
-function scoreGene(code: string, vectors: unknown[], rng: () => number): number {
-  let fn: (input: unknown) => unknown;
-  try {
-    fn = sandboxEval(code);
-  } catch {
-    return 0;
-  }
-  const clean = (o: unknown) => collectNumbers(o).every((n) => Number.isFinite(n));
-
-  let baseOk = 0;
-  for (const v of vectors) {
-    try {
-      const a = fn(clone(v));
-      const b = fn(clone(v));
-      if (JSON.stringify(a) === JSON.stringify(b) && clean(a)) baseOk++;
-    } catch {
-      /* counts as failure */
-    }
-  }
-  const baseFrac = vectors.length ? baseOk / vectors.length : 0;
-
-  const stressRuns = Math.min(12, Math.max(3, vectors.length * 3));
-  let stressOk = 0;
-  for (let i = 0; i < stressRuns; i++) {
-    const v = stressVector(vectors[i % vectors.length], rng, 1.2);
-    try {
-      const a = fn(clone(v));
-      const b = fn(clone(v));
-      if (JSON.stringify(a) === JSON.stringify(b) && clean(a)) stressOk++;
-    } catch {
-      /* counts as failure */
-    }
-  }
-  const stressFrac = stressOk / stressRuns;
-
-  return round4(0.5 * baseFrac + 0.5 * stressFrac);
-}
-
-/** Fallback evaluation set when the registry has no active genes:
- *  the dreaming engine's seven template genes, seeded deterministically. */
-function genesisGeneSet(): EvalGene[] {
-  const rng = mulberry32(GENESIS_SEED);
-  return ALL_DOMAINS.map((domain) => {
-    const spec = generateGenome(domain, rng);
-    return {
-      id: `genesis_${spec.kind}`,
-      name: spec.kind,
-      domain,
-      code: compileGenome(spec),
-      vectors: geneVectors(spec),
-    };
-  });
 }
 
 /* ------------------------------ store ------------------------------- */
@@ -661,7 +549,7 @@ export class RecursiveLearner {
     const domains: ToolDomain[] = ['coding', 'math', 'biotech', 'systemic', 'cyber_defense', 'neuro_symbolic', 'quantum_sim'];
     for (const d of domains) {
       const domainGenes = Object.values(state.geneBeliefs).filter(b => b.domain === d);
-      if (domainGenes.length === 0 || domainGenes.every(b => b.meanReward < 0.6)) {
+      if (domainGenes.every(b => b.meanReward < 0.6)) {
         out.push({
           id: `dir_${h8(`synth:${d}:${state.episode}`)}`,
           kind: 'synthesize_template',

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Sparkles, Cpu, ShieldCheck, CheckCircle2, AlertTriangle, XCircle, Code, RefreshCw, X } from 'lucide-react';
+import { Sparkles, CheckCircle2, AlertTriangle, XCircle, RefreshCw, X } from 'lucide-react';
 import { ToolDomain, PromotionPolicy } from '../types';
 
 interface AiMutatorModalProps {

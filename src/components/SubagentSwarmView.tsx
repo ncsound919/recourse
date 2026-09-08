@@ -2,14 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   SwarmStatus,
   SubAgent,
-  SubAgentTask,
   SubAgentType,
   ToolDomain
 } from '../types';
 import {
   Users,
   Bot,
-  Zap,
   Play,
   CheckCircle2,
   Cpu,
@@ -33,7 +31,7 @@ export const SubagentSwarmView: React.FC<SubagentSwarmViewProps> = ({
   onDispatchTask
 }) => {
   const [swarm, setSwarm] = useState<SwarmStatus | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [_loading, setLoading] = useState<boolean>(true);
   const [isDispatching, setIsDispatching] = useState<boolean>(false);
   const [customTitle, setCustomTitle] = useState<string>('');
   const [selectedAgentType, setSelectedAgentType] = useState<SubAgentType>('algorithmic_synthesizer');

@@ -3,7 +3,7 @@ import { executeToolFunction, executeTestSuite } from './executionSandbox';
 import { validateBiotechClaimAgainstKG, CANONICAL_ONCOLOGY_KG } from './biotechKnowledgeGraph';
 import { solveHornClauses, calculateCosineDistance } from './neuroSymbolicEngine';
 import { auditCodeSecurity, sha256Sync, timingSafeEqualBuffers } from './cyberDefenseEngine';
-import { QuantumStateVector, synthesizeBellState } from './quantumEngine';
+import { synthesizeBellState } from './quantumEngine';
 import { synthesizeTemplateRepair, recordSelfRepairExperience } from './componentTemplates';
 
 export const BIOTECH_LEGS = {
@@ -179,7 +179,7 @@ export function verifyMathCode(
  * Real Deterministic Biotech / Domain Verifier
  * Validates against empirical clinical Knowledge Graph & ontological rules.
  */
-export function verifyBiotechClaim(claim: BiotechClaim, customKg = CANONICAL_ONCOLOGY_KG): VerifierResult {
+export function verifyBiotechClaim(claim: BiotechClaim, _customKg = CANONICAL_ONCOLOGY_KG): VerifierResult {
   const validation = validateBiotechClaimAgainstKG(claim);
   return {
     passed: validation.passed,

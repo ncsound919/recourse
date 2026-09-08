@@ -1,8 +1,5 @@
-import type { ExternalSignal, SourceKind, SourcePollResult, IntakeSnapshot } from './types';
-import { pollArxiv } from './arxiv';
-import { pollHackerNews } from './hackernews';
-import { pollRssFeeds, type RssFeedSpec } from './rss';
-import { pollGitHub } from './github';
+import type { ExternalSignal, SourcePollResult, IntakeSnapshot } from './types';
+import type { RssFeedSpec } from './rss';
 import { createHash } from 'node:crypto';
 
 /**
@@ -122,8 +119,6 @@ export const DEFAULT_RSS_FEEDS: RssFeedSpec[] = [
   { url: 'https://www.reddit.com/r/compsci/.rss', topics: ['computer science'] },
   { url: 'https://blog.research.google/feeds/posts/default', topics: ['research', 'google'] },
 ];
-
-const SOURCES: SourceKind[] = ['arxiv', 'github', 'hackernews', 'agentbrowser', 'kaggle', 'news'];
 
 export function topicsForName(name: string): string[] {
   return name.toLowerCase().split(/[\s,_-]+/).filter(Boolean);

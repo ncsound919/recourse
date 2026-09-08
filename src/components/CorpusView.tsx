@@ -8,7 +8,6 @@ import {
   FileText,
   Map as MapIcon,
   AlertTriangle,
-  CheckCircle2,
   ArrowRight,
 } from 'lucide-react';
 

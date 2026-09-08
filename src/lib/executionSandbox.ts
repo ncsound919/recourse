@@ -7,9 +7,15 @@
  * under test actually defines. No fixture constants are injected, so a test
  * that references an undeclared variable throws a ReferenceError and FAILS.
  * A pass means the real code demonstrably satisfied the assertion.
+ *
+ * Isolation: tool/tests execute in a real isolated-vm V8 isolate when the
+ * native module is loadable (privilege isolation: no process/fs/network).
+ * `new Function(...)` in-process is the fallback ONLY when isolated-vm is not
+ * available (e.g. a platform without the native addon) — never the default.
  */
 
 import { transformSync } from 'esbuild';
+import { executeTestSuiteInIsolate, executeToolInIsolate, isIsolateAvailable } from './isolatedSandbox';
 
 export interface ExecutionResult {
   success: boolean;
@@ -123,6 +129,37 @@ export function executeToolFunction(
     }
   }
 
+  // PRIMARY: real privilege isolation (isolated-vm). The tool runs inside a
+  // fresh V8 isolate with no Node globals — generated code cannot touch
+  // process/fs/network. `new Function` in-process is only the fallback for
+  // platforms where the native addon is not loadable.
+  if (isIsolateAvailable()) {
+    const iso = executeToolInIsolate(sourceCode, functionName, args, { memoryLimitMb: 64, timeoutMs: 2000 });
+    const executionTimeMs = Math.round((performance.now() - startTime) * 100) / 100;
+    if (iso.success) {
+      return {
+        success: true,
+        returnValue: iso.returnValue,
+        stdout: iso.stdout,
+        stderr: iso.stderr,
+        executionTimeMs,
+        error: undefined,
+        assertionsPassed: 1,
+        assertionsFailed: 0,
+      };
+    }
+    return {
+      success: false,
+      returnValue: undefined,
+      stdout: iso.stdout,
+      stderr: iso.stderr.length ? iso.stderr : [iso.error ? `Execution Exception: ${iso.error}` : 'Execution failed'],
+      executionTimeMs,
+      error: iso.error,
+      assertionsPassed: 0,
+      assertionsFailed: 1,
+    };
+  }
+
   try {
     const cleanedCode = prepareExecutableCode(sourceCode);
 
@@ -212,6 +249,23 @@ export function executeTestSuite(
   testDetails: string[];
   executionTimeMs: number;
 } {
+  // PRIMARY: real privilege isolation (isolated-vm) for the whole suite —
+  // source + assertions run with no host globals. Falls back to the in-process
+  // `new Function` path ONLY when the native addon is not loadable.
+  if (isIsolateAvailable()) {
+    const iso = executeTestSuiteInIsolate(sourceCode, testSuiteCode, { memoryLimitMb: 64, timeoutMs: 4000 });
+    if (iso.available) {
+      return {
+        passed: iso.passed,
+        score: iso.score,
+        stdout: iso.stdout,
+        stderr: iso.stderr,
+        testDetails: iso.testDetails,
+        executionTimeMs: iso.executionTimeMs,
+      };
+    }
+  }
+
   const stdout: string[] = [];
   const stderr: string[] = [];
   const testDetails: string[] = [];
@@ -293,9 +347,6 @@ export function executeTestSuite(
       const expr = bare[1].replace(/;$/, '');
       return `__assert((${expr}), ${JSON.stringify(line)});`;
     }
-    // Function-call form: `assert(cond[, msg])` or `assert(cond, 'msg')`.
-    // A quoted 2nd arg is treated as a human label; an unquoted one is
-    // appended to the expression. We never throw away the boolean check.
     const call = line.match(/^assert\s*\((.*)\);?$/);
     if (call) {
       const args = splitTopLevelArgs(call[1]);

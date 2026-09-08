@@ -18,7 +18,7 @@
  * them as live callable modules (see selfHosting.ts).
  */
 
-import type { ToolDomain, ComponentTemplateParam, ComponentTemplateCategory } from '../../types';
+import type { ToolDomain, ComponentTemplateCategory } from '../../types';
 import type { TemplatePlugin } from '../templatePlugin';
 
 // ---------------------------------------------------------------------------

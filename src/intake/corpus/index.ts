@@ -107,9 +107,46 @@ export const DEFAULT_CORPUS_ROOTS: CorpusRoot[] = [
     project: 'hemp-os',
     root: 'C:\\Users\\User\\Downloads\\Uplift\\02_Pillars\\Overlay Science\\Biotech\\Hemp-OS-main',
   },
+  // BB-Tech: basketball → biotech translation core (real domain knowledge:
+  // knowledge bank CSVs, translation engine, scoring/mapping JSON).
+  {
+    project: 'bb-tech',
+    root: 'C:\\Users\\User\\Downloads\\Uplift\\02_Pillars\\Overlay Science\\Shared\\bb_tech_core',
+  },
+  {
+    project: 'sports-science',
+    root: 'C:\\Users\\User\\Downloads\\Uplift\\02_Pillars\\Overlay Science\\Sports\\sports_science',
+  },
+  {
+    project: 'golf-surgery',
+    root: 'C:\\Users\\User\\Downloads\\Uplift\\02_Pillars\\Overlay Science\\Shared\\golf_surgery_core',
+  },
+  // Environmental solutions (ECOS): climate/sustainability research + docs.
+  {
+    project: 'environmental',
+    root: 'C:\\Users\\User\\Downloads\\Uplift\\01_Platforms\\ECOS-Environmental-Initiatives',
+  },
   {
     project: 'overlay-oncology',
     root: 'C:\\Users\\User\\Downloads\\Uplift\\02_Pillars\\Overlay Science\\Overlay Oncology',
+  },
+  {
+    project: 'cancer-pdfs',
+    root: 'C:\\Users\\User\\Desktop\\cancer research pdfs',
+  },
+  {
+    project: 'cancer-datasets',
+    root: 'C:\\Users\\User\\Desktop\\Datasets',
+  },
+  // The Overlay Science research + docs libraries: real papers, schemas, and
+  // engineering docs the science loops should never run out of grounding for.
+  {
+    project: 'overlay-science-research',
+    root: 'C:\\Users\\User\\Downloads\\Uplift\\02_Pillars\\Overlay Science\\research',
+  },
+  {
+    project: 'overlay-science-docs',
+    root: 'C:\\Users\\User\\Downloads\\Uplift\\02_Pillars\\Overlay Science\\docs',
   },
 ];
 

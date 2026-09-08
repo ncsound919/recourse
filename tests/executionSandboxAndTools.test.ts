@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { executeToolFunction, prepareExecutableCode } from '../src/lib/executionSandbox';
-import { generateProvenanceMerkleRoot, verifyProvenanceChainSync } from '../src/lib/provenance';
+import { executeToolFunction } from '../src/lib/executionSandbox';
+import { generateProvenanceMerkleRoot } from '../src/lib/provenance';
 import { ProvenanceEvent } from '../src/types';
 
 describe('Execution Sandbox & Provenance Ledger', () => {

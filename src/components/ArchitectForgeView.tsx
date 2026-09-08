@@ -5,9 +5,7 @@ import {
   Terminal,
   Bot,
   Workflow,
-  Activity,
   CheckCircle,
-  Clock,
   Layers,
   Sparkles,
   Sliders,
@@ -16,7 +14,6 @@ import {
   Code2,
   ShieldCheck,
   Search,
-  Filter,
   RefreshCw,
   Box,
   Binary,
@@ -35,8 +32,7 @@ import type {
   StructuralArtifact,
   ArtifactType,
   ComponentTemplate,
-  ComponentTemplateParam,
-  ToolDomain
+  ComponentTemplateParam
 } from '../types';
 import { IntelInboxView } from './IntelInboxView';
 

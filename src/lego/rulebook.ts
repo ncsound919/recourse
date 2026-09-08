@@ -223,7 +223,7 @@ export class IsolatedComputeSandbox {
         peakFlops: result.totalComputeCost,
         durationMs: duration,
       };
-    } catch (err) {
+    } catch {
       return {
         passedSandbox: false,
         violationType: 'contract_breach',

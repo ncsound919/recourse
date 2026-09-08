@@ -323,5 +323,139 @@ server.registerTool('recourse.compose_soundlab', {
   }, null, 2));
 });
 
+server.registerTool('recourse.axiom_status', {
+  title: 'Check Axiom Agent harness status',
+  description: 'Probe Axiom harness reachability and capability grid from Recourse.',
+}, async () => {
+  try {
+    const j = await apiGet('/api/recourse/axiom/status');
+    return text(JSON.stringify(j, null, 2));
+  } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
+});
+
+server.registerTool('recourse.kg_live_status', {
+  title: 'Live evidence provider status',
+  description: 'Probe Open Targets Platform and PubTator 3.0 availability for the live oncology evidence layer.',
+}, async () => {
+  try {
+    const j = await apiGet('/api/recourse/kg/live/status');
+    return text(JSON.stringify(j, null, 2));
+  } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
+});
+
+server.registerTool('recourse.kg_live_graph', {
+  title: 'Build the live oncology knowledge graph',
+  description: 'Query Open Targets + PubTator 3.0 and merge with the canonical curated KG into a grounded, provenance-tagged graph. Providers that are down are reported ok:false and simply contribute nothing.',
+  inputSchema: {
+    diseases: z.array(z.string()).optional().describe('Override MONDO/EFO disease ids (defaults to the validated oncology set)'),
+    topics: z.array(z.string()).optional().describe('Override PubTator search topics'),
+  },
+}, async ({ diseases, topics }) => {
+  try {
+    const r = await apiPost('/api/recourse/kg/live/graph', { diseases, topics });
+    if (!r.ok) return text(`kg_live_graph failed (HTTP ${r.status}): ${r.data?.error ?? 'see server log'}`);
+    return text(JSON.stringify({
+      ok: r.data.success,
+      counts: r.data.counts,
+      providers: r.data.providers,
+      nodeTotal: r.data.payload?.nodes?.length,
+      edgeTotal: r.data.payload?.edges?.length,
+      generatedAt: r.data.generatedAt,
+    }, null, 2));
+  } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
+});
+
+server.registerTool('recourse.ode_synthesize', {
+  title: 'Synthesize evidence-to-ODE kinetic parameters',
+  description: 'Build the live graph and map Open Targets + PubTator evidence into a concrete OdeSimulationParams bundle (Overlay Oncology solveOdeTumorImmuneSystem contract) with per-parameter provenance. Parameters are labeled evidence-derived / literature-prior / canonical / calibrated.',
+  inputSchema: {
+    diseaseId: z.string().optional().describe('MONDO/EFO disease id to anchor target evidence to (defaults to the graph set)'),
+  },
+}, async ({ diseaseId }) => {
+  try {
+    const r = await apiPost('/api/recourse/kg/live/ode-params', { diseaseId });
+    if (!r.ok) return text(`ode_synthesize failed (HTTP ${r.status}): ${r.data?.error ?? 'see server log'}`);
+    return text(JSON.stringify({
+      ok: r.data.success,
+      params: r.data.params,
+      provenance: r.data.provenance?.map((p: any) => ({ key: p.key, value: p.value, origin: p.origin, confidence: p.confidence, evidence: p.evidence })),
+      synthesisNote: r.data.synthesisNote,
+      providers: r.data.providers,
+    }, null, 2));
+  } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
+});
+
+server.registerTool('recourse.dosing_optimize', {
+  title: 'Run the combinatorial adaptive dosing optimizer',
+  description: 'Synthesize evidence-to-ODE params then sweep therapy modes × dose levels, computing per-arm cure-reachability and a seeded subclone-extinction probability. Arms are real deterministic ODE runs; extinctionProbability is an ensemble fraction, not a fitted clinical statistic.',
+  inputSchema: {
+    diseaseId: z.string().optional().describe('MONDO/EFO disease id to anchor target evidence to'),
+    doses: z.array(z.number().positive()).optional().describe('Dose levels to sweep (uM)'),
+    modes: z.array(z.enum(['continuous_mtd', 'adaptive_pulsed', 'metronomic', 'awaken_senescence'])).optional().describe('Therapy modes to sweep'),
+  },
+}, async ({ diseaseId, doses, modes }) => {
+  try {
+    const r = await apiPost('/api/recourse/kg/live/optimize', { diseaseId, doses, modes });
+    if (!r.ok) return text(`dosing_optimize failed (HTTP ${r.status}): ${r.data?.error ?? 'see server log'}`);
+    const summary = {
+      ok: r.data.success,
+      bestArmKey: r.data.bestArmKey,
+      rankedArms: r.data.rankedArms,
+      extinctionProbability: r.data.extinction?.extinctionProbability,
+      extinctionRuns: `${r.data.extinction?.extinctRuns}/${r.data.extinction?.nRuns}`,
+      arms: r.data.arms?.map((a: any) => ({
+        arm: `${a.therapyMode}@${a.drugDose}`,
+        finalVolume: a.finalVolume_mm3,
+        resistantFraction: a.finalResistantFraction,
+        minHealthy: a.minHealthy,
+        reachable: a.reachability?.isReachable,
+        failureReason: a.reachability?.failureReason,
+        stable: a.stable,
+      })),
+      note: r.data.note,
+    };
+    return text(JSON.stringify(summary, null, 2));
+  } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
+});
+
+server.registerTool('recourse.pipeline_dossier', {
+  title: 'Run the full evidence pipeline and produce a cryptographic dossier',
+  description: 'One call: live graph → ODE params → dosing optimization → SBML Level 3 + PhysiCell XML exports, then hash-chain every stage into a verifiable evidence dossier. Reads the real providers; a down provider contributes nothing.',
+  inputSchema: {
+    diseaseId: z.string().optional().describe('MONDO/EFO disease id to anchor target evidence to'),
+  },
+}, async ({ diseaseId }) => {
+  try {
+    const r = await apiPost('/api/recourse/kg/live/pipeline', { diseaseId });
+    if (!r.ok) return text(`pipeline_dossier failed (HTTP ${r.status}): ${r.data?.error ?? 'see server log'}`);
+    return text(JSON.stringify({
+      ok: r.data.success,
+      dossierHash: r.data.dossier?.hash,
+      stages: r.data.dossier?.stages?.map((s: any) => ({ stage: s.stage, hash: s.hash?.slice(0, 16), prev: s.prevHash?.slice(0, 16) })),
+      provenanceSources: r.data.dossier?.provenanceSources?.length,
+      sbml: r.data.sbml,
+      physicell: r.data.physicell,
+      bestArmKey: r.data.optimization?.bestArmKey,
+      extinctionProbability: r.data.optimization?.extinction?.extinctionProbability,
+      params: r.data.params,
+    }, null, 2));
+  } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
+});
+
+server.registerTool('recourse.axiom_build', {
+  title: 'Build and self-host a tool via Axiom Agent',
+  description: 'Delegate tool synthesis to Axiom Agent harness, verify with Recourse executionSandbox, and materialize into .selfhosted/ manifest. Mutating: requires RECOURSE_API_SECRET.',
+  inputSchema: {
+    name: z.string().describe('Function/tool name to create (e.g. dedupeStable)'),
+    domain: z.enum(['math', 'coding', 'biotech', 'systemic', 'neuro_symbolic', 'cyber_defense', 'quantum_sim']).describe('Tool domain'),
+    prompt: z.string().describe('Detailed prompt / contract for the tool function'),
+    refSuite: z.string().describe('Assertion suite code for real verification (assert ...)'),
+  },
+}, async ({ name, domain, prompt, refSuite }) => {
+  const r = await apiPost('/api/recourse/axiom/build-tool', { name, domain, prompt, refSuite });
+  if (!r.ok) return text(`Axiom build failed (HTTP ${r.status}): ${r.data?.error ?? 'unknown error'}`);
+  return text(JSON.stringify(r.data, null, 2));
+});
+
 const transport = new StdioServerTransport();
 await server.connect(transport);

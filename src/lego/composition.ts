@@ -180,7 +180,6 @@ export class ExecutionEngine {
     rawInputs: number[][],
     computeGradients = true
   ): DAGExecutionResult {
-    const startTime = performance.now();
     const traces: BrickExecutionTrace[] = [];
     const nodeOutputs = new Map<string, Value[][]>();
 

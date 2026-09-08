@@ -19,6 +19,9 @@ describe('ecosystem corpus scanner (real files)', () => {
     await fs.mkdir(path.join(base, 'projA', '__pycache__'), { recursive: true });
     await fs.mkdir(path.join(base, 'projB', 'research'), { recursive: true });
     await fs.mkdir(path.join(base, 'projB', 'dist'), { recursive: true });
+    // Project C — Python knowledge (Overlay Science translation engines).
+    await fs.mkdir(path.join(base, 'projC', 'core'), { recursive: true });
+    await fs.mkdir(path.join(base, 'projC', 'tests'), { recursive: true });
 
     await fs.writeFile(path.join(base, 'projA', 'WHITEPAPER.md'), 'Recourse Oncology Whitepaper. This candidate drug targets tumor mrd and cancer recurrence.'.repeat(5));
     await fs.writeFile(path.join(base, 'projA', 'docs', 'synthesis-breakthrough.md'), 'Cross-project research synthesis about clinical trials and patient cohorts.');
@@ -32,16 +35,37 @@ describe('ecosystem corpus scanner (real files)', () => {
     await fs.writeFile(path.join(base, 'projB', 'research', 'mrd-guided-trial.md'), 'MRD guided adjuvant clinical trial analysis with hemp-derived compound.');
     await fs.writeFile(path.join(base, 'projB', 'dist', 'README.md'), 'noise'); // ignored
     await fs.writeFile(path.join(base, 'projB', 'image.png'), 'fake png bytes'); // ignored by ext
+
+    // Real Python module shape: docstring + class/def symbols. The scanner
+    // must read the docstring + symbols, never the code body.
+    await fs.writeFile(
+      path.join(base, 'projC', 'core', 'translation_engine.py'),
+      `"""BB-Tech basketball-to-biotech translation engine.
+
+Maps basketball performance vocabulary onto oncology treatment terms so the
+recourse research loop can translate across domains with real confidence."""
+class BBTechTranslationEngine:
+    def translate(self, term: str, direction: str) -> dict:
+        return {"term": term, "direction": direction}
+def translate_metric(self, metric: str, value: float) -> float:
+    return value * 2.0
+`,
+    );
+    await fs.writeFile(
+      path.join(base, 'projC', 'tests', 'test_translation.py'),
+      '"""unit tests for the engine"""\ndef test_translate():\n    pass\n',
+    );
   }, 20000);
 
   afterAll(async () => {
     await fs.rm(base, { recursive: true, force: true });
   });
 
-  function roots(): { a: CorpusRoot; b: CorpusRoot } {
+  function roots(): { a: CorpusRoot; b: CorpusRoot; c: CorpusRoot } {
     return {
       a: { project: 'projA', root: path.join(base, 'projA') },
       b: { project: 'projB', root: path.join(base, 'projB') },
+      c: { project: 'projC', root: path.join(base, 'projC') },
     };
   }
 
@@ -89,6 +113,23 @@ describe('ecosystem corpus scanner (real files)', () => {
     expect(artifacts).toHaveLength(0);
     expect(errors).toHaveLength(1);
     expect(errors[0].root).toBe('nope');
+  });
+
+  it('indexes Python modules via docstring + symbols (never the code body)', async () => {
+    const { c } = roots();
+    const { artifacts, errors } = await scanRoot(c);
+    expect(errors).toHaveLength(0);
+    const eng = artifacts.find((a) => a.rel.endsWith('core/translation_engine.py'));
+    expect(eng).toBeDefined();
+    expect(eng?.kind).toBe('research'); // translation engine → research
+    // Excerpt is REAL docstring content + symbols, not raw source code.
+    expect(eng?.excerpt).toContain('BB-Tech basketball-to-biotech');
+    expect(eng?.excerpt).toContain('Symbols: BBTechTranslationEngine, translate, translate_metric');
+    expect(eng?.excerpt).not.toContain('return {"term": term');
+    expect(eng?.topics).toContain('oncology');
+    // Test module must NOT count as research value.
+    const t = artifacts.find((a) => a.rel.endsWith('tests/test_translation.py'));
+    expect(t?.kind).toBe('other');
   });
 });
 

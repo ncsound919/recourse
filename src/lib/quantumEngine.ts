@@ -389,7 +389,7 @@ export class QuantumStateVector {
 
   getProbabilities(): number[] {
     const dim = this.amplitudes.length / 2;
-    const probs = new Array(dim);
+    const probs = Array.from({ length: dim }, () => 0);
     for (let i = 0; i < dim; i++) {
       probs[i] = complexAbsSq(this.getComplex(i));
     }
@@ -411,7 +411,7 @@ export class QuantumStateVector {
   toDensityMatrix(): Complex[][] {
     const dim = this.amplitudes.length / 2;
     const rho: Complex[][] = Array.from({ length: dim }, () =>
-      new Array(dim).fill(null).map(() => ({ re: 0, im: 0 }))
+      Array.from({ length: dim }, () => ({ re: 0, im: 0 }))
     );
     for (let i = 0; i < dim; i++) {
       for (let j = 0; j < dim; j++) {
@@ -439,9 +439,11 @@ export class QuantumStateVector {
     // Build mapping from full basis to reduced basis.
     const fullDim = 1 << n;
     const keepDim = 1 << keepIndices.length;
-    const traceDim = 1 << traceIndices.length;
 
-    const fullIndices = new Array(fullDim);
+    const fullIndices: { keep: number; trace: number }[] = Array.from(
+      { length: fullDim },
+      () => ({ keep: 0, trace: 0 })
+    );
     for (let i = 0; i < fullDim; i++) {
       // Extract basis bits for keep and trace
       let keepVal = 0,
@@ -456,7 +458,7 @@ export class QuantumStateVector {
     }
 
     const rho = Array.from({ length: keepDim }, () =>
-      new Array(keepDim).fill(null).map(() => ({ re: 0, im: 0 }))
+      Array.from({ length: keepDim }, () => ({ re: 0, im: 0 }))
     );
 
     for (let i = 0; i < fullDim; i++) {
@@ -576,7 +578,7 @@ export function vonNeumannEntropy(rho: Complex[][]): number {
  * Fidelity between two density matrices: F = (Tr sqrt(√ρ σ √ρ))²
  * For pure states, this reduces to |<ψ|φ>|².
  */
-export function fidelityDensity(rho: Complex[][], sigma: Complex[][]): number {
+export function fidelityDensity(_rho: Complex[][], _sigma: Complex[][]): number {
   // Placeholder: for pure states use overlap.
   // For mixed, implement via eigenvalues of rho * sigma.
   // For now, just return 0.

@@ -23,7 +23,7 @@
 
 import type { ToolDomain } from '../types';
 
-export type IntelSourceId = 'bbtech' | 'omniresearch' | 'strategy';
+export type IntelSourceId = 'bbtech' | 'omniresearch' | 'strategy' | 'corpus';
 
 export interface IntelIdea {
   title: string;

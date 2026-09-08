@@ -1,6 +1,6 @@
 import React from 'react';
 import { SystemStatus } from '../types';
-import { Shield, Fingerprint, Database, Cpu } from 'lucide-react';
+import { Fingerprint, Cpu } from 'lucide-react';
 
 interface DeterminismBannerProps {
   status: SystemStatus;

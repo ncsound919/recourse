@@ -1,8 +1,7 @@
 ﻿import type {
   ToolDomain,
   ComponentBuildResult,
-  SelfRepairKnowledge,
-  SelfRepairStrategy
+  SelfRepairKnowledge
 } from '../types';
 import {
   registerComponentTemplatePlugin,
@@ -16,9 +15,12 @@ import {
 // Artifact-kind templates: cli / api / mcp / a2a / loop transports.
 import './templatePlugins/artifactKinds.js';
 import { bloomFilterPlugin } from './templatePlugins/bloomFilter';
+import { abmCancerSimPlugin } from './templatePlugins/abmCancerSim';
+import { biosimTrialPlugin } from './templatePlugins/biosimTrial';
 import { premierTrendPlugin } from './templatePlugins/premierTrend';
 import { premierValidatorsPlugin } from './templatePlugins/premierValidators';
 import { ocrPreprocessPlugin } from './templatePlugins/ocrPreprocess';
+import { deterministicResearcherPlugin } from './templatePlugins/deterministicResearcher';
 import {
   webLandingPagePlugin,
   invoiceRendererPlugin,
@@ -1048,9 +1050,12 @@ for (const tpl of Object.values(BUILTIN_TEMPLATE_LIBRARY)) {
 // System core-logic and the ocr-it extension) — see each file's header for
 // provenance and honest scope.
 registerComponentTemplatePlugin(bloomFilterPlugin);
+registerComponentTemplatePlugin(abmCancerSimPlugin);
+registerComponentTemplatePlugin(biosimTrialPlugin);
 registerComponentTemplatePlugin(premierTrendPlugin);
 registerComponentTemplatePlugin(premierValidatorsPlugin);
 registerComponentTemplatePlugin(ocrPreprocessPlugin);
+registerComponentTemplatePlugin(deterministicResearcherPlugin);
 // Web & Revenue lane: real, verified, self-hostable web/revenue artifacts.
 registerComponentTemplatePlugin(webLandingPagePlugin);
 registerComponentTemplatePlugin(invoiceRendererPlugin);

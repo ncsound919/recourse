@@ -22,7 +22,6 @@ import {
   PRState,
   type AuditStatementT,
   type BusinessScorecardT,
-  type CheckpointT,
   type GitHubClient,
   type LoopContext,
   type LoopState,

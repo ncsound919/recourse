@@ -137,7 +137,7 @@ export function listComponentTemplates(
   let list = Object.values(COMPONENT_TEMPLATES);
   if (domain) list = list.filter((t) => t.domain === domain);
   if (category) list = list.filter((t) => t.category === category);
-  return list.map(({ synthesizer, selfHost, ...meta }) => ({
+  return list.map(({ synthesizer: _synthesizer, selfHost, ...meta }) => ({
     ...meta,
     selfHostable: Boolean(selfHost),
     artifactKind: selfHost ? (meta.artifactKind ?? 'function') : undefined

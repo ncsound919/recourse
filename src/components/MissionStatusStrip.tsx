@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 
 interface StatusData {
   generation: number;
@@ -39,7 +39,6 @@ function statusBadge(readiness: number, anomalies: number, permitNext: boolean):
 export const MissionStatusStrip: React.FC = () => {
   const [status, setStatus] = useState<StatusData | null>(null);
   const [swarm, setSwarm] = useState<SwarmData | null>(null);
-  const prevBadgeRef = useRef<string>('');
 
   useEffect(() => {
     let alive = true;

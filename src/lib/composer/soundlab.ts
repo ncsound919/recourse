@@ -140,7 +140,7 @@ export function encodeSoundlabPiece(track: Track): RecoursePiece {
   };
 }
 
-const SHARP: string[] = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+const _SHARP: string[] = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
 /** Validate the piece is chord-correct: every keys-voice note is a tone of the
  *  head chord; bass is the head root. Returns problems[] (empty = valid). */
