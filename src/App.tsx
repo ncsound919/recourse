@@ -4,7 +4,6 @@ import React, {
   useCallback,
   useMemo,
   useRef,
-  useReducer,
   Suspense,
 } from 'react';
 import {
@@ -28,12 +27,14 @@ import {
   RecursiveLearnerView,
   ArchitectForgeView,
   SelfAssemblingLegoView,
-  OllamaView,
+  ProviderView,
+  MusicTherapyView,
   IntakeAndGrowthView,
   CorpusView,
   SkillsView,
   WebDownloadView,
-  SettingsView
+  SettingsView,
+  GamepadVisualizer
 } from './components';
 import {
   SystemStatus,
@@ -53,6 +54,10 @@ import {
   INITIAL_HOURLY_REPORTS,
 } from './lib/mockData';
 import { useSystemVoiceMonitor } from './hooks/useSystemVoiceMonitor';
+import { useGamepad } from './hooks/useGamepad';
+import { useGamepadSnapshot } from './hooks/useGamepadSnapshot';
+import { GamepadIndicator } from './components/GamepadIndicator';
+import { cycleIndex } from './lib/gamepad';
 import { verifyProvenanceChainSync } from './lib/provenance';
 import { recourseJson } from './lib/recourseClient';
 
@@ -85,7 +90,8 @@ import {
    FolderSearch,
    Library,
    Box,
-   Settings
+   Settings,
+   Gamepad2
 } from 'lucide-react';
 
 // ================================================================
@@ -230,7 +236,8 @@ function useToast(durationMs: number = 4000) {
 type TabKey =
   | 'overview'
   | 'lego'
-  | 'ollama'
+  | 'provider'
+  | 'music-therapy'
   | 'recursive-math'
   | 'recursive-learner'
   | 'decision'
@@ -249,6 +256,7 @@ type TabKey =
   | 'skills'
   | 'web'
   | 'visualizer'
+  | 'gamepad'
   | 'settings';
 
 const TABS: Array<{
@@ -273,12 +281,22 @@ const TABS: Array<{
     ),
   },
   {
-    key: 'ollama',
-    label: 'LOCAL OLLAMA MODELS',
+    key: 'provider',
+    label: 'AI PROVIDER',
     icon: <Server className="w-4 h-4 text-indigo-400" />,
     badge: () => (
       <span className="px-1.5 py-0.2 bg-indigo-950 text-indigo-300 text-[10px] rounded border border-indigo-800 font-bold">
-        LLM HUB
+        API
+      </span>
+    ),
+  },
+  {
+    key: 'music-therapy',
+    label: 'MUSIC THERAPY',
+    icon: <Activity className="w-4 h-4 text-fuchsia-400" />,
+    badge: () => (
+      <span className="px-1.5 py-0.2 bg-fuchsia-950 text-fuchsia-300 text-[10px] rounded border border-fuchsia-800 font-bold">
+        432Hz
       </span>
     ),
   },
@@ -402,6 +420,11 @@ const TABS: Array<{
     ),
   },
   {
+    key: 'gamepad',
+    label: 'GAMEPAD',
+    icon: <Gamepad2 className="w-4 h-4 text-emerald-400" />,
+  },
+  {
     key: 'settings',
     label: 'SETTINGS',
     icon: <Settings className="w-4 h-4 text-slate-300" />,
@@ -450,7 +473,7 @@ export default function App() {
     status,
     setStatus,
     registry,
-    setRegistry,
+    setRegistry: _setRegistry,
     provenanceEvents,
     reports,
     chainIntegrity,
@@ -466,16 +489,63 @@ export default function App() {
 
   // -------------------- UI State --------------------
   const [activeTab, setActiveTab] = useState<TabKey>('overview');
+  const activeTabRef = useRef<TabKey>(activeTab);
+  activeTabRef.current = activeTab;
+  const prevTabRef = useRef<TabKey>('overview');
+  const lastTabRef = useRef<TabKey>('overview');
+  useEffect(() => {
+    if (lastTabRef.current !== activeTab) {
+      prevTabRef.current = lastTabRef.current;
+      lastTabRef.current = activeTab;
+    }
+  }, [activeTab]);
+
+  // -------------------- Gamepad-as-UI-input --------------------
+  const [lastGamepadAction, setLastGamepadAction] = useState<string | null>(null);
+  const [gamepadPulse, setGamepadPulse] = useState(0);
+  const { connected: gamepadConnected, name: gamepadName } = useGamepad({
+    onAction: (action) => {
+      setLastGamepadAction(action);
+      setGamepadPulse((p) => p + 1);
+      const tabs = TABS.map((t) => t.key);
+      const idx = tabs.indexOf(activeTabRef.current);
+      switch (action) {
+        case 'left':
+        case 'right': {
+          const next = cycleIndex(idx < 0 ? 0 : idx, tabs.length, action);
+          setActiveTab(tabs[next]);
+          break;
+        }
+        case 'up':
+          window.scrollBy({ top: -480, behavior: 'smooth' });
+          break;
+        case 'down':
+          window.scrollBy({ top: 480, behavior: 'smooth' });
+          break;
+        case 'confirm':
+          handleStepEvolution('coding');
+          break;
+        case 'action1':
+          handleToggleAuto(!status.isAutoEvolving);
+          break;
+        case 'action2':
+          setActiveTab('overview');
+          break;
+        case 'cancel':
+          setActiveTab(prevTabRef.current);
+          break;
+        default:
+          break;
+      }
+    },
+  });
+  const gamepadSnapshot = useGamepadSnapshot();
   const [isAiModalOpen, setIsAiModalOpen] = useState<boolean>(false);
   const [isStepping, setIsStepping] = useState<boolean>(false);
   const [isGeneratingReport, setIsGeneratingReport] = useState<boolean>(false);
   const [isApproving, setIsApproving] = useState<boolean>(false);
 
   // -------------------- Memoized derived values --------------------
-  const pendingCount = useMemo(
-    () => status.pendingApprovalsCount,
-    [status.pendingApprovalsCount]
-  );
   const registryCount = useMemo(() => registry.length, [registry]);
   const reportCount = useMemo(() => reports.length, [reports]);
 
@@ -930,6 +1000,12 @@ export default function App() {
           </div>
 
           <div className="flex items-center space-x-2 font-mono text-xs text-slate-400">
+            <GamepadIndicator
+              connected={gamepadConnected}
+              name={gamepadName}
+              lastAction={lastGamepadAction}
+              pulse={gamepadPulse}
+            />
             <span className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-lg">
               <RefreshCw className="w-3.5 h-3.5 text-indigo-400 animate-spin" />
               <span>Deterministic OS Core Active</span>
@@ -993,8 +1069,12 @@ export default function App() {
               <SelfAssemblingLegoView onNotify={showToast} />
             )}
 
-            {activeTab === 'ollama' && (
-              <OllamaView />
+            {activeTab === 'provider' && (
+              <ProviderView />
+            )}
+
+            {activeTab === 'music-therapy' && (
+              <MusicTherapyView />
             )}
 
             {activeTab === 'recursive-math' && (
@@ -1111,6 +1191,51 @@ export default function App() {
             )}
             {activeTab === 'settings' && (
               <SettingsView />
+            )}
+            {activeTab === 'gamepad' && (
+              <div className="space-y-6">
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="font-mono text-sm text-slate-300">
+                      LIVE CONTROLLER INPUT
+                    </h2>
+                    <span className="font-mono text-[11px] text-slate-500">
+                      60fps • browser Gamepad API
+                    </span>
+                  </div>
+                  <GamepadVisualizer
+                    snapshot={gamepadSnapshot}
+                    lastAction={lastGamepadAction}
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-5">
+                    <h3 className="font-mono text-xs text-slate-400 mb-3 uppercase">
+                      Control map
+                    </h3>
+                    <ul className="font-mono text-xs space-y-2 text-slate-300">
+                      <li><span className="text-violet-400">Left/Right</span> — cycle dashboard tabs</li>
+                      <li><span className="text-violet-400">Up / Down</span> — scroll the view</li>
+                      <li><span className="text-emerald-400">X (cross)</span> — run a deterministic step</li>
+                      <li><span className="text-red-400">O (circle)</span> — back to previous tab</li>
+                      <li><span className="text-sky-400">Square</span> — toggle 24/7 auto-growth loop</li>
+                      <li><span className="text-amber-400">Triangle</span> — jump to Overview</li>
+                    </ul>
+                  </div>
+                  <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-5">
+                    <h3 className="font-mono text-xs text-slate-400 mb-3 uppercase">
+                      Live readout
+                    </h3>
+                    <ul className="font-mono text-xs space-y-2 text-slate-300">
+                      <li>Buttons polled: <span className="text-slate-500">{gamepadSnapshot.buttons.length}</span></li>
+                      <li>Axes polled: <span className="text-slate-500">{gamepadSnapshot.axes.length}</span></li>
+                      <li>Last action: <span className="text-emerald-400">{lastGamepadAction?.toUpperCase() ?? '—'}</span></li>
+                      <li>Connection: <span className={gamepadConnected ? 'text-emerald-400' : 'text-slate-500'}>{gamepadConnected ? 'CONNECTED' : 'DISCONNECTED'}</span></li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
             )}
           </>
         )}

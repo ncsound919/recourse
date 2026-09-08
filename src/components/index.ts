@@ -19,7 +19,8 @@ export { RecursiveLearnerView } from './RecursiveLearnerView';
 export { DeterminismBanner } from './DeterminismBanner';
 export { ArchitectForgeView } from './ArchitectForgeView';
 export { SelfAssemblingLegoView } from './SelfAssemblingLegoView';
-export { OllamaView } from './OllamaView';
+export { ProviderView } from './ProviderView';
+export { MusicTherapyView } from './MusicTherapyView';
 export { IntakeAndGrowthView } from './IntakeAndGrowthView';
 export { CorpusView } from './CorpusView';
 export { SkillsView } from './SkillsView';
@@ -27,3 +28,5 @@ export { WebDownloadView } from './WebDownloadView';
 export { RecourseVisualizer3D } from './RecourseVisualizer3D';
 export { SettingsView } from './SettingsView';
 
+export { GamepadIndicator } from './GamepadIndicator';
+export { GamepadVisualizer } from './GamepadVisualizer';
