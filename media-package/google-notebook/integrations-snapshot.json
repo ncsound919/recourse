@@ -1,0 +1,40 @@
+{
+  "ossStack": {
+    "postiz": {
+      "available": false,
+      "detail": "http://127.0.0.1:4007 unreachable (fetch failed)"
+    },
+    "umami": {
+      "available": false,
+      "detail": "http://127.0.0.1:3003 unreachable (fetch failed)"
+    },
+    "listmonk": {
+      "available": false,
+      "detail": "http://127.0.0.1:9002 unreachable (fetch failed)"
+    }
+  },
+  "marketingskills": {
+    "available": true,
+    "count": 50
+  },
+  "financeConnect": {
+    "available": true,
+    "detail": "finance-connect pipelines present on disk"
+  },
+  "affiliate": {
+    "available": false,
+    "detail": "http://127.0.0.1:4601 unreachable (fetch failed)"
+  },
+  "cce": {
+    "available": true,
+    "detail": "CCE present (video pipeline needs ComfyUI :8188 + models + keys — checked at run time)"
+  },
+  "cceRuntime": {
+    "available": false,
+    "detail": "ComfyUI down at http://127.0.0.1:8188 — video generation unavailable"
+  },
+  "ufc": {
+    "available": true,
+    "detail": "UFC-MCP ImageProcessor + sharp present (convert/resize only)"
+  }
+}

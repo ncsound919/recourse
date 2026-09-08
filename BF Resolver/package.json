@@ -1,0 +1,41 @@
+{
+  "name": "brute-force-resolver",
+  "version": "0.1.0",
+  "description": "Autonomous 24/7 compute engine for hard math and biotech problems",
+  "type": "module",
+  "main": "bfr-orchestrator.js",
+  "bin": {
+    "bfr": "bfr-cli.js"
+  },
+  "scripts": {
+    "start": "node bfr-cli.js start --problems riemann,pnp,aging",
+    "start-riemann": "node bfr-cli.js start --problems riemann",
+    "start-pnp": "node bfr-cli.js start --problems pnp",
+    "start-aging": "node bfr-cli.js start --problems aging",
+    "status": "node bfr-cli.js status",
+    "discoveries": "node bfr-cli.js discoveries",
+    "submit": "node bfr-cli.js submit"
+  },
+  "keywords": [
+    "mathematics",
+    "complexity-theory",
+    "biotech",
+    "aging",
+    "riemann",
+    "p-vs-np",
+    "distributed-computing"
+  ],
+  "author": "Dj",
+  "license": "MIT",
+  "dependencies": {
+    "better-sqlite3": "^11.6.0",
+    "yargs": "^17.7.2"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.0"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "python": ">=3.10"
+  }
+}

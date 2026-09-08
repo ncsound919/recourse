@@ -1,0 +1,12 @@
+##fileformat=VCFv4.2
+##source=BioSimEngine_v0.3
+##contig=<ID=chr_sim1,length=100000>
+##INFO=<ID=VAF,Number=1,Type=Float,Description="True variant allele fraction in mixture">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO
+chr_sim1	40500	.	T	C	100	PASS	VAF=0.05
+chr_sim1	51134	.	T	G	100	PASS	VAF=0.05
+chr_sim1	74496	.	G	A	100	PASS	VAF=0.05
+chr_sim1	93244	.	C	A	100	PASS	VAF=0.05
+chr_sim1	5345	.	G	T	100	PASS	VAF=0.05
+chr_sim1	15839	.	G	C	100	PASS	VAF=0.05
+chr_sim1	81002	.	C	A	100	PASS	VAF=0.05

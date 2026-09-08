@@ -1,0 +1,23 @@
+# Core numerical and scientific computing
+numpy>=1.24.0
+scipy>=1.10.0
+pandas>=2.0.0
+
+# Mathematics and symbolic computation
+mpmath>=1.3.0
+
+# Biotech and aging-related
+scikit-learn>=1.3.0
+joblib>=1.3.0
+
+# SAT solving and constraint solving (optional, uses system cadical if available)
+python-sat>=0.1.8.dev21
+
+# Bioinformatics (optional, for extended aging biology features)
+# biopython>=1.81
+# scanpy>=1.9.0
+# decoupler>=1.4.0
+
+# Utilities
+PyYAML>=6.0
+tqdm>=4.65.0

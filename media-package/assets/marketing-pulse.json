@@ -1,0 +1,120 @@
+{
+  "voice": {
+    "corpusStatus": "loaded",
+    "checks": [
+      {
+        "postId": "p-good",
+        "verdict": "review",
+        "matches": [
+          "ro-honest-limits:pattern hit",
+          "ro-provenance-language:pattern hit"
+        ]
+      },
+      {
+        "postId": "p-bad-clinical",
+        "verdict": "review",
+        "matches": [
+          "ro-ecosystem-language:missing \"Recourse\"",
+          "ro-ecosystem-language:missing \"Overlay Oncology\"",
+          "ro-ecosystem-language:missing \"evidence\"",
+          "ro-closed-loop:missing \"falsif\"",
+          "ro-closed-loop:missing \"deterministic\"",
+          "ro-no-clinical-claims:cures",
+          "ro-no-fabricated-numbers:10x better"
+        ]
+      },
+      {
+        "postId": "p-bad-hype",
+        "verdict": "review",
+        "matches": [
+          "ro-ecosystem-language:missing \"Recourse\"",
+          "ro-ecosystem-language:missing \"Overlay Oncology\"",
+          "ro-ecosystem-language:missing \"evidence\"",
+          "ro-closed-loop:missing \"falsif\"",
+          "ro-closed-loop:missing \"deterministic\"",
+          "ro-no-fabricated-numbers:guaranteed",
+          "ro-no-theater:revolutionary cure",
+          "ro-no-theater:perfect accuracy",
+          "ro-no-theater:!!!",
+          "ro-no-theater:act now"
+        ]
+      },
+      {
+        "postId": "p-no-link",
+        "verdict": "review",
+        "matches": [
+          "ro-ecosystem-language:missing \"Recourse\"",
+          "ro-honest-limits:pattern hit"
+        ]
+      }
+    ]
+  },
+  "formatFails": [
+    {
+      "postId": "p-bad-clinical",
+      "platform": "linkedin",
+      "issues": [
+        "link required"
+      ]
+    },
+    {
+      "postId": "p-no-link",
+      "platform": "linkedin",
+      "issues": [
+        "link required"
+      ]
+    }
+  ],
+  "calendarCount": 17,
+  "actionItems": [
+    "[Voice Keeper] Post p-good needs review (2 rule match).",
+    "[Voice Keeper] Post p-bad-clinical needs review (7 rule match).",
+    "[Voice Keeper] Post p-bad-hype needs review (10 rule match).",
+    "[Voice Keeper] Post p-no-link needs review (2 rule match).",
+    "[Format Auditor] Post p-bad-clinical (linkedin): link required.",
+    "[Format Auditor] Post p-no-link (linkedin): link required.",
+    "[Tracker] Impressions 59% of 2-week average"
+  ]
+}
+
+--- markdown ---
+
+# Marketing Pulse GÇö 2026-09-07
+
+## Voice
+`loaded` -+ 4 post check(s)
+## Calendar
+17 planned post(s) across platforms
+## Format Audit
+2 post(s) failed format checks
+## Performance
+2400 impressions -+ 5.83% engagement
+
+## Action Items
+
+- [Voice Keeper] Post p-good needs review (2 rule match).
+- [Voice Keeper] Post p-bad-clinical needs review (7 rule match).
+- [Voice Keeper] Post p-bad-hype needs review (10 rule match).
+- [Voice Keeper] Post p-no-link needs review (2 rule match).
+- [Format Auditor] Post p-bad-clinical (linkedin): link required.
+- [Format Auditor] Post p-no-link (linkedin): link required.
+- [Tracker] Impressions 59% of 2-week average
+
+--- corpus summary ---
+
+corpus loaded rules: 15
+  vr-ecosystem-language [required] (overlay365-brand-guidelines-v1.json)
+  vr-interconnection [required] (overlay365-brand-guidelines-v1.json)
+  vr-no-fabricated-claims [forbidden] (overlay365-brand-guidelines-v1.json)
+  vr-no-medical-claims [forbidden] (overlay365-brand-guidelines-v1.json)
+  vr-no-legal-claims [forbidden] (overlay365-brand-guidelines-v1.json)
+  vr-premium-concise [forbidden] (overlay365-brand-guidelines-v1.json)
+  vr-ai-safety [forbidden] (overlay365-brand-guidelines-v1.json)
+  vr-hashtag-discipline [pattern] (overlay365-brand-guidelines-v1.json)
+  ro-ecosystem-language [required] (recourse-oncology-brand-guidelines-v1.json)
+  ro-closed-loop [required] (recourse-oncology-brand-guidelines-v1.json)
+  ro-no-clinical-claims [forbidden] (recourse-oncology-brand-guidelines-v1.json)
+  ro-no-fabricated-numbers [forbidden] (recourse-oncology-brand-guidelines-v1.json)
+  ro-honest-limits [pattern] (recourse-oncology-brand-guidelines-v1.json)
+  ro-no-theater [forbidden] (recourse-oncology-brand-guidelines-v1.json)
+  ro-provenance-language [pattern] (recourse-oncology-brand-guidelines-v1.json)

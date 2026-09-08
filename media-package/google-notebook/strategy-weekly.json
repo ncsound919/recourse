@@ -1,0 +1,8 @@
+{
+  "ok": false,
+  "mode": "weeklyScan",
+  "periodStart": "2026-09-01T04:45:17.471Z",
+  "periodEnd": "2026-09-08T04:45:17.471Z",
+  "error": "fetch failed",
+  "note": "Draymond unreachable — no proposals fabricated. Strategy report reflects real data only."
+}

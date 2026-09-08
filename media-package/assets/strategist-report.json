@@ -1,0 +1,125 @@
+{
+  "ok": true,
+  "mode": "strategist",
+  "report": {
+    "agentName": "The Strategist",
+    "periodStart": "2026-08-31T00:00:00Z",
+    "periodEnd": "2026-09-06T00:00:00Z",
+    "coverage": {
+      "totalItemsProcessed": 8,
+      "byPlatform": {
+        "health": 3,
+        "wealth": 3,
+        "justice": 0,
+        "cross-platform": 2
+      },
+      "excludedCount": 0,
+      "excludedReasons": [
+        "support-email: no export file provided (manual import pending)"
+      ]
+    },
+    "clusters": [
+      {
+        "id": "cl-fb1",
+        "label": "The moat is verification: every pipeline stage h",
+        "itemIds": [
+          "fb1",
+          "fb7",
+          "fb8"
+        ],
+        "platforms": [
+          "wealth",
+          "health"
+        ],
+        "frequency": 2,
+        "frequencyPct": 25,
+        "severity": "low",
+        "type": "other",
+        "brandAlignment": "neutral",
+        "score": 48
+      }
+    ],
+    "watchList": [
+      {
+        "id": "fb2",
+        "source": "investor",
+        "platform": "wealth",
+        "rawText": "Regulators want auditable evidence dossiers with model-derived vs calibrated labels; the provenance ledger delivers exactly that.",
+        "channel": "external",
+        "timestamp": "2026-09-02T00:00:00Z",
+        "confidence": "high",
+        "metadata": {
+          "assets": [
+            "evidence-dossier"
+          ]
+        }
+      },
+      {
+        "id": "fb3",
+        "source": "regulatory",
+        "platform": "health",
+        "rawText": "Provenance ledger marks every parameter origin as evidence-derived or calibrated G현 the audit trail regulators ask for.",
+        "channel": "external",
+        "timestamp": "2026-09-03T00:00:00Z",
+        "confidence": "high",
+        "metadata": {
+          "assets": [
+            "evidence-dossier",
+            "ode-synthesizer"
+          ]
+        }
+      },
+      {
+        "id": "fb4",
+        "source": "partner",
+        "platform": "cross-platform",
+        "rawText": "Standards interop matters: SBML Level 3 export validated by libSBML opens in COPASI. Real interop, not a screenshot.",
+        "channel": "external",
+        "timestamp": "2026-09-04T00:00:00Z",
+        "confidence": "medium",
+        "metadata": {
+          "assets": [
+            "sbml-exporter",
+            "libsbml-validator"
+          ]
+        }
+      },
+      {
+        "id": "fb5",
+        "source": "partner",
+        "platform": "cross-platform",
+        "rawText": "PhysiCell XML config carries the same evidence-synthesized parameters G현 cell-scale simulators can run the same model.",
+        "channel": "external",
+        "timestamp": "2026-09-05T00:00:00Z",
+        "confidence": "medium",
+        "metadata": {
+          "assets": [
+            "physicell-exporter"
+          ]
+        }
+      },
+      {
+        "id": "fb6",
+        "source": "research-team",
+        "platform": "health",
+        "rawText": "Closed-loop falsification: live Open Targets and PubTator evidence feeds deterministic ODE synthesis, then dosing sweeps. Verdicts can be negative G현 cure not reachable is a valid finding.",
+        "channel": "internal",
+        "timestamp": "2026-09-06T00:00:00Z",
+        "confidence": "high",
+        "metadata": {
+          "assets": [
+            "live-evidence-graph",
+            "ode-synthesizer",
+            "dosing-optimizer"
+          ]
+        }
+      }
+    ],
+    "flags": [],
+    "recommendations": [
+      "Consider \"The moat is verification: every pipeline stage h\" (score 48) for roadmap triage."
+    ],
+    "confidenceNote": "Based on 8 items. All items carried full provenance."
+  },
+  "markdown": "# The Strategist Report\n\n**Period:** 2026-08-31T00:00:00Z G樣 2026-09-06T00:00:00Z -+ **Items processed:** 8\n\n## Coverage\n\n| Platform | Items |\n|---|---|\n| health | 3 |\n| wealth | 3 |\n| justice | 0 |\n| cross-platform | 2 |\n| excluded | 0 |\n| excluded reasons | support-email: no export file provided (manual import pending) |\n\n## Clusters\n\n### The moat is verification: every pipeline stage h _(score 48)_\n\n- **Type:** other -+ **Severity:** low -+ **Brand:** neutral\n- **Frequency:** 2 (25.0% of period)\n- **Platforms:** wealth, health\n- **Audit trail (3):** fb1, fb7, fb8\n\n## Watch List\n\n- [fb2] Regulators want auditable evidence dossiers with model-derived vs calibrated labels; the provenance ledger delivers exactly that.\n- [fb3] Provenance ledger marks every parameter origin as evidence-derived or calibrated G현 the audit trail regulators ask for.\n- [fb4] Standards interop matters: SBML Level 3 export validated by libSBML opens in COPASI. Real interop, not a screenshot.\n- [fb5] PhysiCell XML config carries the same evidence-synthesized parameters G현 cell-scale simulators can run the same model.\n- [fb6] Closed-loop falsification: live Open Targets and PubTator evidence feeds deterministic ODE synthesis, then dosing sweeps. Verdicts can be negative G현 cure not reachable is a valid finding.\n\n## Flags\n\n\n## Recommendations\n\n1. Consider \"The moat is verification: every pipeline stage h\" (score 48) for roadmap triage.\n\n## Confidence Note\n\nBased on 8 items. All items carried full provenance."
+}
