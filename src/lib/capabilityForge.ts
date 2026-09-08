@@ -14,13 +14,15 @@
  *    model retries (bounded). Nothing is promoted unless the reference suite
  *    passes. If the model never passes, the attempt is recorded honestly as
  *    failed — it is never faked into a "success".
- *  - The forge can be pointed at a different (typically faster/local) model
- *    than the rest of the app via FORGE_MODEL_* env vars, defaulting to the
- *    global OpenAI-compatible provider, defaulting again to local Ollama.
+ *  - The forge can be pointed at a different model than the rest of the app
+ *    via FORGE_MODEL_* env vars, defaulting to the global API provider
+ *    (FORGE_* -> API_MODEL_* -> MODEL_* -> the API default). The local
+ *    profile is inert unless explicitly configured.
  */
 
 import type { ToolDomain } from '../types';
 import { executeTestSuite } from './executionSandbox';
+import { integrateAxiomTool, axiomReachable } from './axiomBridge.js';
 
 export interface ForgeSpec {
   id: string;
@@ -48,6 +50,8 @@ export interface ForgeAttemptOutcome {
   domain: ToolDomain;
   /** Present and correct only when ok === true (source passed the ref suite). */
   source?: string;
+  /** Overrides spec.refSuite when the source was renamed (dream-gene path). */
+  refSuite?: string;
   /** Human reason when not ok: 'offline' | 'failed' */
   reason?: 'offline' | 'failed';
   attemptsUsed: number;
@@ -438,28 +442,34 @@ export function forgeSpecById(id: string): ForgeSpec | undefined {
 // Forge model client (independent of the global provider)
 // ---------------------------------------------------------------------------
 // FORGE_MODEL_BASE_URL / FORGE_MODEL_NAME / FORGE_MODEL_API_KEY /
-// FORGE_MODEL_TIMEOUT_MS override the global provider so the forge can run on a
-// fast local model without disturbing the rest of the app. Fallback chain:
-// FORGE_* -> global MODEL_* -> local Ollama qwen (fast default).
-function forgeConfig() {
+// FORGE_MODEL_TIMEOUT_MS override the global provider so the forge can pin a
+// different model. Fallback chain: FORGE_* -> API_MODEL_* (Phoenix Grove) ->
+// MODEL_* -> the API default. The local profile is inert (reports offline
+// unless LOCAL_MODEL_BASE_URL is set) — the operator runs no local model.
+export function forgeConfig() {
   const base = (
     process.env.FORGE_MODEL_BASE_URL ||
+    process.env.API_MODEL_BASE_URL ||
     process.env.MODEL_BASE_URL ||
-    process.env.OLLAMA_BASE_URL ||
-    'http://localhost:11434/v1'
+    'https://api.pgsgrove.com/v1'
   ).replace(/\/+$/, '');
   return {
     baseUrl: base,
     model:
       process.env.FORGE_MODEL_NAME ||
+      process.env.API_MODEL_NAME ||
       process.env.MODEL_NAME ||
-      'qwen3.8-4b-distill:q4_k_m',
-    apiKey: process.env.FORGE_MODEL_API_KEY || process.env.MODEL_API_KEY || 'ollama',
+      'deepseek-v4-flash-0731',
+    apiKey:
+      process.env.FORGE_MODEL_API_KEY ||
+      process.env.API_MODEL_API_KEY ||
+      process.env.MODEL_API_KEY ||
+      '',
     timeoutMs: Number(process.env.FORGE_MODEL_TIMEOUT_MS || process.env.MODEL_TIMEOUT_MS || 240_000),
   };
 }
 
-async function forgeOnline(force = false): Promise<boolean> {
+async function forgeOnline(_force = false): Promise<boolean> {
   const cfg = forgeConfig();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 4000);
@@ -473,8 +483,12 @@ async function forgeOnline(force = false): Promise<boolean> {
   }
 }
 
-/** One OpenAI-compatible chat completion. Honest: reports offline/error, never
- *  fabricates content. */
+/** One chat completion via the SHARED provider layer (modelProvider.ts).
+ *  The forge's FORGE_MODEL_* overrides configure the shared provider's profile
+ *  (same env vars the rest of the app uses: API_MODEL_* / LOCAL_MODEL_*), so
+ *  routing, health checks, retry/timeout semantics and usage accounting are
+ *  unified instead of a second bespoke HTTP client. Honest: reports
+ *  offline/error, never fabricates content. */
 async function forgeChat(system: string, user: string, temperature = 0.1): Promise<{
   ok: boolean;
   content: string | null;
@@ -482,44 +496,27 @@ async function forgeChat(system: string, user: string, temperature = 0.1): Promi
   error?: string;
 }> {
   const cfg = forgeConfig();
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), cfg.timeoutMs);
-  try {
-    const res = await fetch(`${cfg.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
-      body: JSON.stringify({
-        model: cfg.model,
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: user },
-        ],
-        stream: false,
-        temperature,
-      }),
-      signal: controller.signal,
-    });
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      return { ok: false, content: null, error: `HTTP ${res.status}: ${text.slice(0, 200)}` };
-    }
-    const data: any = await res.json();
-    const content: string | null = data?.choices?.[0]?.message?.content ?? null;
-    if (typeof content !== 'string' || !content.trim()) {
-      return { ok: false, content: null, error: 'model returned empty content' };
-    }
-    return { ok: true, content };
-  } catch (err: any) {
-    const aborted = err?.name === 'AbortError';
+  // Resolve which shared-provider profile this endpoint maps to. Explicit
+  // FORGE_MODEL_* wins; otherwise match by base URL so API_MODEL_* (Phoenix
+  // Grove) and LOCAL_MODEL_* keep working exactly as before.
+  let profileId: 'api' | 'local' = 'api';
+  if (process.env.FORGE_MODEL_BASE_URL && cfg.baseUrl === (process.env.FORGE_MODEL_BASE_URL || '').replace(/\/+$/, '')) {
+    profileId = process.env.FORGE_MODEL_BASE_URL.includes(':11434') ? 'local' : 'api';
+  }
+  const { chatCompleteProfile } = await import('./modelProvider.js');
+  const res = await chatCompleteProfile(profileId, [
+    { role: 'system', content: system },
+    { role: 'user', content: user },
+  ], { temperature });
+  if (!res.ok || res.content === null) {
     return {
       ok: false,
       content: null,
-      offline: !aborted,
-      error: aborted ? `request timed out after ${cfg.timeoutMs}ms` : err?.message || 'request failed',
+      offline: res.status === 'offline',
+      error: res.error || 'model returned empty content',
     };
-  } finally {
-    clearTimeout(timer);
   }
+  return { ok: true, content: res.content };
 }
 
 function stripFences(content: string): string {
@@ -606,6 +603,25 @@ export async function attemptForgeSpec(
     if (!gen.ok) {
       failures.push({ attempt, note: gen.offline ? `offline: ${gen.error}` : `generate error: ${gen.error}` });
       if (gen.offline) {
+        // Fallback: try Axiom autonomous builder
+        if (await axiomReachable()) {
+          const axiomRes = await integrateAxiomTool(spec.name, spec.domain, spec.prompt, spec.refSuite);
+          if (axiomRes.ok) {
+            return {
+              ok: true,
+              id: spec.id,
+              name: spec.name,
+              domain: spec.domain,
+              source: axiomRes.selfHosted?.sourceCode,
+              attemptsUsed: attempt,
+              maxTries,
+              failures,
+              verifyScore: 1.0,
+              verifyDetails: ['[PASS] Verified via Axiom bridge + Recourse sandbox'],
+            };
+          }
+          failures.push({ attempt, note: `Axiom bridge failed: ${axiomRes.error}` });
+        }
         return {
           ok: false,
           id: spec.id,

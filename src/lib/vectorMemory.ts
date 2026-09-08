@@ -6,10 +6,11 @@
  * genes, hypotheses, lessons and signals.
  *
  * Honesty / fallback rules:
- *  - EMBEDDER: prefers the local Ollama embedding model (nomic-embed-text on
- *    :11434); if unavailable it falls back to a deterministic lexical hash
- *    vector. Both are FIXED at DIM=768 so rows never mix dimensions. The chosen
- *    backend is reported in `status()` — never implied.
+ *  - EMBEDDER: prefers the configured API embedding model (`EMBEDDING_MODEL` on
+ *    `EMBEDDING_BASE_URL || API_MODEL_BASE_URL`); if unset/unavailable it falls
+ *    back to a deterministic lexical hash vector. Both are FIXED at DIM=768 so
+ *    rows never mix dimensions. The chosen backend is reported in `status()` —
+ *    never implied. No localhost/Ollama probe is ever made.
  *  - STORAGE: persists to a LanceDB directory when the native module loads;
  *    otherwise it transparently degrades to an in-memory cosine store (same
  *    interface) so the learner always works offline. The store type is
@@ -38,7 +39,7 @@ export interface RecallHit extends MemoryDoc {
 export interface MemoryStoreStatus {
   /** 'unknown' until the first remember/recall actually embeds something —
    *  honest, never an implied backend. */
-  embedder: 'ollama' | 'lexical' | 'unknown';
+  embedder: 'api' | 'lexical' | 'unknown';
   store: 'lancedb' | 'memory';
   dir?: string;
   docs: number;
@@ -50,7 +51,7 @@ export interface MemoryStoreStatus {
 
 /** Deterministic lexical hash vector of length VEC_DIM (fallback embedder). */
 export function lexicalEmbed(text: string): number[] {
-  const v = new Array<number>(VEC_DIM).fill(0);
+  const v = Array.from({ length: VEC_DIM }, () => 0);
   const tokens = text.toLowerCase().replace(/[^a-z0-9_ ]/g, ' ').split(/\s+/).filter(Boolean);
   for (const tok of tokens) {
     const h = crypto.createHash('sha256').update(tok).digest();
@@ -64,43 +65,39 @@ export function lexicalEmbed(text: string): number[] {
   return v.map((x) => x / norm);
 }
 
-// Ollama probe cooldown: when a probe fails we skip the network round-trip for
-// COOLDOWN_MS so a batch (learner episode, dream tick) never pays the ~500 ms
-// timeout N times. lastProbeOkAt=0 means "never probed or last probe succeeded".
-let lastProbeOkAt = 0;
-const OLLAMA_PROBE_COOLDOWN_MS = 30_000;
-
-async function embedWithOllama(text: string): Promise<number[] | null> {
-  if (lastProbeOkAt !== 0 && Date.now() - lastProbeOkAt < OLLAMA_PROBE_COOLDOWN_MS) return null;
+async function embedWithApi(text: string): Promise<number[] | null> {
+  const model = process.env.EMBEDDING_MODEL;
+  if (!model) return null;
+  const base = (process.env.EMBEDDING_BASE_URL || process.env.API_MODEL_BASE_URL || process.env.MODEL_BASE_URL || '').replace(/\/+$/, '');
+  if (!base) return null;
+  const key = process.env.API_MODEL_API_KEY || process.env.MODEL_API_KEY || '';
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 2000);
   try {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 500);
-    const res = await fetch('http://localhost:11434/api/embed', {
+    const res = await fetch(`${base}/embeddings`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model: process.env.RECOURSE_EMBED_MODEL || 'nomic-embed-text', input: text }),
+      headers: { 'content-type': 'application/json', ...(key ? { authorization: `Bearer ${key}` } : {}) },
+      body: JSON.stringify({ model, input: text }),
       signal: ctrl.signal,
     });
-    clearTimeout(t);
-    if (!res.ok) { lastProbeOkAt = Date.now(); return null; }
+    if (!res.ok) return null;
     const j: any = await res.json();
-    const vec: number[] | undefined = j?.embeddings?.[0];
-    if (!Array.isArray(vec) || vec.length === 0) { lastProbeOkAt = Date.now(); return null; }
-    // Normalize to VEC_DIM (truncate or pad) so the table stays fixed-shape.
-    const out = new Array<number>(VEC_DIM).fill(0);
+    const vec: number[] | undefined = j?.data?.[0]?.embedding ?? j?.embeddings?.[0];
+    if (!Array.isArray(vec) || vec.length === 0) return null;
+    const out = Array.from({ length: VEC_DIM }, () => 0);
     for (let i = 0; i < Math.min(vec.length, VEC_DIM); i++) out[i] = vec[i];
     const norm = Math.sqrt(out.reduce((a, x) => a + x * x, 0)) || 1;
-    lastProbeOkAt = 0; // healthy again — allow the next probe
     return out.map((x) => x / norm);
   } catch {
-    lastProbeOkAt = Date.now();
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
-export async function embedText(text: string): Promise<{ vec: number[]; backend: 'ollama' | 'lexical' }> {
-  const ollama = await embedWithOllama(text);
-  if (ollama) return { vec: ollama, backend: 'ollama' };
+export async function embedText(text: string): Promise<{ vec: number[]; backend: 'api' | 'lexical' }> {
+  const api = await embedWithApi(text);
+  if (api) return { vec: api, backend: 'api' };
   return { vec: lexicalEmbed(text), backend: 'lexical' };
 }
 
@@ -167,7 +164,7 @@ async function openLance(dir: string): Promise<MemoryStore | null> {
       table = await db.openTable(tableName);
     } catch {
       table = await db.createTable(tableName, [
-        { id: '__init__', kind: 'gene', text: '', vec: new Array(VEC_DIM).fill(0), meta: '{}' },
+        { id: '__init__', kind: 'gene', text: '', vec: Array.from({ length: VEC_DIM }).fill(0), meta: '{}' },
       ]);
       await table.delete('id = \'__init__\'');
     }
@@ -241,7 +238,7 @@ export async function openVectorMemory(opts: { dir?: string } = {}): Promise<Vec
 export class VectorMemory {
   private store: MemoryStore;
   private dir?: string;
-  private embedBackend: 'ollama' | 'lexical' | 'unknown' = 'unknown';
+  private embedBackend: 'api' | 'lexical' | 'unknown' = 'unknown';
   constructor(store: MemoryStore, dir?: string) { this.store = store; this.dir = dir; }
 
   async remember(kind: MemoryKind, id: string, text: string, meta?: Record<string, any>): Promise<void> {

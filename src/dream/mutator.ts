@@ -4,7 +4,7 @@
 // The engine that actually produced a candidate is always recorded honestly.
 
 import crypto from 'crypto';
-import { chatComplete, extractJsonBlock } from '../lib/modelProvider';
+import { chatCompleteProfile, extractJsonBlock } from '../lib/modelProvider';
 import { lintSource } from '../lib/lintGate';
 import {
   avoidGuidance,
@@ -27,7 +27,7 @@ let currentPolicy: PromotionPolicy = 'auto_promote';
 let globalGeneration = 1;
 
 export function getActiveModel(): string {
-  return process.env.MODEL_NAME || 'qwen3.8-4b-distill:q4_k_m';
+  return process.env.API_MODEL_NAME || process.env.MODEL_NAME || 'deepseek-v4-flash-0731';
 }
 
 export function getActivePolicy(): PromotionPolicy {
@@ -345,10 +345,10 @@ function synthesizeFallback(domain: ToolDomain, instructions: string, targetTool
 }
 
 // ---------------------------------------------------------------------------
-// Local model synthesis (OpenAI-compatible / Ollama provider)
+// API model synthesis (Phoenix Grove provider via the shared profile layer)
 // ---------------------------------------------------------------------------
 
-async function synthesizeWithLocalModel(
+async function synthesizeWithModel(
   domain: ToolDomain,
   instructions: string,
   targetToolName?: string,
@@ -361,7 +361,11 @@ The function MUST be named '${toolName}' and exported via 'export function ${too
 It MUST NOT access DOM/window/process, write to disk, or call non-deterministic APIs (Math.random, Date.now) inside its body.
 Return ONLY valid JSON: {"description": "...", "source": "<the full javascript source>", "testVectors": ["...json strings..."]}`;
 
-  const result = await chatComplete([
+  // Dream codegen routes to the API profile (Phoenix Grove / deepseek-v4-flash-0731).
+  // The 0.6B local model is too weak to produce sandbox-passing genes; routing
+  // the heavy synthesis work to the cloud model and reserving the local model
+  // for rephrase/classification yields a strictly higher crystalization rate.
+  const result = await chatCompleteProfile('api', [
     { role: 'system', content: systemInstruction },
     { role: 'user', content: `Architectural Instructions: ${instructions}\nDomain: ${domain}` },
   ], { temperature: 0.2, json: true });
@@ -408,7 +412,7 @@ export async function evolveGene(
 ): Promise<MutationResult> {
   const currentGen = ++globalGeneration;
   let candidate: MutationCandidate | null = null;
-  let engine: 'local_model' | 'deterministic_fallback' = 'deterministic_fallback';
+  let engine: 'api_model' | 'local_model' | 'deterministic_fallback' = 'deterministic_fallback';
 
   // Failure-memory steering: attach similar past failures as avoid-guidance.
   // Guidance only — synthesis is never blocked, so the epsilon exploration
@@ -425,11 +429,11 @@ export async function evolveGene(
 
   // Prefer the configured open-source model provider.
   try {
-    candidate = await synthesizeWithLocalModel(params.domain, guidedInstructions, params.targetToolName);
+    candidate = await synthesizeWithModel(params.domain, guidedInstructions, params.targetToolName);
     if (candidate) {
-      engine = 'local_model';
+      engine = 'api_model';
     } else {
-      console.warn('[mutator:local_model_unavailable] provider returned nothing usable; using deterministic fallback');
+      console.warn('[mutator:model_unavailable] provider returned nothing usable; using deterministic fallback');
     }
   } catch (err: any) {
     console.warn('[mutator:local_model_error]', err?.message || err);

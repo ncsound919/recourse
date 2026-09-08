@@ -13,7 +13,7 @@ export type MutationOutcome = 'promoted' | 'pending_approval' | 'rejected';
 
 export type GeneStatus = 'active' | 'pending_approval' | 'rejected' | 'retired';
 
-export type GeneOrigin = 'local_model' | 'deterministic_fallback' | 'dream_engine';
+export type GeneOrigin = 'local_model' | 'api_model' | 'deterministic_fallback' | 'dream_engine';
 
 /** Raw candidate produced by the model (or the local fallback synthesizer).
  *  Never trusted directly — everything passes through verification. */
@@ -75,7 +75,7 @@ export interface MutationResult {
   versionHash: string;
   verifierResult: { verified: boolean; summary: string; checks: InvariantCheck[] };
   geneId?: string;
-  engine?: 'local_model' | 'deterministic_fallback';
+  engine?: 'local_model' | 'api_model' | 'deterministic_fallback';
   error?: string;
   memory?: EvolveMemoryResult;
 }

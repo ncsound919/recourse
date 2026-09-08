@@ -42,7 +42,7 @@ describe('vector memory (offline in-memory store + lexical embedder)', () => {
     await mem.remember('snapshot', 's1', 'boot baseline snapshot');
     const st = await mem.status();
     expect(st.store).toBe('memory');
-    expect(['ollama', 'lexical']).toContain(st.embedder);
+    expect(['api', 'lexical']).toContain(st.embedder);
     expect(st.docs).toBe(1);
   });
 });
