@@ -36,9 +36,9 @@ describe('Model-driven dreaming', () => {
     const { dreamState, newThought, phaseReport } = await engine.tick();
     expect(phaseReport).toContain('model proposed');
     expect(newThought).not.toBeNull();
-    expect(newThought!.origin).toBe('local_model');
+    expect(newThought!.origin).toBe('api_model');
     expect(newThought!.hypothesis).toContain('double()');
-    expect(dreamState.recentThoughts.some((t) => t.origin === 'local_model')).toBe(true);
+    expect(dreamState.recentThoughts.some((t) => t.origin === 'api_model')).toBe(true);
   });
 
   it('crystallizes a model thought only when its code passes the real sandbox', async () => {

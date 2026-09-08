@@ -44,8 +44,8 @@ export interface DreamThought {
   crystallizationReadiness: number;   // 0..1 — raised by passing theorem induction
   abstractGenomeDraft?: string;       // compiled gene source shown in the UI
   genome?: GenomeSpec;                // structural spec used for mutation/crossover
-  /** Where this thought came from: the local model, or the deterministic rule lexicon. */
-  origin?: 'local_model' | 'rule_based';
+  /** Where this thought came from: the configured API model, or the deterministic rule lexicon. */
+  origin?: 'local_model' | 'api_model' | 'rule_based';
   /** Arbitrary code candidate (local-model thoughts) + its own assert suite. */
   code?: string;
   codeTests?: string;

@@ -93,7 +93,6 @@ const DOMAINS: ToolDomain[] = [
   'neuro_symbolic', 'cyber_defense', 'quantum_sim',
 ];
 
-const STREAM_LIMIT = 24;   // what the UI renders
 const POOL_LIMIT = 32;     // hard cap on live thoughts
 const AUTO_PROMOTE_THRESHOLD = 0.9;
 
@@ -221,13 +220,13 @@ export class DreamingEngine {
 
     switch (s.currentPhase) {
       case 'rem_counterfactual_sim': {
-        // Prefer the real local model: premise/hypothesis/code from the LLM,
+        // Prefer the configured provider model: premise/hypothesis/code from the LLM,
         // still gated by real sandbox verification before it can ever promote.
         const modelThought = await this.tryModelThought(s);
         if (modelThought) {
           s.recentThoughts.unshift(modelThought);
           newThought = modelThought;
-          phaseReport = `REM: model proposed "${modelThought.hypothesis.slice(0, 60)}${modelThought.hypothesis.length > 60 ? '...' : ''}" (${modelThought.origin === 'local_model' ? 'local model' : 'draft'})`;
+          phaseReport = `REM: model proposed "${modelThought.hypothesis.slice(0, 60)}${modelThought.hypothesis.length > 60 ? '...' : ''}" (${modelThought.origin === 'api_model' ? 'API model' : modelThought.origin === 'local_model' ? 'local model' : 'draft'})`;
         } else {
           const created = this.phaseRem(s, rng);
           newThought = created[0] ?? null;
@@ -398,7 +397,7 @@ export class DreamingEngine {
 
   private phaseLucid(s: DreamState): CrystallizedTool[] {
     const tools: CrystallizedTool[] = [];
-    for (const t of [...s.recentThoughts]) {
+    for (const t of s.recentThoughts) {
       if (t.crystallizationReadiness >= AUTO_PROMOTE_THRESHOLD && t.genome) {
         const tool = this.promote(s, t);
         if (tool) tools.push(tool);
@@ -557,9 +556,9 @@ export class DreamingEngine {
       abstractGenomeDraft: code || undefined,
       code: code || undefined,
       codeTests: tests || undefined,
-      origin: 'local_model',
+      origin: 'api_model',
       invariantChecks: checks,
-      provenance: ['local_model_rem'],
+      provenance: ['api_model_rem'],
       createdAt: new Date().toISOString(),
       tick: s.tick,
     };
