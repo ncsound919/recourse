@@ -302,7 +302,7 @@ export interface ScienceCycle {
   trendScan: TrendPhaseResult | null;
   axiomBuild: AxiomBuildResult | null;
   keywireHandoff: KeywireHandoffResult | null;
-  integrityCheck: { submitted: boolean; passed?: boolean; error?: string };
+  integrityCheck: { submitted: boolean; passed?: boolean; error?: string; documentId?: string; complianceScore?: number };
   skipped: string[];
 }
 
@@ -1732,19 +1732,30 @@ export async function runScienceCycle(): Promise<ScienceCycle> {
   for (const e of tr.enginesUsed) if (!enginesUsed.includes(e)) enginesUsed.push(e);
   if (keywireHandoff?.brainOk) enginesUsed.push('keywire-brain');
 
-  // VERIFY: integrity service wraps the cycle when online.
+  // VERIFY: integrity service wraps the cycle when online. Payload must match
+  // the service's VerificationRequest contract (experiment_id, results dict,
+  // methodology str, data_summary dict) or it 422s.
   let integrityCheck: ScienceCycle['integrityCheck'] = { submitted: false };
   if (services.integrity?.online) {
     const r = await verifyWork({
-      tool: 'science_conductor',
-      cycle: cycleNum,
-      problem: target.problemId,
-      hypothesis: target.hypothesisId,
-      experiment_mode: experimentMode,
-      experiments_run: experimentsRun,
+      experiment_id: `science-cycle-${cycleNum}-${target.problemId}`,
+      results: {
+        cycle: cycleNum,
+        experiment_mode: experimentMode,
+        experiments_run: experimentsRun,
+        findings: findings.length,
+        novel: novelCount,
+        repeats: repeatCount,
+      },
+      methodology: `recourse science_conductor SCOUT->HYPOTHESIZE->EXPERIMENT->EVIDENCE->VERIFY->RECORD on ${target.problemId} (${target.hypothesisId})`,
+      data_summary: {
+        problem_title: target.problemTitle,
+        engines_used: enginesUsed,
+      },
     });
-    integrityCheck = r.ok
-      ? { submitted: true, passed: true }
+    const doc = (r.data as any)?.document?.verification_document;
+    integrityCheck = r.ok && doc
+      ? { submitted: true, passed: true, documentId: doc.document_id, complianceScore: doc.compliance_score }
       : { submitted: true, passed: false, error: r.error };
   } else {
     skipped.push('integrity (offline) — verification doc not requested');
