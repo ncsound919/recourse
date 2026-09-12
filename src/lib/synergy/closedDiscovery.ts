@@ -116,8 +116,8 @@ export function discover(
       let far;
       const relationsDeclared = m.relationBasis === 'declared' && p.relationBasis === 'declared';
       if (useAlign && relationsDeclared && m.relations.length > 0 && p.relations.length > 0) {
-        const bd = dgroupFromRelations(m.domain, m.relations, m.relations.flatMap((r) => r.args));
-        const td = dgroupFromRelations(p.domain, p.relations, p.relations.flatMap((r) => r.args));
+        const bd = dgroupFromRelations(m.domain, m.relations, [...new Set(m.relations.flatMap((r) => r.args))]);
+        const td = dgroupFromRelations(p.domain, p.relations, [...new Set(p.relations.flatMap((r) => r.args))]);
         alignment = smeAlign(bd, td);
         far = farTransfer(bd, td);
       }
