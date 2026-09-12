@@ -1158,7 +1158,9 @@ function problem(id: string, domain: string, requiredPrimitives: string[], accep
   };
 }
 
-const methods = [method('method:a', 'mathematics', ['graph', 'sequence'])];
+// A third non-overlapping doc keeps the corpus at 3 docs so the shared `graph`
+// bridge is not over-general (df=2 <= 0.9 * 3) while exactly one candidate forms.
+const methods = [method('method:a', 'mathematics', ['graph', 'sequence']), method('method:c', 'cybersecurity', ['compliance'])];
 const problems = [problem('problem:b', 'logistics', ['graph', 'prediction'])];
 
 describe('closed discovery', () => {
@@ -1169,13 +1171,17 @@ describe('closed discovery', () => {
     expect(candidates[0].bridges.map((b) => b.term)).toContain('term:graph');
     expect(candidates[0].fromDomain).toBe('mathematics');
     expect(candidates[0].toDomain).toBe('logistics');
+    expect(candidates[0].score).toBe(1);
+    expect(candidates[0].support).toBe(1);
+    expect(candidates[0].prediction).toBe('pass');
   });
 
-  it('is deterministic (same inputs -> same candidate ids and manifest)', () => {
+  it('is deterministic and order-invariant', () => {
     const a = discover(methods, problems);
-    const b = discover(methods, problems);
+    const b = discover([...methods].reverse(), [...problems].reverse());
     expect(a.manifest).toBe(b.manifest);
-    expect(a.candidates).toEqual(b.candidates);
+    // Golden manifest: pins version + vocabulary + options + canonical ordering.
+    expect(a.manifest).toBe('263b5d28d2eec2427c75f68c9e25707c89c334ba5da467ad68646e183e073ab0');
   });
 
   it('excludes same-domain pairs', () => {
@@ -1187,6 +1193,13 @@ describe('closed discovery', () => {
     const { candidates } = discover(methods, problems);
     expect(candidates[0].falsification).toMatch(/sandbox run/i);
     expect(candidates[0].engineVersion).toBe(SYNERGY_ENGINE_VERSION);
+  });
+
+  it('prediction flips with passThreshold', () => {
+    const pass = discover(methods, problems, { passThreshold: 0.1 });
+    const fail = discover(methods, problems, { passThreshold: 1.1 });
+    expect(pass.candidates[0].prediction).toBe('pass');
+    expect(fail.candidates[0].prediction).toBe('fail');
   });
 
   it('findBridges returns [] for unindexed ids', () => {
@@ -1220,7 +1233,7 @@ import type {
 } from './types.js';
 import { buildGraph, termDocFrequency, type GraphDoc, type WeightedGraph } from './graph.js';
 import { filterBridge, allPassed, type FilterContext } from './filters.js';
-import { manifestHash, sha256Hex } from './manifest.js';
+import { manifestHash, sha256Hex, stableStringify } from './manifest.js';
 import { vocabularyHash } from './vocabulary.js';
 
 export const SYNERGY_ENGINE_VERSION = '0.1.0';
@@ -1246,7 +1259,19 @@ export const SYNERGY_CALIBRATION = {
 
 function docText(s: MethodSignature | ProblemSignature): string {
   const prims = 'primitives' in s ? s.primitives : s.requiredPrimitives;
-  return [s.name, s.domain, ...prims, ...s.relations.map((r) => r.functor)].join(' ');
+  return [s.name, s.domain, ...prims].join(' ');
+}
+
+function resolveOptions(opts: DiscoverOptions) {
+  return {
+    maxDocFrequency: opts.maxDocFrequency ?? SYNERGY_CALIBRATION.maxDocFrequency,
+    minDocsPerLeg: opts.minDocsPerLeg ?? SYNERGY_CALIBRATION.minDocsPerLeg,
+    topBridges: Math.max(1, opts.topBridges ?? SYNERGY_CALIBRATION.topBridges),
+    passThreshold: opts.passThreshold ?? SYNERGY_CALIBRATION.passThreshold,
+    coverageExponent: opts.coverageExponent ?? SYNERGY_CALIBRATION.coverageExponent,
+    stoplist: opts.stoplist ?? [...SYNERGY_CALIBRATION.stoplist],
+    knownPairs: opts.knownPairs ?? [],
+  };
 }
 
 export function findBridges(graph: WeightedGraph, methodId: string, problemId: string): BridgeEvidence[] {
@@ -1273,13 +1298,9 @@ export function discover(
   problems: ProblemSignature[],
   opts: DiscoverOptions = {},
 ): { candidates: TransferCandidate[]; graph: WeightedGraph; manifest: string } {
-  const maxDocFrequency = opts.maxDocFrequency ?? SYNERGY_CALIBRATION.maxDocFrequency;
-  const minDocsPerLeg = opts.minDocsPerLeg ?? SYNERGY_CALIBRATION.minDocsPerLeg;
-  const topBridges = opts.topBridges ?? SYNERGY_CALIBRATION.topBridges;
-  const passThreshold = opts.passThreshold ?? SYNERGY_CALIBRATION.passThreshold;
-  const coverageExponent = opts.coverageExponent ?? SYNERGY_CALIBRATION.coverageExponent;
-  const stoplist = opts.stoplist ?? [...SYNERGY_CALIBRATION.stoplist];
-  const knownPairs = opts.knownPairs ?? [];
+  const {
+    maxDocFrequency, minDocsPerLeg, topBridges, passThreshold, coverageExponent, stoplist, knownPairs,
+  } = resolveOptions(opts);
 
   const docs: GraphDoc[] = [
     ...methods.map((m) => ({ id: m.id, domain: m.domain, text: docText(m) })),
@@ -1309,7 +1330,11 @@ export function discover(
       const base = top.reduce((s, b) => s + b.score, 0) / top.length;
       const coverage = passing.length / bridges.length;
       const score = Math.round(base * Math.pow(coverage, coverageExponent) * 1000) / 1000;
-      const id = `tc_${sha256Hex(`${m.id}|${p.id}|${SYNERGY_ENGINE_VERSION}`).slice(0, 16)}`;
+      const id = `tc_${sha256Hex([
+        m.id, p.id, SYNERGY_ENGINE_VERSION, String(score),
+        top.map((b) => b.term).join(','),
+        stableStringify(resolved),
+      ].join('|')).slice(0, 16)}`;
       candidates.push({
         id,
         methodId: m.id,
@@ -1331,8 +1356,9 @@ export function discover(
   const manifest = manifestHash([
     SYNERGY_ENGINE_VERSION,
     vocabularyHash(),
-    ...methods.map((m) => m.id),
-    ...problems.map((p) => p.id),
+    stableStringify(resolved),
+    ...methods.map((m) => m.id).sort(),
+    ...problems.map((p) => p.id).sort(),
     ...candidates.map((c) => `${c.id}:${c.score}:${c.bridges.map((b) => b.term).join(',')}`),
   ]);
   return { candidates, graph, manifest };
@@ -1342,7 +1368,7 @@ export function discover(
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run tests/synergy/closedDiscovery.test.ts`
-Expected: PASS (5 tests). If `prediction` is `fail` for the graph bridge that is fine; tests do not assert prediction value.
+Expected: PASS (6 tests). If `prediction` is `fail` for the graph bridge that is fine; tests do not assert prediction value.
 
 - [ ] **Step 5: Commit**
 
