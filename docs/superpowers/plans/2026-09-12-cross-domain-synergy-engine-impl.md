@@ -708,7 +708,7 @@ git commit -m "feat(synergy): add method index with determinism gate"
 ```ts
 // tests/synergy/problemIndex.test.ts
 import { describe, it, expect } from 'vitest';
-import { extractProblem, extractProblems } from '../../src/lib/synergy/problemIndex.js';
+import { extractProblem, extractProblems, detectPrimitives } from '../../src/lib/synergy/problemIndex.js';
 import type { RecourseProblem } from '../../src/lib/problemArchive.js';
 
 const problem: RecourseProblem = {
@@ -725,12 +725,24 @@ describe('problem index', () => {
     expect(p.id).toBe('problem:repro_trend_analyzer');
     expect(p.testHash).toHaveLength(64);
     expect(p.extraction).toBe('heuristic');
-    expect(p.requiredPrimitives).toContain('prediction');
+    expect(p.requiredPrimitives).toEqual(['statistics', 'prediction']);
   });
 
   it('produces no primitives when the text mentions none', () => {
     const p = extractProblem({ ...problem, title: 'Alpha', statement: 'Beta', acceptanceTest: 'assert true;' });
     expect(p.requiredPrimitives).toEqual([]);
+  });
+
+  it('detects controlled primitives with word boundaries', () => {
+    expect(detectPrimitives('signals and risk')).toEqual([]);
+    expect(detectPrimitives('lossless compression')).toEqual([]);
+    expect(detectPrimitives('research')).toEqual([]);
+    expect(detectPrimitives('linear algebra')).toEqual(['linear_algebra']);
+    expect(detectPrimitives('linear_algebra')).toEqual(['linear_algebra']);
+  });
+
+  it('rejects a problem with no id', () => {
+    expect(() => extractProblem({ ...problem, id: '' })).toThrow(/id is required/);
   });
 
   it('extractProblems sorts by id', () => {
@@ -753,23 +765,26 @@ Expected: FAIL — module not found.
 /**
  * Problem extraction from RecourseProblem. Primitive detection is a labeled
  * heuristic over the statement + acceptance test — never claimed as measured.
+ * Limitation: text is lowercased before matching, so camelCase identifiers like
+ * `LossFunction` do NOT match — a conservative, accepted false-negative.
  */
 import type { RecourseProblem } from '../problemArchive.js';
-import type { ProblemSignature, Rel } from './types.js';
+import type { ProblemSignature } from './types.js';
 import { PRIMITIVES, canonicalizeTerm } from './vocabulary.js';
+import { relationsFromPrimitives } from './methodIndex.js';
 import { sha256Hex } from './manifest.js';
 
-export function extractProblem(p: RecourseProblem): ProblemSignature {
-  const text = `${p.title}\n${p.statement}\n${p.acceptanceTest}`.toLowerCase();
-  const requiredPrimitives = PRIMITIVES
-    .filter((prim) => new RegExp(`\\b${String(prim).replace(/_/g, '[_ ]?')}\\b`).test(text))
+/** Heuristic controlled-primitive detector over free text. Word-boundary based. */
+export function detectPrimitives(text: string): string[] {
+  const lower = text.toLowerCase();
+  return PRIMITIVES
+    .filter((prim) => new RegExp(`\\b${prim.replace(/_/g, '[_ ]?')}\\b`).test(lower))
     .map((prim) => canonicalizeTerm(prim));
-  const relations: Rel[] = requiredPrimitives.map((prim, i) => ({
-    functor: prim,
-    type: 'rel',
-    args: [p.domain],
-    order: i + 1,
-  }));
+}
+
+export function extractProblem(p: RecourseProblem): ProblemSignature {
+  if (!p || !p.id) throw new Error('extractProblem: problem id is required');
+  const requiredPrimitives = detectPrimitives(`${p.title}\n${p.statement}\n${p.acceptanceTest}`);
   return {
     id: `problem:${canonicalizeTerm(p.id)}`,
     name: p.title,
@@ -778,7 +793,7 @@ export function extractProblem(p: RecourseProblem): ProblemSignature {
     acceptanceTest: p.acceptanceTest,
     testHash: sha256Hex(p.acceptanceTest),
     extraction: 'heuristic',
-    relations,
+    relations: relationsFromPrimitives(requiredPrimitives, p.domain),
   };
 }
 
@@ -1799,6 +1814,12 @@ export function createSynergyRouter(): Router {
       return res.status(400).json({ success: false, error: 'methods and problems arrays required' });
     }
     const { methods, rejected } = extractMethods(body.methods);
+    const invalidProblem = body.problems.find(
+      (p) => !p || typeof p.id !== 'string' || typeof p.acceptanceTest !== 'string',
+    );
+    if (invalidProblem) {
+      return res.status(400).json({ success: false, error: 'each problem requires string id and acceptanceTest' });
+    }
     const problems = extractProblems(body.problems);
     const { candidates, manifest } = discover(methods, problems, { knownPairs: body.knownPairs ?? [] });
     const map = buildSynergyMap(candidates, { generatedAtRun: `manifest:${manifest}` });
