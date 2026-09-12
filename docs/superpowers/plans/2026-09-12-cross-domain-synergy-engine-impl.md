@@ -1391,7 +1391,7 @@ git commit -m "feat(synergy): add deterministic closed-discovery bridge search"
 // tests/synergy/synergyMap.test.ts
 import { describe, it, expect } from 'vitest';
 import { buildSynergyMap, crossDomainSynergyFor } from '../../src/lib/synergy/synergyMap.js';
-import type { TransferCandidate } from '../../src/lib/synergy/types.js';
+import type { TransferCandidate, SynergyMap } from '../../src/lib/synergy/types.js';
 
 function candidate(id: string, from: string, to: string, score: number): TransferCandidate {
   return {
@@ -1431,6 +1431,38 @@ describe('synergy map', () => {
     expect(math).toBeGreaterThan(empty);
     expect(math).toBeLessThanOrEqual(1);
   });
+
+  it('is order-invariant (canonical output)', () => {
+    const a = buildSynergyMap(candidates, { generatedAtRun: 'run:1' });
+    const b = buildSynergyMap([...candidates].reverse(), { generatedAtRun: 'run:1' });
+    expect(b.manifestHash).toBe(a.manifestHash);
+    expect(b.edges).toEqual(a.edges);
+    expect(b.candidates.map((c) => c.id)).toEqual(a.candidates.map((c) => c.id));
+  });
+
+  it('credits a domain that only appears as the target', () => {
+    const map = buildSynergyMap(candidates, { generatedAtRun: 'run:1' });
+    expect(crossDomainSynergyFor(map, 'health_oncology')).toBe(0.3);
+  });
+
+  it('credits resolved passes and returns a real earned term', () => {
+    const withResolved: SynergyMap = {
+      engineVersion: '0.1.0', generatedAtRun: 'run:1', domains: ['a', 'b'],
+      edges: [{ from: 'a', to: 'b', kind: 'resolved', score: 0.9, passes: 3, attempts: 3, backingIds: ['x'] }],
+      candidates: [], manifestHash: 'h',
+    };
+    expect(crossDomainSynergyFor(withResolved, 'a')).toBe(0.5);
+    expect(crossDomainSynergyFor(withResolved, 'b')).toBe(0.5);
+    expect(crossDomainSynergyFor(withResolved, 'c')).toBe(0);
+  });
+
+  it('scales open potential with score and excludes below-floor candidates', () => {
+    const high = buildSynergyMap([candidate('tc_high', 'mathematics', 'logistics', 0.9)], { generatedAtRun: 'r' });
+    const low = buildSynergyMap([candidate('tc_low', 'mathematics', 'logistics', 0.3)], { generatedAtRun: 'r' });
+    const below = buildSynergyMap([candidate('tc_below', 'mathematics', 'logistics', 0.2)], { generatedAtRun: 'r' });
+    expect(crossDomainSynergyFor(high, 'mathematics')).toBeGreaterThan(crossDomainSynergyFor(low, 'mathematics'));
+    expect(crossDomainSynergyFor(below, 'mathematics')).toBe(0);
+  });
 });
 ```
 
@@ -1464,8 +1496,11 @@ export const SYNERGY_MAP_CALIBRATION = {
 
 export function buildSynergyMap(candidates: TransferCandidate[], opts: SynergyMapOptions = {}): SynergyMap {
   const generatedAtRun = opts.generatedAtRun ?? 'run:manual';
+  const ordered = [...candidates].sort((a, b) =>
+    b.score - a.score || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+  );
   const grouped = new Map<string, SynergyEdge>();
-  for (const c of candidates) {
+  for (const c of ordered) {
     const key = `${c.fromDomain}->${c.toDomain}`;
     const existing = grouped.get(key);
     if (!existing) {
@@ -1482,23 +1517,31 @@ export function buildSynergyMap(candidates: TransferCandidate[], opts: SynergyMa
   const edges = [...grouped.values()].sort((a, b) =>
     a.from < b.from ? -1 : a.from > b.from ? 1 : a.to < b.to ? -1 : a.to > b.to ? 1 : 0,
   );
-  const domains = [...new Set(candidates.flatMap((c) => [c.fromDomain, c.toDomain]))].sort();
+  const domains = [...new Set(ordered.flatMap((c) => [c.fromDomain, c.toDomain]))].sort();
   const manifest = manifestHash([
     SYNERGY_ENGINE_VERSION,
     generatedAtRun,
     ...edges.map((e) => `${e.from}->${e.to}:${e.score}:${e.attempts}`),
-    ...candidates.map((c) => `${c.id}:${c.score}`),
+    ...ordered.map((c) => `${c.id}:${c.score}`),
   ]);
   return {
     engineVersion: SYNERGY_ENGINE_VERSION,
     generatedAtRun,
     domains,
     edges,
-    candidates: [...candidates],
+    candidates: ordered,
     manifestHash: manifest,
   };
 }
 
+/**
+ * Blend of earned (resolved) and open (candidate) synergy for a domain.
+ * Deviation from spec §9 pending Plan 3/4: the earned term sums resolved
+ * `passes` (evidence weight; `buildSynergyMap` emits no resolved edges in
+ * Plan 1) normalized by the global max, and omits `surpriseBits_norm`; the
+ * open term credits a candidate to BOTH endpoints (direction is deliberately
+ * ignored for a per-domain signal).
+ */
 export function crossDomainSynergyFor(
   map: SynergyMap,
   domain: string,
@@ -1520,7 +1563,7 @@ export function crossDomainSynergyFor(
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run tests/synergy/synergyMap.test.ts`
-Expected: PASS (3 tests).
+Expected: PASS (7 tests).
 
 - [ ] **Step 5: Commit**
 
