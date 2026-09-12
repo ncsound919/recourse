@@ -57,44 +57,24 @@ import { otSearch, otHealth as openTargetsHealth } from './src/lib/openTargetsCl
 import { ptSearch, ptHealth as pubTatorHealth, parsePubTatorAnnotations } from './src/lib/pubTatorClient.js';
 import { HARD_MATH_PROBLEMS, ProblemTier } from './src/lib/hardMathProblems.js';
 import { recordMathAttempt, recordBiotechClaim, getMathAttempts, getBiotechClaims, getGoalProgress, MathAttempt, BiotechClaim as LedgerBiotechClaim, initGoalLedger, saveGoalLedger } from './src/lib/goalLedger.js';
-import { pdfSidecarHealth, pdfExtractUrl, pdfExtractBytes, PDF_SIDECAR_DEFAULT_URL } from './src/lib/pdfSidecarClient.js';
-import { fuzzSidecarHealth, fuzzMatch, fuzzDedup, FUZZ_SIDECAR_DEFAULT_URL } from './src/lib/fuzzSidecarClient.js';
-import { biosimHealth, biosimTrial, biosimMontecarlo, biosimSequence, biosimLod95, BIOSIM_SIDECAR_DEFAULT_URL } from './src/lib/biosimSidecarClient.js';
-import { listProblems, getProblem, findGaps, generateHypotheses, designExperiments, scoreProposal, packageGrant } from './src/lib/oncologyGrantEngine.js';
-import { executeResearch, bindToClaims, DEFAULT_RESEARCH_CONFIG } from './src/lib/deterministicResearch.js';
-import { fetchExport, parsePrometheusHypotheses, toResearchSources, PROMETHEUS_DEFAULT_URL } from './src/lib/prometheusBridge.js';
-import { runAgingSweep, runSatSweep, runRiemannSlice } from './src/lib/bfrBridge.js';
-import { oncologyManifest, oncologySimulate, oncologySynthesis, oncologyHealth, oncologyCalibrationState, oncologyCalibrationDatasets, oncologyValidationScorecard, oncologyValidationMatrix, oncologyDiscoveryScreen, oncologyDiscoveryLedger, oncologyEvidence, oncologyResearchUnified, oncologyResearchPipeline, oncologyMechanismFusion, oncologyPredict, ONCOLOGY_DEFAULT_URL } from './src/lib/oncologyEngineBridge.js';
-import type { OncologyPipelineStudy } from './src/lib/oncologyEngineBridge.js';
-import { scientificHealth, dnaAnalyze, proteinAnalyze, geneLookup, statsTTest, SCIENTIFIC_API_DEFAULT_URL } from './src/lib/scientificApiBridge.js';
-import { integrityStatus, trackReproducibility, crossValidate, logAccountability, verifyWork, INTEGRITY_DEFAULT_URL } from './src/lib/integrityBridge.js';
-import { orchestratorHealth, listSystems, submitStudy, listRuns, getRun, listClaims, getValidity, ORCHESTRATOR_DEFAULT_URL } from './src/lib/studyOrchestratorBridge.js';
-import { foldingHealth, submitFold, getFoldRun, listFoldRuns, FOLDING_DEFAULT_URL } from './src/lib/proteinFoldingBridge.js';
-import { PATHOSPHERE_CONTRACTS, buildBounty, buildCurationVote, buildFeeSplit, chainBundle } from './src/lib/pathosphereBridge.js';
-import { umoeHealth, umoeWorkflows, umoePredictions, umoeFields, umoeNetwork, umoeRun, UMOE_DEFAULT_URL } from './src/lib/umoeBridge.js';
-import { chemlabHealth, moleculeProperties, moleculeSimilarity, moleculeDruglikeness, moleculeRisk, simulateKinetics, parseReaction, CHEMLAB_DEFAULT_URL } from './src/lib/chemlabBridge.js';
-import { foresightStatus, foresightSimulate, foresightResistance, foresightToxicity, foresightRemission, foresightBacktest, ONCOFORESIGHT_DEFAULT_URL } from './src/lib/oncoforesightBridge.js';
+import { pdfExtractBytes } from './src/lib/pdfSidecarClient.js';
+import { oncologyHealth } from './src/lib/oncologyEngineBridge.js';
 import { startScienceConductor, stopScienceConductor, runScienceCycle, getConductorStatus, recentFindings, recentCycles } from './src/lib/scienceConductor.js';
 import { globalLensHealth, globalLensConfigured, globalLensBaseUrl } from './src/lib/globalLensBridge.js';
 import { runPublishPass, PUBLISH_DOMAINS } from './src/lib/globalLensPublisher.js';
-import { engineConfig, translationHealth, translationPythonBin, translationRunnerPath, type TranslationEngineId } from './src/lib/translationBridge.js';
 import { musicTherapyFindings } from './src/lib/musicTherapyFindings.js';
 import { renderTuningContrast, TUNING_CAVEATS, benchmarkComparison, tuningContrastModel, TUNING_GRID, TUNING_RECORDS, tuningContrastDetailed, musicVsControlBenchmark, BENCHMARK_NOTE, renderTuningSummary } from './src/lib/musicTherapyTuning.js';
 import { startMathConductor, stopMathConductor, runMathCycle, mathConductorStatus, recentMathCycles, recentMathFindings } from './src/lib/mathConductor.js';
-import { runTrendScan } from './src/lib/trendEngine.js';
-import { fetchDomainPageviews } from './src/lib/trendSources.js';
-import { recentInsights, verifyLedgerChain } from './src/lib/trendLedger.js';
-import { trendHealth, trendScan, trendChangepoint, trendDecompose, TREND_SIDECAR_DEFAULT_URL } from './src/lib/trendSidecarClient.js';
+import { recentInsights } from './src/lib/trendLedger.js';
 import { registerScheduledJob, getSchedulerStatus, setJobEnabled, triggerJob, listScheduledJobs } from './src/lib/jobScheduler.js';
-import { keywireHealth, keywireSummary, keywireCallService, keywireBrainTask, keywireAxiomTest, keywirePm2Status, keywireServers, keywireAuthStatus, KEYWIRE_DEFAULT_URL } from './src/lib/keywireBridge.js';
+import { keywireHealth } from './src/lib/keywireBridge.js';
 import { computeIssueProgress, readIssueRecords, renderIssueDocs, renderIssueIndex } from './src/lib/issueTracker.js';
 import { generateFleetReport, renderDailyReport, recentReports } from './src/lib/researchReports.js';
 import { renderAndPersistAgenda, computeAgenda, selectNextMathMilestone, selectNextOncologyMilestone } from './src/lib/breakthroughAgenda.js';
 import { computeGameProfile, persistGameProfile, leaderboard } from './src/lib/gamification.js';
 import { renderDashboard } from './src/lib/fleetDashboard.js';
 import * as jobSchedulerApi from './src/lib/jobScheduler.js';
-import { zod400, kgNeighborhoodReq, kgBridgesReq, pdfExtractUrlReq, pdfExtractBytesReq, fuzzMatchReq, fuzzDedupReq, biotechClaimExtra, biosimTrialReq, biosimMontecarloReq, biosimSequenceReq, biosimLod95Req, grantHypothesesReq, researchExecuteReq, prometheusExportReq, bfrAgingReq, bfrSatReq, bfrRiemannReq, oncologySimulateReq, sequenceReq, geneLookupReq, ttestReq, integrityPayloadReq, studySubmitReq, foldSubmitReq, pathosphereBountyReq, pathosphereVoteReq, pathosphereSplitReq, pathosphereBundleReq, umoeRunReq, chemlabSmilesReq, chemlabSimilarityReq, chemlabPassthroughReq, chemlabReactionReq, foresightBodyReq } from './src/lib/contracts.js';
-import { oncologyPredictReq, oncologyDiscoveryScreenReq, oncologyResearchPipelineReq, oncologyEvidenceReq, oncologyValidationMatrixReq } from './src/lib/contracts.js';
+import { zod400, kgNeighborhoodReq, kgBridgesReq, biotechClaimExtra } from './src/lib/contracts.js';
 import helmet from 'helmet';
 import { rateLimit } from 'express-rate-limit';
 import { evaluateGrowthDecision, DEFAULT_GROWTH_WEIGHTS } from './src/lib/decisionEngine.js';
@@ -275,6 +255,15 @@ import {
 
 const app = express();
 const PORT = Number(process.env.PORT || 3050);
+import { createStateStore } from './src/lib/stateStore.js';
+import { createKgRouter } from './src/routes/kg.js';
+import { createOncologyRouter } from './src/routes/oncology.js';
+import { createBioRouter } from './src/routes/bio.js';
+import { createBridgesRouter } from './src/routes/bridges.js';
+import { createToolsRouter } from './src/routes/tools.js';
+import { createServicesRouter } from './src/routes/services.js';
+import { createSynergyRouter } from './src/routes/synergy.js';
+import { createVizRouter } from './src/routes/viz.js';
 const STATE_FILE = path.join(process.cwd(), 'recourse_storage.json');
 
 // Math solver state. Hoisted to module top so the function declaration at
@@ -489,7 +478,7 @@ let forgeLedger: ForgeLedgerEntry[] = [];
 let forgeAutopilotOn = false;
 let forgeBusy = false;
 let forgeTimer: NodeJS.Timeout | null = null;
-const FORGE_AUTOPILOT_MS = 2000;
+const FORGE_AUTOPILOT_MS = Math.max(5000, Number(process.env.FORGE_AUTOPILOT_MS) || 2000);
 // Quarantine: dream/backfill specs that fail live re-verify are retried only
 // FORGE_QUARANTINE_LIMIT times, then skipped by nextForgeSpec. Prevents the
 // 2s autopilot from spinning forever on a gene whose source cannot self-host.
@@ -955,9 +944,8 @@ interface SkillImportRecord {
 // Load persisted state if available
 function loadPersistedDreamGenesFromStorage(): Array<{ name: string; domain?: string; code?: string; description?: string; testVectors?: unknown[]; invariantChecks?: Array<{ name: string; passed: boolean }> }> {
   try {
-    if (!fs.existsSync(STATE_FILE)) return [];
-    const raw = fs.readFileSync(STATE_FILE, 'utf-8');
-    const data = JSON.parse(raw);
+    const data = ensureStateStore().load<Record<string, any>>();
+    if (!data) return [];
     const dreamReg = data?.status?.dreamState?.registry;
     return Array.isArray(dreamReg) ? dreamReg : [];
   } catch {
@@ -967,9 +955,8 @@ function loadPersistedDreamGenesFromStorage(): Array<{ name: string; domain?: st
 
 function loadStateFromDisk() {
   try {
-    if (fs.existsSync(STATE_FILE)) {
-      const raw = fs.readFileSync(STATE_FILE, 'utf-8');
-      const data = JSON.parse(raw);
+    const data = ensureStateStore().load<Record<string, any>>();
+    if (data) {
       if (data.registry) registry = data.registry;
       if (data.provenanceEvents) provenanceEvents = data.provenanceEvents;
       if (data.reports) reports = data.reports;
@@ -1074,80 +1061,79 @@ function loadStateFromDisk() {
   }
 }
 
-let saveTimer: NodeJS.Timeout | null = null;
-
 function saveStateToDisk() {
-  if (saveTimer) return;
-  saveTimer = setTimeout(() => {
-    saveTimer = null;
-    try {
-      const payload = {
-        registry,
-        provenanceEvents,
-        reports,
-        anomalies,
-        growthWeights,
-        gitHubBlueprints,
-        swarmStatus,
-        swarmTeamStates,
-        status,
-        intakeSignals,
-        benchmarkHistory,
-        lastGroundAt,
-        lastGroundSummary,
-        intakeAutopilotOn,
-        serverTickAutopilotOn,
-        scienceAutopilotOn,
-        globalLensAutopilotOn,
-        globalLensLastPublish,
-        corpusRoots,
-        corpusArtifacts,
-        corpusLastScan,
-        corpusLastErrors,
-        corpusDispatched,
-        corpusRefilledHashes,
-        skillRoots,
-        skillCatalog,
-        skillLastScan,
-        skillFound,
-        skillPrunedTranslations,
-        skillLastErrors,
-        skillExportRoot,
-        skillExports,
-        skillImports,
-        skillImportPending,
-        selfUseLog,
-        generationLedger,
-        forgeLedger,
-        forgeAutopilotOn,
-        providerMode,
-        builderProfiles,
-        builderJournal,
-        activeBuilderId,
-        builderLastMetaRun,
-        builderLastMutate,
-        builderVariantTrials,
-        intelProposals,
-        dynamicAgenda,
-        devLoopLog,
-        devAutopilotOn,
-        stuckIssues,
-        stuckRepairLedger,
-        capabilityAdoptions,
-        capabilityServed,
-        systemSnapshots,
-        systemBaseline,
-        autonomySettings,
-        mathIteration: mathLoopState.iteration
-      };
-      const tmpFile = `${STATE_FILE}.tmp`;
-      fs.writeFileSync(tmpFile, JSON.stringify(payload, null, 2), 'utf-8');
-      fs.renameSync(tmpFile, STATE_FILE);
-      saveGoalLedger();
-    } catch (err) {
-      console.warn('[Recourse Engine] Could not persist state to disk:', err);
-    }
-  }, 400);
+  ensureStateStore().save();
+}
+
+// The store is created lazily (module vars used in getPayload are declared below).
+let stateStore: ReturnType<typeof createStateStore> | null = null;
+function ensureStateStore(): ReturnType<typeof createStateStore> {
+  if (stateStore) return stateStore;
+  stateStore = createStateStore({
+    stateFile: STATE_FILE,
+    debounceMs: 1500,
+    saveGoalLedger,
+    getPayload: () => ({
+      registry,
+      provenanceEvents,
+      reports,
+      anomalies,
+      growthWeights,
+      gitHubBlueprints,
+      swarmStatus,
+      swarmTeamStates,
+      status,
+      intakeSignals,
+      benchmarkHistory,
+      lastGroundAt,
+      lastGroundSummary,
+      intakeAutopilotOn,
+      serverTickAutopilotOn,
+      scienceAutopilotOn,
+      globalLensAutopilotOn,
+      globalLensLastPublish,
+      corpusRoots,
+      corpusArtifacts,
+      corpusLastScan,
+      corpusLastErrors,
+      corpusDispatched,
+      corpusRefilledHashes,
+      skillRoots,
+      skillCatalog,
+      skillLastScan,
+      skillFound,
+      skillPrunedTranslations,
+      skillLastErrors,
+      skillExportRoot,
+      skillExports,
+      skillImports,
+      skillImportPending,
+      selfUseLog,
+      generationLedger,
+      forgeLedger,
+      forgeAutopilotOn,
+      providerMode,
+      builderProfiles,
+      builderJournal,
+      activeBuilderId,
+      builderLastMetaRun,
+      builderLastMutate,
+      builderVariantTrials,
+      intelProposals,
+      dynamicAgenda,
+      devLoopLog,
+      devAutopilotOn,
+      stuckIssues,
+      stuckRepairLedger,
+      capabilityAdoptions,
+      capabilityServed,
+      systemSnapshots,
+      systemBaseline,
+      autonomySettings,
+      mathIteration: mathLoopState.iteration,
+    }),
+  });
+  return stateStore;
 }
 
 // NOTE: loadStateFromDisk() + reconcileRegistryOnBoot() are intentionally
@@ -1983,206 +1969,11 @@ app.get('/api/recourse/benchmark', (_req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Python NetworkX Knowledge-Graph sidecar proxy. The sidecar is a stateless
-// compute service: Recourse supplies the oncology graph (from the TS canonical
-// KG) and the sidecar returns real networkx metrics. Status is honest - when
-// the sidecar is down these report offline and never fake a metric.
+// Python NetworkX Knowledge-Graph sidecar proxy + live evidence layer +
+// closed-loop falsification pipeline. Extracted to src/routes/kg.ts (stateless
+// handlers over lib modules; no server-internal state).
 // ---------------------------------------------------------------------------
-app.get('/api/recourse/kg/sidecar', async (_req, res) => {
-  const health = await kgSidecarHealth();
-  res.json({
-    success: true,
-    online: health.ok,
-    service: health.service,
-    networkx: health.networkx,
-    sidecarUrl: process.env.KG_SIDECAR_URL || KG_SIDECAR_DEFAULT_URL,
-    graphNodes: oncologyKgToGraph().nodes.length,
-    graphEdges: oncologyKgToGraph().edges.length,
-    latencyMs: health.latencyMs,
-    error: health.error ?? null,
-  });
-});
-
-app.post('/api/recourse/kg/sidecar/centrality', async (_req, res) => {
-  const payload = oncologyKgToGraph();
-  const result = await kgCentrality(payload);
-  res.json({ success: true, ...result });
-});
-
-app.post('/api/recourse/kg/sidecar/neighborhood', async (req, res) => {
-  const body = zod400(kgNeighborhoodReq, req, res);
-  if (!body) return;
-  const result = await kgNeighborhood(oncologyKgToGraph(), body.target);
-  res.json({ success: true, ...result });
-});
-
-app.post('/api/recourse/kg/sidecar/bridges', async (req, res) => {
-  const body = zod400(kgBridgesReq, req, res);
-  if (!body) return;
-  const result = await kgBridges(oncologyKgToGraph(), body.from, body.to);
-  res.json({ success: true, ...result });
-});
-
-// ---------------------------------------------------------------------------
-// Live evidence layer (Phase 1 of the closed-loop falsification program):
-// Open Targets Platform + PubTator 3.0 -> grounded oncology graph.
-// Honest: provider failures are reported per-provider (ok:false) and the graph
-// is built from whatever real data the live APIs returned - never fabricated.
-// ---------------------------------------------------------------------------
-app.get('/api/recourse/kg/live/status', async (_req, res) => {
-  const health = await liveEvidenceHealth();
-  res.json({
-    success: true,
-    providers: health,
-    note: 'Status of the Open Targets + PubTator 3.0 live evidence providers.',
-  });
-});
-
-app.post('/api/recourse/kg/live/graph', async (_req, res) => {
-  const result = await buildLiveOncologyGraph();
-  res.json({
-    success: true,
-    ...result,
-  });
-});
-
-app.post('/api/recourse/kg/live/search', async (req, res) => {
-  const q = typeof req.body?.query === 'string' ? req.body.query.trim() : '';
-  if (!q || q.length > 300) {
-    res.status(400).json({ success: false, error: 'query must be a non-empty string (max 300 chars)' });
-    return;
-  }
-  const [ot, pt] = await Promise.all([
-    otSearch(q, ['disease', 'target'], 5),
-    ptSearch(q, { pageSize: 3 }),
-  ]);
-  res.json({
-    success: true,
-    query: q,
-    openTargets: ot,
-    pubTator: {
-      ok: pt.ok,
-      error: pt.error,
-      cached: pt.cached,
-      latencyMs: pt.latencyMs,
-      articles: pt.data?.articles.map((a) => ({ pmid: a.pmid, title: a.title, journal: a.journal, doi: a.doi, entities: a.entities })) ?? [],
-    },
-  });
-});
-
-app.post('/api/recourse/kg/live/annotate', async (req, res) => {
-  const text = typeof req.body?.text === 'string' ? req.body.text : '';
-  if (!text || text.length > 20000) {
-    res.status(400).json({ success: false, error: 'text must be a non-empty string (max 20000 chars)' });
-    return;
-  }
-  // Pure local parser over supplied text_hl-format highlights; no network.
-  const entities = parsePubTatorAnnotations(text);
-  res.json({ success: true, entities });
-});
-
-// ---------------------------------------------------------------------------
-// Phase 2: Evidence-to-ODE kinetic synthesizer. Builds the live graph then
-// maps Open Targets + PubTator evidence into a concrete OdeSimulationParams
-// bundle (Overlay Oncology solveOdeTumorImmuneSystem contract) with per-
-// parameter provenance. Every parameter is labeled evidence-derived /
-// literature-prior / canonical / calibrated — nothing is invented biology.
-// ---------------------------------------------------------------------------
-app.post('/api/recourse/kg/live/ode-params', async (req, res) => {
-  const diseaseId = typeof req.body?.diseaseId === 'string' && req.body.diseaseId ? req.body.diseaseId : undefined;
-  const graphResult = await buildLiveOncologyGraph();
-  if (!graphResult.ok) {
-    res.status(502).json({ success: false, error: graphResult.error ?? 'live graph build failed' });
-    return;
-  }
-  const bundle = await synthesizeOdeKinetics({ graph: graphResult, diseaseId });
-  res.json({ success: true, ...bundle });
-});
-
-// ---------------------------------------------------------------------------
-// Phase 3: Combinatorial adaptive dosing optimizer. Runs the evidence-
-// synthesized (or canonical) ODE params through a therapy-mode × dose sweep
-// and reports per-arm cure-reachability + a seeded subclone-extinction
-// probability. Arms are real deterministic ODE runs; extinctionProbability is
-// an ensemble fraction, explicitly not a fitted clinical statistic.
-// ---------------------------------------------------------------------------
-app.post('/api/recourse/kg/live/optimize', async (req, res) => {
-  const diseaseId = typeof req.body?.diseaseId === 'string' && req.body.diseaseId ? req.body.diseaseId : undefined;
-  const doses = Array.isArray(req.body?.doses)
-    ? req.body.doses.filter((d: unknown) => typeof d === 'number' && d > 0).slice(0, 8)
-    : undefined;
-  const modes = Array.isArray(req.body?.modes)
-    ? req.body.modes.filter((m: unknown) => typeof m === 'string')
-    : undefined;
-  const graphResult = await buildLiveOncologyGraph();
-  if (!graphResult.ok) {
-    res.status(502).json({ success: false, error: graphResult.error ?? 'live graph build failed' });
-    return;
-  }
-  const bundle = await synthesizeOdeKinetics({ graph: graphResult, diseaseId });
-  if (!bundle.ok) {
-    res.status(502).json({ success: false, error: bundle.error ?? 'synthesis failed' });
-    return;
-  }
-  const result = await runDosingSweep(bundle.params, { doses, modes });
-  res.json({
-    success: true,
-    diseaseId: diseaseId ?? null,
-    params: bundle.params,
-    provenance: bundle.provenance,
-    ...result,
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Phase 4: Standards interop (SBML Level 3 / PhysiCell XML) + cryptographic
-// evidence dossier for one full evidence→params→optimization pipeline run.
-// The dossier hash-chains every stage so any tampering is detectable.
-// ---------------------------------------------------------------------------
-app.post('/api/recourse/kg/live/pipeline', async (req, res) => {
-  const diseaseId = typeof req.body?.diseaseId === 'string' && req.body.diseaseId ? req.body.diseaseId : undefined;
-  const doses = Array.isArray(req.body?.doses)
-    ? req.body.doses.filter((d: unknown) => typeof d === 'number' && d > 0).slice(0, 8)
-    : undefined;
-  const modes = Array.isArray(req.body?.modes)
-    ? req.body.modes.filter((m: unknown) => typeof m === 'string')
-    : undefined;
-
-  const graphResult = await buildLiveOncologyGraph();
-  if (!graphResult.ok) {
-    res.status(502).json({ success: false, error: graphResult.error ?? 'live graph build failed' });
-    return;
-  }
-  const bundle = await synthesizeOdeKinetics({ graph: graphResult, diseaseId });
-  if (!bundle.ok) {
-    res.status(502).json({ success: false, error: bundle.error ?? 'synthesis failed' });
-    return;
-  }
-  const opt = await runDosingSweep(bundle.params, { doses, modes });
-  const sbml = exportOdeToSbml(bundle.params);
-  const physicell = exportOdeToPhysicell(bundle.params);
-  const dossier = buildEvidenceDossier({
-    graph: graphResult,
-    params: bundle.params,
-    paramProvenance: bundle.provenance.map((p) => ({ key: p.key, origin: p.origin, evidence: p.evidence, confidence: p.confidence })),
-    arms: opt.arms.map((a) => ({ arm: `${a.therapyMode}@${a.drugDose}`, finalVolume: a.finalVolume_mm3, reachable: a.reachability.isReachable })),
-    extinction: { extinctionProbability: opt.extinction.extinctionProbability, nRuns: opt.extinction.nRuns },
-    sbml: { hash: crypto.createHash('sha256').update(sbml.sbml).digest('hex'), ok: sbml.ok },
-    physicell: { hash: crypto.createHash('sha256').update(physicell.xml).digest('hex'), ok: physicell.ok },
-  });
-
-  res.json({
-    success: true,
-    diseaseId: diseaseId ?? null,
-    dossier,
-    provenance: bundle.provenance.map((p) => ({ key: p.key, value: p.value, origin: p.origin, confidence: p.confidence, evidence: p.evidence })),
-    arms: opt.arms.map((a) => ({ therapyMode: a.therapyMode, drugDose: a.drugDose, finalVolume_mm3: a.finalVolume_mm3, finalResistantFraction: a.finalResistantFraction, minHealthy: a.minHealthy, reachable: a.reachability.isReachable, failureReason: a.reachability.failureReason })),
-    sbml: { ok: sbml.ok, level: sbml.level, version: sbml.version, speciesCount: sbml.speciesCount, parameterCount: sbml.parameterCount, reactionCount: sbml.reactionCount, note: sbml.modelNotes },
-    physicell: { ok: physicell.ok, cellCount: physicell.cellCount, parameterCount: physicell.parameterCount, note: physicell.note },
-    optimization: { bestArmKey: opt.bestArmKey, rankedArms: opt.rankedArms, extinction: opt.extinction },
-    params: bundle.params,
-  });
-});
+app.use('/api/recourse/kg', createKgRouter());
 
 // ---------------------------------------------------------------------------
 // Python PDF sidecar proxy (PyMuPDF text extraction over a URL or bytes) and
@@ -2190,704 +1981,51 @@ app.post('/api/recourse/kg/live/pipeline', async (req, res) => {
 // stateless compute and honestly report offline (ok:false) when their service
 // is down - never a fabricated extract or match.
 // ---------------------------------------------------------------------------
-app.get('/api/recourse/pdf/sidecar', async (_req, res) => {
-  const health = await pdfSidecarHealth();
-  res.json({
-    success: true,
-    online: health.ok,
-    service: health.service,
-    pymupdf: health.pymupdf,
-    sidecarUrl: process.env.PDF_SIDECAR_URL || PDF_SIDECAR_DEFAULT_URL,
-    latencyMs: health.latencyMs,
-    error: health.error ?? null,
-  });
-});
-
-app.post('/api/recourse/pdf/extract-url', async (req, res) => {
-  const body = zod400(pdfExtractUrlReq, req, res);
-  if (!body) return;
-  const result = await pdfExtractUrl(body.url, body.max_pages ? { maxPages: body.max_pages } : {});
-  res.json({ success: true, ...result });
-});
-
-app.post('/api/recourse/pdf/extract-bytes', async (req, res) => {
-  const body = zod400(pdfExtractBytesReq, req, res);
-  if (!body) return;
-  const result = await pdfExtractBytes(body.data_base64, {
-    ...(body.filename ? { filename: body.filename } : {}),
-    ...(body.max_pages ? { maxPages: body.max_pages } : {}),
-  });
-  res.json({ success: true, ...result });
-});
-
-app.get('/api/recourse/fuzz/sidecar', async (_req, res) => {
-  const health = await fuzzSidecarHealth();
-  res.json({
-    success: true,
-    online: health.ok,
-    service: health.service,
-    rapidfuzz: health.rapidfuzz,
-    sidecarUrl: process.env.FUZZ_SIDECAR_URL || FUZZ_SIDECAR_DEFAULT_URL,
-    latencyMs: health.latencyMs,
-    error: health.error ?? null,
-  });
-});
-
-app.post('/api/recourse/fuzz/match', async (req, res) => {
-  const body = zod400(fuzzMatchReq, req, res);
-  if (!body) return;
-  const result = await fuzzMatch(body.needle, body.candidates, {
-    ...(body.scorer ? { scorer: body.scorer } : {}),
-    ...(body.threshold !== undefined ? { threshold: body.threshold } : {}),
-    ...(body.limit !== undefined ? { limit: body.limit } : {}),
-  });
-  res.json({ success: true, ...result });
-});
-
-app.post('/api/recourse/fuzz/dedup', async (req, res) => {
-  const body = zod400(fuzzDedupReq, req, res);
-  if (!body) return;
-  const result = await fuzzDedup(body.names, {
-    ...(body.scorer ? { scorer: body.scorer } : {}),
-    ...(body.threshold !== undefined ? { threshold: body.threshold } : {}),
-  });
-  res.json({ success: true, ...result });
-});
+// ---------------------------------------------------------------------------
+// pdf / fuzz / grant / research / prometheus / bfr bridges. Extracted to
+// src/routes/tools.ts (stateless proxies over lib modules).
+// ---------------------------------------------------------------------------
+app.use('/api/recourse', createToolsRouter());
 
 // ---------------------------------------------------------------------------
 // BioSim sidecar proxy (Monte Carlo tumor/CAR-T + sequencing detection).
 // Stateless compute; honestly reports offline (ok:false) when down.
 // ---------------------------------------------------------------------------
-app.get('/api/recourse/biosim/sidecar', async (_req, res) => {
-  const health = await biosimHealth();
-  res.json({
-    success: true,
-    online: health.ok,
-    service: health.service,
-    numpy: (health as { numpy?: string }).numpy ?? null,
-    sidecarUrl: process.env.BIOSIM_SIDECAR_URL || BIOSIM_SIDECAR_DEFAULT_URL,
-    latencyMs: health.latencyMs,
-    error: health.error ?? null,
-  });
-});
-
-app.post('/api/recourse/biosim/trial', async (req, res) => {
-  const body = zod400(biosimTrialReq, req, res);
-  if (!body) return;
-  const result = await biosimTrial(body);
-  res.json({ success: true, ...result });
-});
-
-app.post('/api/recourse/biosim/montecarlo', async (req, res) => {
-  const body = zod400(biosimMontecarloReq, req, res);
-  if (!body) return;
-  const result = await biosimMontecarlo(body);
-  res.json({ success: true, ...result });
-});
-
-app.post('/api/recourse/biosim/sequence', async (req, res) => {
-  const body = zod400(biosimSequenceReq, req, res);
-  if (!body) return;
-  const result = await biosimSequence(body);
-  res.json({ success: true, ...result });
-});
-
-app.post('/api/recourse/biosim/lod95', async (req, res) => {
-  const body = zod400(biosimLod95Req, req, res);
-  if (!body) return;
-  const result = await biosimLod95(body);
-  res.json({ success: true, ...result });
-});
+// biosim sidecar + biotech scientific API bridges. Extracted to
+// src/routes/bio.ts (stateless proxies over lib modules).
+// ---------------------------------------------------------------------------
+app.use('/api/recourse', createBioRouter());
 
 // ---------------------------------------------------------------------------
-// Oncology grant engine (seed registry Stages 1-4, deterministic, no LLM).
+// Data Visualizer sidecar proxy (curated matplotlib scenes -> PNG artifacts).
+// Stateless compute; honestly reports offline (ok:false) when down.
 // ---------------------------------------------------------------------------
-app.get('/api/recourse/grant/problems', (_req, res) => {
-  const problems = listProblems().map((p) => ({
-    problem_id: p.problem_id,
-    title: p.title,
-    summary: p.summary,
-    subMechanisms: p.subMechanisms.length,
-    sources: Object.keys(p.sources).length,
-    lastUpdated: p.lastUpdated,
-  }));
-  res.json({ success: true, count: problems.length, problems });
-});
-
-app.get('/api/recourse/grant/problems/:id', (req, res) => {
-  try {
-    res.json({ success: true, problem: getProblem(req.params.id) });
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'unknown problem';
-    res.status(404).json({ success: false, error: message });
-  }
-});
-
-app.post('/api/recourse/grant/hypotheses', (req, res) => {
-  const body = zod400(grantHypothesesReq, req, res);
-  if (!body) return;
-  try {
-    const gaps = findGaps(body.problemId);
-    const hypotheses = generateHypotheses(body.problemId);
-    const experiments = designExperiments(body.problemId);
-    const scored = hypotheses.map((h, i) => ({ hypothesis: h, experiment: experiments[i] ?? null, review: experiments[i] ? scoreProposal(h, experiments[i]) : null }));
-    res.json({ success: true, problemId: body.problemId, gaps, hypotheses, experiments, scored });
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'grant pipeline failed';
-    res.status(404).json({ success: false, error: message });
-  }
-});
-
-app.post('/api/recourse/grant/package', (req, res) => {
-  const body = zod400(grantHypothesesReq, req, res);
-  if (!body) return;
-  try {
-    res.json({ success: true, package: packageGrant(body.problemId) });
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'packaging failed';
-    res.status(400).json({ success: false, error: message });
-  }
-});
+app.use('/api/recourse/viz', createVizRouter());
 
 // ---------------------------------------------------------------------------
-// Deterministic research (in-process; no external fetch; bit-reproducible).
 // ---------------------------------------------------------------------------
-app.post('/api/recourse/research/execute', (req, res) => {
-  const body = zod400(researchExecuteReq, req, res);
-  if (!body) return;
-  const query = {
-    id: body.query.id,
-    timestamp: Date.now(),
-    topic: body.query.topic,
-    intent: (body.query.intent ?? 'literature_scan') as 'literature_scan' | 'fact_check' | 'trend_detection' | 'evidence_collection',
-    scope: { domains: body.query.domains },
-    constraints: { minRelevanceScore: body.query.minRelevance },
-  };
-  const sources = body.sources.map((s) => ({
-    id: s.id,
-    title: s.title,
-    url: s.url,
-    domain: s.domain,
-    contentPreview: s.contentPreview ?? `${s.title} — ${s.domain}`,
-    metadata: {
-      publishedAt: s.publishedAt,
-      authors: s.authors,
-      doi: s.doi,
-      accessibilityStatus: (s.openAccess === false ? 'paywalled' : 'open') as 'open' | 'paywalled' | 'restricted',
-    },
-    fetchedAt: Date.now(),
-  }));
-  const result = executeResearch(query, sources, {
-    ...DEFAULT_RESEARCH_CONFIG,
-    ...(body.query.minRelevance !== undefined ? { minRelevance: body.query.minRelevance } : {}),
-    ...(body.query.threshold !== undefined ? { dedupThreshold: body.query.threshold } : {}),
-  });
-  const bindings = body.claims ? bindToClaims(result, body.claims) : [];
-  res.json({ success: true, ...result, bindings });
-});
-
-// ---------------------------------------------------------------------------
-// Prometheus bridge (external engine export; ok:false when down, never mock).
-// ---------------------------------------------------------------------------
-app.post('/api/recourse/prometheus/export', async (req, res) => {
-  const body = zod400(prometheusExportReq, req, res);
-  if (!body) return;
-  const result = await fetchExport(body.entity, body.format ?? 'json');
-  if (!result.ok) return res.json({ success: true, ...result });
-  if (body.entity === 'hypotheses' && (body.format ?? 'json') === 'json') {
-    const rows = parsePrometheusHypotheses(result.data);
-    return res.json({ success: true, ...result, rows, researchSources: toResearchSources(rows) });
-  }
-  res.json({ success: true, ...result });
-});
-
-app.get('/api/recourse/prometheus/status', (_req, res) => {
-  res.json({ success: true, url: process.env.PROMETHEUS_URL || PROMETHEUS_DEFAULT_URL, note: 'external engine; use POST /api/recourse/prometheus/export to pull rows' });
-});
-
-// ---------------------------------------------------------------------------
-// BFR lightweight sweeps (seeded SIMULATED/ESTIMATE proxies, deterministic).
-// ---------------------------------------------------------------------------
-app.post('/api/recourse/bfr/aging', (req, res) => {
-  const body = zod400(bfrAgingReq, req, res);
-  if (!body) return;
-  res.json({
-    success: true,
-    sweep: runAgingSweep(body.hallmarks ?? ['genomic_instability', 'cellular_senescence'], body.organisms ?? ['mouse'], body.seed ?? 1),
-  });
-});
-
-app.post('/api/recourse/bfr/sat', (req, res) => {
-  const body = zod400(bfrSatReq, req, res);
-  if (!body) return;
-  res.json({ success: true, sweep: runSatSweep(body.nVars ?? 50, body.nInstances ?? 100, body.seed ?? 1) });
-});
-
-app.post('/api/recourse/bfr/riemann', (req, res) => {
-  const body = zod400(bfrRiemannReq, req, res);
-  if (!body) return;
-  res.json({ success: true, sweep: runRiemannSlice(body.tStart ?? 14, body.tEnd ?? 100, body.points ?? 16, body.seed ?? 1) });
-});
-
+// (grant / research / prometheus / bfr bridges live in src/routes/tools.ts,
+// mounted under /api/recourse)
 // ---------------------------------------------------------------------------
 // Overlay Oncology engine bridge (external Next app; ok:false when down).
 // Default :3000 collides with Recourse dev — set ONCOLOGY_URL when both run.
 // ---------------------------------------------------------------------------
-app.get('/api/recourse/oncology/status', async (_req, res) => {
-  const manifest = await oncologyManifest();
-  res.json({
-    success: true,
-    online: manifest.ok,
-    sidecarUrl: process.env.ONCOLOGY_URL || ONCOLOGY_DEFAULT_URL,
-    manifest: manifest.ok ? manifest.manifest : null,
-    latencyMs: manifest.latencyMs,
-    error: manifest.error ?? null,
-  });
-});
-
-app.post('/api/recourse/oncology/simulate', async (req, res) => {
-  const body = zod400(oncologySimulateReq, req, res);
-  if (!body) return;
-  const result = await oncologySimulate(body.input);
-  res.json({ success: true, ...result });
-});
-
-app.get('/api/recourse/oncology/synthesis', async (_req, res) => {
-  const result = await oncologySynthesis();
-  res.json({ success: true, ...result });
-});
-
 // ---------------------------------------------------------------------------
 // Overlay Oncology AGGREGATE bridge — Decon, QLCCE, ATTEC, ctDNA/MRD,
-// Oncograph, HelixForge and daraxonrasib already run INSIDE the oncology host.
-// Recourse reaches all of them through these proxy routes (one client), each
-// availability-gated: ok:false with the real status when the host is down,
-// never a fabricated result. Contracts verified against the route sources.
+// Oncograph, HelixForge, daraxonrasib run INSIDE the oncology host; Recourse
+// reaches all through these proxies (one client). Extracted to
+// src/routes/oncology.ts (stateless bridges over lib modules).
 // ---------------------------------------------------------------------------
-app.get('/api/recourse/oncology/health', async (_req, res) => {
-  const result = await oncologyHealth();
-  res.json({ success: true, online: result.ok, ...result });
-});
-
-app.get('/api/recourse/oncology/calibration/state', async (_req, res) => {
-  const result = await oncologyCalibrationState();
-  res.json({ success: true, ...result });
-});
-
-app.get('/api/recourse/oncology/calibration/datasets', async (_req, res) => {
-  const result = await oncologyCalibrationDatasets();
-  res.json({ success: true, ...result });
-});
-
-app.get('/api/recourse/oncology/validation/scorecard', async (_req, res) => {
-  const result = await oncologyValidationScorecard();
-  res.json({ success: result.ok, ...result });
-});
-
-app.get('/api/recourse/oncology/validation/matrix', async (req, res) => {
-  const parsed = oncologyValidationMatrixReq.safeParse({
-    ...(typeof req.query.train === 'string' ? { train: req.query.train.split(',').map((s) => s.trim()).filter(Boolean) } : {}),
-    ...(typeof req.query.valid === 'string' ? { valid: req.query.valid.split(',').map((s) => s.trim()).filter(Boolean) } : {}),
-  });
-  if (!parsed.success) return res.status(400).json({ success: false, error: 'invalid train/valid cohorts' });
-  const result = await oncologyValidationMatrix({ train: parsed.data.train, valid: parsed.data.valid });
-  res.json({ success: result.ok, ...result });
-});
-
-app.post('/api/recourse/oncology/discovery/screen', async (req, res) => {
-  const body = zod400(oncologyDiscoveryScreenReq, req, res);
-  if (!body) return;
-  const result = await oncologyDiscoveryScreen(body.hypotheses, { seed: body.seed, useQueue: body.useQueue });
-  res.json({ success: result.ok, ...result });
-});
-
-app.get('/api/recourse/oncology/discovery/ledger', async (_req, res) => {
-  const result = await oncologyDiscoveryLedger();
-  res.json({ success: true, ...result });
-});
-
-app.get('/api/recourse/oncology/evidence', async (req, res) => {
-  const cohort = typeof req.query.cohort === 'string' ? req.query.cohort : undefined;
-  const gene = typeof req.query.gene === 'string' ? req.query.gene : undefined;
-  const parsed = oncologyEvidenceReq.safeParse({ cohort, gene });
-  if (!parsed.success) return res.status(400).json({ success: false, error: 'invalid cohort/gene' });
-  const result = await oncologyEvidence({ cohort: parsed.data.cohort, gene: parsed.data.gene });
-  res.json({ success: result.ok, ...result });
-});
-
-app.get('/api/recourse/oncology/research/unified', async (_req, res) => {
-  const result = await oncologyResearchUnified();
-  res.json({ success: result.ok, ...result });
-});
-
-app.post('/api/recourse/oncology/research/pipeline', async (req, res) => {
-  const body = zod400(oncologyResearchPipelineReq, req, res);
-  if (!body) return;
-  const result = await oncologyResearchPipeline(body as OncologyPipelineStudy);
-  res.json({ success: result.ok, ...result });
-});
-
-app.get('/api/recourse/oncology/mechanism-fusion', async (_req, res) => {
-  const result = await oncologyMechanismFusion();
-  res.json({ success: result.ok, ...result });
-});
-
-app.post('/api/recourse/oncology/predict', async (req, res) => {
-  const body = zod400(oncologyPredictReq, req, res);
-  if (!body) return;
-  const result = await oncologyPredict(body);
-  // The upstream route honestly returns 422/501 when data/model is missing —
-  // forward that verdict instead of hiding it behind success:true.
-  res.json({ success: result.ok, ...result });
-});
-
-/**
- * Integrated oncology systems status — one dashboard over every oncology
- * bridge Recourse talks to. Every row is a REAL health probe; a down/unset
- * service is reported offline with its error, never fabricated.
- */
-app.get('/api/recourse/oncology/systems', async (_req, res) => {
-  const probes: Array<{ id: string; name: string; run: () => Promise<{ ok: boolean; latencyMs?: number; error?: string }> }> = [
-    { id: 'oncology', name: 'Overlay Oncology (aggregate host)', run: () => oncologyHealth(undefined, 4000) },
-    { id: 'umoe', name: 'UMOE (mechanistic engine)', run: () => umoeHealth(undefined, 4000) },
-    { id: 'foresight', name: 'OncoForesight', run: () => foresightStatus(undefined, 4000) },
-    { id: 'chemlab', name: 'Overlay-Chemlab', run: () => chemlabHealth(undefined, 4000) },
-    { id: 'folding', name: 'Protein folding', run: () => foldingHealth(undefined, 4000) },
-    { id: 'scientific_api', name: 'Scientific API', run: () => scientificHealth(undefined, 4000) },
-    { id: 'integrity', name: 'Research integrity', run: () => integrityStatus(undefined, 4000) },
-    { id: 'orchestrator', name: 'Study orchestrator', run: () => orchestratorHealth(undefined, 4000) },
-    { id: 'biosim', name: 'BioSim sidecar', run: () => biosimHealth(undefined, 4000) },
-    { id: 'kg', name: 'Knowledge-graph sidecar', run: () => kgSidecarHealth(undefined, 4000) },
-    { id: 'open_targets', name: 'Open Targets Platform (live)', run: () => openTargetsHealth(4000) },
-    { id: 'pubtator', name: 'PubTator 3.0 (live)', run: () => pubTatorHealth(4000) },
-  ];
-  const rows = await Promise.all(
-    probes.map(async (p) => {
-      const r = await p.run().catch((err) => ({ ok: false, latencyMs: 0, error: err instanceof Error ? err.message : String(err) }));
-      return { id: p.id, name: p.name, online: r.ok === true, latencyMs: r.latencyMs ?? 0, error: r.error ?? null };
-    }),
-  );
-  res.json({
-    success: true,
-    generatedAt: new Date().toISOString(),
-    online: rows.filter((r) => r.online).length,
-    total: rows.length,
-    systems: rows,
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Biotech scientific API bridge (numpy workbench :8090; ok:false when down).
-// ---------------------------------------------------------------------------
-app.get('/api/recourse/bio/status', async (_req, res) => {
-  const health = await scientificHealth();
-  res.json({
-    success: true,
-    online: health.ok,
-    sidecarUrl: process.env.SCIENTIFIC_API_URL || SCIENTIFIC_API_DEFAULT_URL,
-    latencyMs: health.latencyMs,
-    error: health.error ?? null,
-  });
-});
-
-app.post('/api/recourse/bio/dna/analyze', async (req, res) => {
-  const body = zod400(sequenceReq, req, res);
-  if (!body) return;
-  res.json({ success: true, ...(await dnaAnalyze(body.sequence)) });
-});
-
-app.post('/api/recourse/bio/protein/analyze', async (req, res) => {
-  const body = zod400(sequenceReq, req, res);
-  if (!body) return;
-  res.json({ success: true, ...(await proteinAnalyze(body.sequence)) });
-});
-
-app.get('/api/recourse/bio/gene/:symbol', async (req, res) => {
-  const parsed = geneLookupReq.safeParse({ symbol: req.params.symbol });
-  if (!parsed.success) return res.status(400).json({ success: false, error: 'invalid symbol' });
-  res.json({ success: true, ...(await geneLookup(parsed.data.symbol)) });
-});
-
-app.post('/api/recourse/bio/stats/ttest', async (req, res) => {
-  const body = zod400(ttestReq, req, res);
-  if (!body) return;
-  res.json({ success: true, ...(await statsTTest(body.a, body.b)) });
-});
+app.use('/api/recourse/oncology', createOncologyRouter());
 
 // ---------------------------------------------------------------------------
 // Research integrity bridge (:8025; reproducibility/custody wrapper).
 // ---------------------------------------------------------------------------
-app.get('/api/recourse/integrity/status', async (_req, res) => {
-  const status = await integrityStatus();
-  res.json({
-    success: true,
-    online: status.ok,
-    sidecarUrl: process.env.INTEGRITY_URL || INTEGRITY_DEFAULT_URL,
-    status: status.ok ? status.status : null,
-    latencyMs: status.latencyMs,
-    error: status.error ?? null,
-  });
-});
-
-app.post('/api/recourse/integrity/reproducibility', async (req, res) => {
-  const body = zod400(integrityPayloadReq, req, res);
-  if (!body) return;
-  res.json({ success: true, ...(await trackReproducibility(body)) });
-});
-
-app.post('/api/recourse/integrity/cross-validation', async (req, res) => {
-  const body = zod400(integrityPayloadReq, req, res);
-  if (!body) return;
-  res.json({ success: true, ...(await crossValidate(body)) });
-});
-
-app.post('/api/recourse/integrity/accountability', async (req, res) => {
-  const body = zod400(integrityPayloadReq, req, res);
-  if (!body) return;
-  res.json({ success: true, ...(await logAccountability(body)) });
-});
-
-app.post('/api/recourse/integrity/verification', async (req, res) => {
-  const body = zod400(integrityPayloadReq, req, res);
-  if (!body) return;
-  res.json({ success: true, ...(await verifyWork(body)) });
-});
-
 // ---------------------------------------------------------------------------
-// Study orchestrator bridge (:8099; fleet research commander).
+// integrity / studies / folding / pathosphere / umoe / chemlab / foresight
+// bridges. Extracted to src/routes/bridges.ts (stateless proxies over libs).
 // ---------------------------------------------------------------------------
-app.get('/api/recourse/studies/health', async (_req, res) => {
-  const health = await orchestratorHealth();
-  res.json({
-    success: true,
-    online: health.ok,
-    sidecarUrl: process.env.ORCHESTRATOR_URL || ORCHESTRATOR_DEFAULT_URL,
-    latencyMs: health.latencyMs,
-    error: health.error ?? null,
-  });
-});
-
-app.get('/api/recourse/studies/systems', async (_req, res) => {
-  res.json({ success: true, ...(await listSystems()) });
-});
-
-app.post('/api/recourse/studies', async (req, res) => {
-  const body = zod400(studySubmitReq, req, res);
-  if (!body) return;
-  res.json({ success: true, ...(await submitStudy(body)) });
-});
-
-app.get('/api/recourse/studies/runs', async (_req, res) => {
-  res.json({ success: true, ...(await listRuns()) });
-});
-
-app.get('/api/recourse/studies/runs/:runId', async (req, res) => {
-  res.json({ success: true, ...(await getRun(req.params.runId)) });
-});
-
-app.get('/api/recourse/studies/claims', async (_req, res) => {
-  res.json({ success: true, ...(await listClaims()) });
-});
-
-app.get('/api/recourse/studies/validity', async (_req, res) => {
-  res.json({ success: true, ...(await getValidity()) });
-});
-
-// ---------------------------------------------------------------------------
-// BioSim-Fusion protein folding bridge (:8000; ok:false when down).
-// ---------------------------------------------------------------------------
-app.get('/api/recourse/folding/status', async (_req, res) => {
-  const health = await foldingHealth();
-  res.json({
-    success: true,
-    online: health.ok,
-    sidecarUrl: process.env.FOLDING_URL || FOLDING_DEFAULT_URL,
-    latencyMs: health.latencyMs,
-    error: health.error ?? null,
-  });
-});
-
-app.post('/api/recourse/folding/fold', async (req, res) => {
-  const body = zod400(foldSubmitReq, req, res);
-  if (!body) return;
-  res.json({ success: true, ...(await submitFold(body)) });
-});
-
-app.get('/api/recourse/folding/run/:runId', async (req, res) => {
-  res.json({ success: true, ...(await getFoldRun(req.params.runId)) });
-});
-
-app.get('/api/recourse/folding/runs', async (_req, res) => {
-  res.json({ success: true, ...(await listFoldRuns()) });
-});
-
-// ---------------------------------------------------------------------------
-// Pathosphere off-chain adapter (in-process; validated JSON, no chain calls).
-// On-chain execution requires hardhat deployment — see chainBundle output.
-// ---------------------------------------------------------------------------
-app.get('/api/recourse/pathosphere/contracts', (_req, res) => {
-  res.json({ success: true, count: PATHOSPHERE_CONTRACTS.length, contracts: PATHOSPHERE_CONTRACTS });
-});
-
-app.post('/api/recourse/pathosphere/bounty', (req, res) => {
-  const body = zod400(pathosphereBountyReq, req, res);
-  if (!body) return;
-  const result = buildBounty(body);
-  if (result.ok === false) return res.status(400).json({ success: false, error: result.error });
-  res.json({ success: true, bounty: result.bounty });
-});
-
-app.post('/api/recourse/pathosphere/vote', (req, res) => {
-  const body = zod400(pathosphereVoteReq, req, res);
-  if (!body) return;
-  const result = buildCurationVote(body);
-  if (result.ok === false) return res.status(400).json({ success: false, error: result.error });
-  res.json({ success: true, vote: result.vote });
-});
-
-app.post('/api/recourse/pathosphere/split', (req, res) => {
-  const body = zod400(pathosphereSplitReq, req, res);
-  if (!body) return;
-  const result = buildFeeSplit(body);
-  if (result.ok === false) return res.status(400).json({ success: false, error: result.error });
-  res.json({ success: true, split: result.split });
-});
-
-app.post('/api/recourse/pathosphere/bundle', (req, res) => {
-  const body = zod400(pathosphereBundleReq, req, res);
-  if (!body) return;
-  res.json({ success: true, bundle: chainBundle(body.kind, body.payload) });
-});
-
-// ---------------------------------------------------------------------------
-// UMOE mechanistic engine bridge (:8723; ok:false when down).
-// ---------------------------------------------------------------------------
-app.get('/api/recourse/umoe/status', async (_req, res) => {
-  const health = await umoeHealth();
-  res.json({
-    success: true,
-    online: health.ok,
-    sidecarUrl: process.env.UMOE_URL || UMOE_DEFAULT_URL,
-    data: health.ok ? health.data : null,
-    latencyMs: health.latencyMs,
-    error: health.error ?? null,
-  });
-});
-
-app.get('/api/recourse/umoe/workflows', async (_req, res) => {
-  res.json({ success: true, ...(await umoeWorkflows()) });
-});
-
-app.get('/api/recourse/umoe/predictions/:tumorId', async (req, res) => {
-  res.json({ success: true, ...(await umoePredictions(req.params.tumorId)) });
-});
-
-app.get('/api/recourse/umoe/fields/:tumorId', async (req, res) => {
-  res.json({ success: true, ...(await umoeFields(req.params.tumorId)) });
-});
-
-app.get('/api/recourse/umoe/network/:tumorId', async (req, res) => {
-  res.json({ success: true, ...(await umoeNetwork(req.params.tumorId)) });
-});
-
-app.post('/api/recourse/umoe/run', async (req, res) => {
-  const body = zod400(umoeRunReq, req, res);
-  if (!body) return;
-  res.json({ success: true, ...(await umoeRun(body)) });
-});
-
-// ---------------------------------------------------------------------------
-// Overlay-Chemlab bridge (cheminformatics + kinetics; ok:false when down).
-// ---------------------------------------------------------------------------
-app.get('/api/recourse/chemlab/status', async (_req, res) => {
-  const health = await chemlabHealth();
-  res.json({
-    success: true,
-    online: health.ok,
-    sidecarUrl: process.env.CHEMLAB_URL || CHEMLAB_DEFAULT_URL,
-    latencyMs: health.latencyMs,
-    error: health.error ?? null,
-  });
-});
-
-app.get('/api/recourse/chemlab/molecule/properties', async (req, res) => {
-  const parsed = chemlabSmilesReq.safeParse({ smiles: req.query.smiles });
-  if (!parsed.success) return res.status(400).json({ success: false, error: 'smiles query parameter is required' });
-  res.json({ success: true, ...(await moleculeProperties(parsed.data.smiles)) });
-});
-
-app.get('/api/recourse/chemlab/molecule/similarity', async (req, res) => {
-  const parsed = chemlabSimilarityReq.safeParse({ smiles1: req.query.smiles1, smiles2: req.query.smiles2 });
-  if (!parsed.success) return res.status(400).json({ success: false, error: 'smiles1 and smiles2 query parameters are required' });
-  res.json({ success: true, ...(await moleculeSimilarity(parsed.data.smiles1, parsed.data.smiles2)) });
-});
-
-app.get('/api/recourse/chemlab/molecule/druglikeness', async (req, res) => {
-  const parsed = chemlabSmilesReq.safeParse({ smiles: req.query.smiles });
-  if (!parsed.success) return res.status(400).json({ success: false, error: 'smiles query parameter is required' });
-  res.json({ success: true, ...(await moleculeDruglikeness(parsed.data.smiles)) });
-});
-
-app.post('/api/recourse/chemlab/molecule/risk', async (req, res) => {
-  const body = zod400(chemlabPassthroughReq, req, res);
-  if (!body) return;
-  res.json({ success: true, ...(await moleculeRisk(body)) });
-});
-
-app.post('/api/recourse/chemlab/simulate/kinetics', async (req, res) => {
-  const body = zod400(chemlabPassthroughReq, req, res);
-  if (!body) return;
-  res.json({ success: true, ...(await simulateKinetics(body)) });
-});
-
-app.post('/api/recourse/chemlab/reaction/parse', async (req, res) => {
-  const body = zod400(chemlabReactionReq, req, res);
-  if (!body) return;
-  res.json({ success: true, ...(await parseReaction(body.reaction)) });
-});
-
-// ---------------------------------------------------------------------------
-// OncoForesight predictor bridge (relapse/resistance/toxicity; ok:false down).
-// ---------------------------------------------------------------------------
-app.get('/api/recourse/foresight/status', async (_req, res) => {
-  const status = await foresightStatus();
-  res.json({
-    success: true,
-    online: status.ok,
-    sidecarUrl: process.env.ONCOFORESIGHT_URL || ONCOFORESIGHT_DEFAULT_URL,
-    latencyMs: status.latencyMs,
-    error: status.error ?? null,
-  });
-});
-
-app.post('/api/recourse/foresight/simulate', async (req, res) => {
-  const body = zod400(foresightBodyReq, req, res);
-  if (!body) return;
-  res.json({ success: true, ...(await foresightSimulate(body)) });
-});
-
-app.post('/api/recourse/foresight/resistance', async (req, res) => {
-  const body = zod400(foresightBodyReq, req, res);
-  if (!body) return;
-  res.json({ success: true, ...(await foresightResistance(body)) });
-});
-
-app.post('/api/recourse/foresight/toxicity', async (req, res) => {
-  const body = zod400(foresightBodyReq, req, res);
-  if (!body) return;
-  res.json({ success: true, ...(await foresightToxicity(body)) });
-});
-
-app.post('/api/recourse/foresight/remission', async (req, res) => {
-  const body = zod400(foresightBodyReq, req, res);
-  if (!body) return;
-  res.json({ success: true, ...(await foresightRemission(body)) });
-});
-
-app.get('/api/recourse/foresight/backtest', async (req, res) => {
-  const q = typeof req.query.q === 'string' ? req.query.q : '';
-  res.json({ success: true, ...(await foresightBacktest(q)) });
-});
+app.use('/api/recourse', createBridgesRouter());
 
 // ---------------------------------------------------------------------------
 // Science conductor — the 24/7 research loop driving the connected stack.
@@ -3053,32 +2191,12 @@ app.post('/api/recourse/global-lens/toggle', async (req, res) => {
 res.status(400).json({ success: false, error: "action must be 'start' or 'stop'" });
 });
 
-// Translation engines status — the REAL Overlay Science Python engines
-// (BB-Tech basketball→biotech, golf-surgery) probed as stateless subprocesses.
-app.get('/api/recourse/translation/status', async (_req, res) => {
-  const ids: TranslationEngineId[] = ['bbtech', 'golf-surgery'];
-  const engines = [];
-  for (const id of ids) {
-    const cfg = engineConfig(id);
-    const h = await translationHealth(id, { timeoutMs: 8000 });
-    engines.push({
-      id,
-      label: cfg.label,
-      className: cfg.className,
-      moduleFile: cfg.moduleFile,
-      online: h.online,
-      latencyMs: h.latencyMs ?? null,
-      error: h.error ?? null,
-      stats: h.stats ?? null,
-    });
-  }
-  res.json({
-    success: true,
-    python: translationPythonBin(),
-    runner: translationRunnerPath(),
-    engines,
-  });
-});
+// ---------------------------------------------------------------------------
+// translation / keywire / trend bridges. Extracted to src/routes/services.ts
+// (stateless proxies over lib modules).
+// ---------------------------------------------------------------------------
+app.use('/api/recourse', createServicesRouter());
+app.use('/api/recourse', createSynergyRouter());
 
 // Math Conductor routes — the 24/7 loop for hard math problems.
 app.post('/api/recourse/math/toggle', (req, res) => {
@@ -3217,50 +2335,9 @@ function mirrorAutopilotFlag(id: string, enabled: boolean): void {
 // Keywire fleet command plane — status, service bring-up, brain passthrough,
 // Axiom probe, pm2 table. Fail-soft: ok:false when Keywire is unreachable.
 // ---------------------------------------------------------------------------
-app.get('/api/recourse/keywire/status', async (_req, res) => {
-  const r = await keywireHealth();
-  res.json({
-    success: true,
-    online: r.ok,
-    keywireUrl: process.env.KEYWIRE_URL || KEYWIRE_DEFAULT_URL,
-    auth: keywireAuthStatus(),
-    summary: r.ok ? r.summary : null,
-    error: r.error ?? null,
-    latencyMs: r.latencyMs,
-  });
-});
-
-app.get('/api/recourse/keywire/summary', async (_req, res) => {
-  const r = await keywireSummary();
-  res.json({ success: true, ...r });
-});
-
-app.post('/api/recourse/keywire/call', async (req, res) => {
-  const { id } = (req.body ?? {}) as { id?: string };
-  if (!id) return res.status(400).json({ success: false, error: 'id (string) required' });
-  const r = await keywireCallService(id);
-  res.json({ success: true, ...r });
-});
-
-app.post('/api/recourse/keywire/brain', async (req, res) => {
-  const r = await keywireBrainTask((req.body ?? {}) as Record<string, unknown>);
-  res.json({ success: true, ...r });
-});
-
-app.get('/api/recourse/keywire/axiom', async (_req, res) => {
-  const r = await keywireAxiomTest();
-  res.json({ success: true, ...r });
-});
-
-app.get('/api/recourse/keywire/pm2', async (_req, res) => {
-  const r = await keywirePm2Status();
-  res.json({ success: true, ...r });
-});
-
-app.get('/api/recourse/keywire/servers', async (_req, res) => {
-  const r = await keywireServers();
-  res.json({ success: true, ...r });
-});
+// ---------------------------------------------------------------------------
+// (keywire bridges live in src/routes/services.ts, mounted under /api/recourse)
+// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // Phased subsystem orchestration — resource-aware batching of the science
@@ -3329,94 +2406,6 @@ app.post('/api/recourse/reports/generate', async (_req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Trend engine API — deterministic trend/anomaly/hypothesis discovery over
-// real (Wikipedia pageviews) or labeled-seeded series. Read the discovery
-// ledger (hash-chained, tamper-evident) or run a one-off scan.
-// ---------------------------------------------------------------------------
-app.get('/api/recourse/trend/ledger', (_req, res) => {
-  const ledger = recentInsights(200);
-  const verify = verifyLedgerChain();
-  res.json({ success: true, count: ledger.length, chainValid: verify.valid, ledger });
-});
-
-app.get('/api/recourse/trend/ledger/verify', (_req, res) => {
-  res.json({ success: true, ...verifyLedgerChain() });
-});
-
-app.post('/api/recourse/trend/scan', async (req, res) => {
-  try {
-    const from = Date.now() - 60 * 24 * 3600 * 1000;
-    const results = await fetchDomainPageviews('oncology', from, Date.now());
-    const live = results
-      .filter((r) => r.ok && r.points.length >= 7)
-      .map((r) => ({ id: `wiki_${r.article}`, name: r.article, domain: 'wikipedia', points: r.points }));
-    if (live.length < 2) {
-      return res.json({
-        success: true,
-        online: false,
-        note: 'wikipedia pageviews unreachable or too few series — run returned no scan',
-        raw: results.map((r) => ({ article: r.article, ok: r.ok, error: r.error })),
-      });
-    }
-    const scan = runTrendScan(live);
-    res.json({ success: true, online: true, series: live.length, ...scan });
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'trend scan failed';
-    res.status(500).json({ success: false, error: message });
-  }
-});
-
-// Python trend sidecar proxy (statsmodels STL + ruptures PELT). Stateless
-// compute; honestly reports offline (ok:false) when down. Run:
-//   pip install -r python/trend_service/requirements.txt
-//   uvicorn main:app --host 127.0.0.1 --port 8800
-app.get('/api/recourse/trend/sidecar', async (_req, res) => {
-  const health = await trendHealth();
-  res.json({
-    success: true,
-    online: health.ok,
-    service: health.service,
-    statsmodels: health.statsmodels ?? false,
-    ruptures: health.ruptures ?? false,
-    sidecarUrl: process.env.TREND_SIDECAR_URL || TREND_SIDECAR_DEFAULT_URL,
-    latencyMs: health.latencyMs,
-    error: health.error ?? null,
-  });
-});
-
-app.post('/api/recourse/trend/sidecar/scan', async (req, res) => {
-  const body = (req.body ?? {}) as { series?: unknown[] };
-  if (!Array.isArray(body.series) || body.series.length === 0) {
-    return res.status(400).json({ success: false, error: 'series array required' });
-  }
-  const result = await trendScan(body.series as never[]);
-  res.json({ success: true, ...result });
-});
-
-app.post('/api/recourse/trend/sidecar/changepoint', async (req, res) => {
-  const body = (req.body ?? {}) as { series?: unknown; penalty?: number; min_segment?: number };
-  if (!body.series || typeof body.series !== 'object') {
-    return res.status(400).json({ success: false, error: 'series object required' });
-  }
-  const result = await trendChangepoint(
-    body.series as never,
-    body.penalty ?? 5.0,
-    body.min_segment ?? 3,
-  );
-  res.json({ success: true, ...result });
-});
-
-app.post('/api/recourse/trend/sidecar/decompose', async (req, res) => {
-  const body = (req.body ?? {}) as { series?: unknown; period?: number };
-  if (!body.series || typeof body.series !== 'object') {
-    return res.status(400).json({ success: false, error: 'series object required' });
-  }
-  const result = await trendDecompose(body.series as never, body.period ?? 7);
-  res.json({ success: true, ...result });
-});
-
-// =========================================================================
-
 // =========================================================================
 // OPEN-SOURCE LOCAL MODEL API (OpenAI-compatible / Ollama)
 // =========================================================================
@@ -10119,8 +9108,10 @@ app.get('/api/recourse/qd', (_req, res) => {
 
 // Initialize Express + Vite Server
 async function startServer() {
+  console.log(`[boot] t+${Math.round(process.uptime())}s startServer entered`);
   // Dream state comes from the engine's own durable store.
   dreamState = await dreamEngine.status();
+  console.log(`[boot] t+${Math.round(process.uptime())}s dream status resolved (active=${dreamState?.isDreamingActive})`);
   if (autonomySettings.safeBoot) {
     // Safe boot: never auto-resume the autonomous loops that can re-enter the
     // reload loop or churn state the moment the page loads. The operator starts
@@ -10134,6 +9125,7 @@ async function startServer() {
       dreamState = await dreamEngine.status().catch(() => dreamState);
     }
     saveStateToDisk();
+    console.log(`[boot] t+${Math.round(process.uptime())}s saveStateToDisk returned`);
     console.log('[Recourse] Safe boot: autonomous loops paused. Enable them from the dashboard.');
   } else {
     // Non-safe boot: resume every autopilot that was active before restart, and
@@ -10201,18 +9193,28 @@ async function startServer() {
   // still toggle each off from the dashboard / scheduler API.
   // Science conductor: SCOUT -> HYPOTHESIZE -> EXPERIMENT -> VERIFY -> RECORD.
   ensureScienceAutopilot();
+  console.log(`[boot] t+${Math.round(process.uptime())}s science autopilot ensured`);
   setJobEnabled('reports', true);
   setJobEnabled('keywire', true);
+  console.log(`[boot] t+${Math.round(process.uptime())}s jobs enabled`);
   saveStateToDisk();
+  console.log(`[boot] t+${Math.round(process.uptime())}s post-jobs save returned`);
 
-  if (process.env.NODE_ENV !== 'production') {
-    // The engine is a self-modifying system: its autonomous loops write state
-    // AND patch its own source files (repair/forge/swarm). If Vite's dev file
-    // watcher is live, ANY such write full-reloads the browser page — and with
-    // persisted isAutoEvolving that becomes an infinite reload loop (tick ->
-    // write -> reload -> tick) the operator cannot click out of. File watching
-    // is therefore OFF by default; pick up source edits by restarting the
-    // server. Set RECOURSE_HMR=1 to opt into live reload during active UI dev.
+  if (process.env.RECOURSE_DEV_VITE === '1') {
+    // Vite dev middleware ONLY when explicitly opted in. The engine is a
+    // self-modifying system: its autonomous loops write state AND patch its own
+    // source files (repair/forge/swarm). If Vite's file watcher is live, ANY
+    // such write full-reloads the browser page — and with persisted
+    // isAutoEvolving that becomes an infinite reload loop (tick -> write ->
+    // reload -> tick) the operator cannot click out of. File watching is
+    // therefore OFF by default; pick up source edits by restarting the server.
+    // Set RECOURSE_HMR=1 to opt into live reload during active UI dev.
+    //
+    // IMPORTANT: building a Vite dev server here at boot is what wedged startup
+    // — createViteServer runs a full dependency scan + optimizer pre-bundle
+    // BEFORE app.listen, which can burn minutes of CPU/RAM (and crash on a
+    // memory-constrained laptop) before the listener ever binds. Production
+    // starts serve the built dist/ instead; dev-with-vite is opt-in only.
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
@@ -10226,15 +9228,27 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
+    // Prefer the built SPA; fall back to a minimal inline index so the API
+    // still serves (and the /api/* routes remain usable) even before a build.
+    const spaIndex = path.join(distPath, 'index.html');
+    if (fs.existsSync(spaIndex)) {
+      app.use(express.static(distPath));
+      app.get('*', (req, res) => {
+        res.sendFile(spaIndex);
+      });
+    } else {
+      app.get('*', (req, res) => {
+        res.status(200).type('html').send(
+          '<!doctype html><html><head><title>Recourse</title></head><body style="font-family:monospace;background:#0b1020;color:#cbd5e1;padding:2rem"><h1>Recourse API is running</h1><p>Frontend not built yet — run <code>npm run build</code> then start.</p><p>API routes under <code>/api/recourse/*</code> are live.</p></body></html>'
+        );
+      });
+    }
   }
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Recourse server running on http://0.0.0.0:${PORT}`);
   });
+  console.log(`[boot] t+${Math.round(process.uptime())}s listen() called on ${PORT}`);
 }
 
 // Boot block: load persisted state AFTER every module-level `let` has been
@@ -10494,8 +9508,22 @@ function registerAllSchedulerJobs(): void {
 // initialized (see note at the old call site ~line 831). Then reconcile the
 // registry against the loaded state. Both must precede startServer(), whose
 // safe-boot/autopilot resume logic depends on the loaded flags.
+console.log(`[boot] t+${Math.round(process.uptime())}s entering boot block`);
 loadStateFromDisk();
-reconcileRegistryOnBoot();
+console.log(`[boot] t+${Math.round(process.uptime())}s state loaded`);
+// Deferred 2026-09-09: reconcileRegistryOnBoot() re-verifies every promoted
+// tool version in sandboxes, synchronously, before listen. At 5718 registry
+// tools that wedged boot for hours (bound nothing, held the lock). Health
+// flags refresh in background after the server is up; startServer() only
+// depends on the loaded autonomy flags above, not on reconcile output.
+setImmediate(() => {
+  try {
+    reconcileRegistryOnBoot();
+    console.log('[Recourse] background boot-reconcile complete.');
+  } catch (err: unknown) {
+    console.warn('[Recourse] background boot-reconcile failed:', err instanceof Error ? err.message : String(err));
+  }
+});
 initGoalLedger();
 // Reapply the persisted model provider mode ('local' Ollama vs 'api' LLM) so
 // generative features resume with the operator's chosen endpoint after restart.
