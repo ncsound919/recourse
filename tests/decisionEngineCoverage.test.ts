@@ -117,11 +117,11 @@ describe('evaluateGrowthDecision', () => {
     const frontier = actions.filter((a) => ['biotech', 'neuro_symbolic', 'quantum_sim'].includes(a.targetDomain));
     const rest = actions.filter((a) => !['biotech', 'neuro_symbolic', 'quantum_sim'].includes(a.targetDomain));
     for (const a of frontier) {
-      expect(a.computedUtilityScore).toBeCloseTo(0.68, 6);
+      expect(a.computedUtilityScore).toBeCloseTo(0.64, 6);
       expect(expectedUtility(a.rawFactorScores, DEFAULT_GROWTH_WEIGHTS)).toBe(a.computedUtilityScore);
     }
     for (const a of rest) {
-      expect(a.computedUtilityScore).toBeCloseTo(0.6425, 6);
+      expect(a.computedUtilityScore).toBeCloseTo(0.6025, 6);
       expect(expectedUtility(a.rawFactorScores, DEFAULT_GROWTH_WEIGHTS)).toBe(a.computedUtilityScore);
     }
 

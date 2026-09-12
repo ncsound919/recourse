@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildSynergyMap, crossDomainSynergyFor } from '../../src/lib/synergy/synergyMap.js';
+import { buildSynergyMap, crossDomainSynergyFor, domainScoresFromMap } from '../../src/lib/synergy/synergyMap.js';
 import type { TransferCandidate, SynergyMap } from '../../src/lib/synergy/types.js';
 
 function candidate(id: string, from: string, to: string, score: number): TransferCandidate {
@@ -26,6 +26,13 @@ describe('synergy map', () => {
     expect(map.domains).toEqual(['health_oncology', 'logistics', 'mathematics', 'sports']);
     const again = buildSynergyMap(candidates, { generatedAtRun: 'run:1' });
     expect(again.manifestHash).toBe(map.manifestHash);
+  });
+
+  it('domainScoresFromMap returns a score per domain', () => {
+    const map = buildSynergyMap(candidates, { generatedAtRun: 'run:1' });
+    const scores = domainScoresFromMap(map, map.domains);
+    expect(Object.keys(scores).sort()).toEqual(map.domains);
+    expect(domainScoresFromMap(map, ['cybersecurity']).cybersecurity).toBe(0);
   });
 
   it('crossDomainSynergyFor is 0 for a domain with no resolved edges and no candidates', () => {

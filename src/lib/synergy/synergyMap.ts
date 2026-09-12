@@ -81,3 +81,10 @@ export function crossDomainSynergyFor(
   const value = blend * (resolvedDegree / maxResolved) + (1 - blend) * openPotential;
   return Math.round(Math.max(0, Math.min(1, value)) * 1000) / 1000;
 }
+
+/** Per-domain cross-domain synergy scores for the decision engine. */
+export function domainScoresFromMap(map: SynergyMap, domains: string[] = map.domains): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const d of domains) out[d] = crossDomainSynergyFor(map, d);
+  return out;
+}

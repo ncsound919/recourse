@@ -5,8 +5,8 @@
  * with no randomness. The empty-registry utilities are hand-computable, so we
  * assert exact numbers, not ranges: for an empty registry every domain has
  * domainDeficit=1, passRateGap=1, vulnerabilityUrgency=0.05, novelty = boost,
- * synergy=0.4. With the default weights, coding (boost 0.6) = 0.6425 and
- * quantum_sim (boost 0.85) = 0.68 exactly.
+ * synergy=0 (caller-supplied, defaults to 0). With the default weights, coding
+ * (boost 0.6) = 0.6025 and quantum_sim (boost 0.85) = 0.64 exactly.
  */
 import { describe, expect, it } from 'vitest';
 import { evaluateGrowthDecision, DEFAULT_GROWTH_WEIGHTS } from '../src/lib/decisionEngine';
@@ -46,11 +46,11 @@ describe('evaluateGrowthDecision', () => {
     const domainActions = r.candidateActions.filter((a) => a.actionType === 'domain_gap_expansion');
     expect(domainActions).toHaveLength(7);
     const byDomain = Object.fromEntries(domainActions.map((a) => [a.targetDomain, a.computedUtilityScore]));
-    // Hand-computed with default weights: coding boost 0.6 -> 0.6425; quantum 0.85 -> 0.68.
-    expect(byDomain['coding']).toBe(0.6425);
-    expect(byDomain['quantum_sim']).toBe(0.68);
-    expect(byDomain['neuro_symbolic']).toBe(0.68);
-    expect(byDomain['biotech']).toBe(0.68);
+    // Hand-computed with default weights: coding boost 0.6 -> 0.6025; quantum 0.85 -> 0.64.
+    expect(byDomain['coding']).toBe(0.6025);
+    expect(byDomain['quantum_sim']).toBe(0.64);
+    expect(byDomain['neuro_symbolic']).toBe(0.64);
+    expect(byDomain['biotech']).toBe(0.64);
     expect(r.stateVectorSummary).toEqual({ totalGenes: 0, activeDomains: 0, healthIndex: 1, overallPassRate: 0 });
     expect(r.generation).toBe(7);
     expect(r.selectedAction).toBe(r.candidateActions[0]);
@@ -131,6 +131,15 @@ describe('evaluateGrowthDecision', () => {
     expect(a.decisionEntropy).toBeGreaterThan(0);
     expect(a.decisionEntropy).toBeLessThanOrEqual(Math.log2(a.candidateActions.length) + 0.001);
     expect(typeof a.entropyReduction).toBe('number');
+  });
+
+  it('uses caller-supplied cross-domain synergy and defaults to 0', () => {
+    const reg = [{ name: 'a', domain: 'math', versions: [{ promoted: true, score: 1 }] }, { name: 'b', domain: 'coding', versions: [{ promoted: true, score: 1 }] }] as any;
+    const zero = evaluateGrowthDecision(reg, [], DEFAULT_GROWTH_WEIGHTS, 1, [], []);
+    const withMap = evaluateGrowthDecision(reg, [], DEFAULT_GROWTH_WEIGHTS, 1, [], [], { cyber_defense: 0.9 });
+    const find = (r: any) => r.candidateActions.find((a: any) => a.actionType === 'cross_domain_hybridization');
+    expect(find(zero)?.rawFactorScores.crossDomainSynergy).toBe(0);
+    expect(find(withMap)?.rawFactorScores.crossDomainSynergy).toBe(0.9);
   });
 
   it('honors a caller-supplied weight vector in the computed utility', () => {
