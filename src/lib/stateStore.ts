@@ -101,10 +101,18 @@ function migrateLegacyJsonToSqlite(dbPath: string): void {
     return;
   }
 
-  rmSync(dbPath, { force: true });
-  const db = new Database(dbPath);
+  // Build the SQLite database at a temporary path first and only replace the
+  // legacy JSON file once it is fully populated. This way a native-module,
+  // permissions, or disk failure mid-migration leaves the original JSON file
+  // intact instead of losing persisted state.
+  const tmpPath = `${dbPath}.migrating-${process.pid}-${Date.now()}`;
+  rmSync(tmpPath, { force: true });
+  const db = new Database(tmpPath);
+  let entryCount = 0;
   try {
-    db.pragma("journal_mode = WAL");
+    // Default (non-WAL) journal mode: this is a short-lived, single-writer
+    // migration DB, so there is no WAL/SHM sidecar to reconcile before the
+    // rename below moves only the single main database file into place.
     db.exec("CREATE TABLE IF NOT EXISTS kv_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
     const insert = db.prepare("INSERT OR REPLACE INTO kv_state(key, value) VALUES(?, ?)");
     const txn = db.transaction((entries: ReadonlyArray<readonly [string, string]>) => {
@@ -118,12 +126,16 @@ function migrateLegacyJsonToSqlite(dbPath: string): void {
       }
     }
     txn(entries);
-    console.log(
-      `[Recourse Engine] Migrated legacy JSON state into SQLite at ${dbPath} (${entries.length} keys).`
-    );
+    entryCount = entries.length;
   } finally {
     db.close();
   }
+  // Only now that the new DB is fully built and closed do we discard the
+  // legacy JSON, atomically via rename (never delete-then-create).
+  renameSync(tmpPath, dbPath);
+  console.log(
+    `[Recourse Engine] Migrated legacy JSON state into SQLite at ${dbPath} (${entryCount} keys).`
+  );
 }
 
 export function createStateStore(opts: StateStoreOptions): StateStore {

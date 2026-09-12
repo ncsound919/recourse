@@ -14,8 +14,11 @@ import { extractMethods, type RawMethod } from '../lib/synergy/methodIndex.js';
 import { extractProblems } from '../lib/synergy/problemIndex.js';
 import { recordSynergyScan } from '../lib/synergy/ledger.js';
 import { resolveTransfer, admit, applyTransferResult, recordTransferResult } from '../lib/synergy/resolver.js';
+import { requireMutationAuth } from '../lib/mutationAuth.js';
 import type { RecourseProblem } from '../lib/problemArchive.js';
 import type { TransferCandidate, TransferResult } from '../lib/synergy/types.js';
+
+const RAW_METHOD_SOURCES = new Set(['tool', 'brick', 'translation']);
 
 function isRawMethod(x: unknown): x is RawMethod {
   if (!x || typeof x !== 'object') return false;
@@ -25,14 +28,25 @@ function isRawMethod(x: unknown): x is RawMethod {
     typeof m.name === 'string' &&
     typeof m.domain === 'string' &&
     typeof m.source === 'string' &&
-    (m.primitives === undefined || Array.isArray(m.primitives))
+    RAW_METHOD_SOURCES.has(m.source) &&
+    (m.primitives === undefined || (Array.isArray(m.primitives) && m.primitives.every((p) => typeof p === 'string')))
   );
 }
 
 function isProblem(x: unknown): x is RecourseProblem {
   if (!x || typeof x !== 'object') return false;
   const p = x as Record<string, unknown>;
-  return typeof p.id === 'string' && typeof p.acceptanceTest === 'string';
+  return (
+    typeof p.id === 'string' &&
+    typeof p.domain === 'string' &&
+    typeof p.title === 'string' &&
+    typeof p.statement === 'string' &&
+    typeof p.acceptanceTest === 'string'
+  );
+}
+
+function isStringArray(x: unknown): x is string[] {
+  return Array.isArray(x) && x.every((v) => typeof v === 'string');
 }
 
 function isTransferCandidate(x: unknown): x is TransferCandidate {
@@ -93,6 +107,7 @@ export function createSynergyRouter(): Router {
   });
 
   router.post('/synergy/scan', (req, res) => {
+    if (!requireMutationAuth(req, res)) return;
     const body = (req.body ?? {}) as { methods?: unknown; problems?: unknown; knownPairs?: unknown };
     if (!Array.isArray(body.methods) || !Array.isArray(body.problems)) {
       return res.status(400).json({ success: false, error: 'methods and problems arrays required' });
@@ -101,12 +116,12 @@ export function createSynergyRouter(): Router {
       return res.status(400).json({ success: false, error: 'methods and problems must be non-empty' });
     }
     if (!body.methods.every(isRawMethod)) {
-      return res.status(400).json({ success: false, error: 'invalid method element (requires id, name, domain, source)' });
+      return res.status(400).json({ success: false, error: 'invalid method element (requires id, name, domain, source in tool|brick|translation, string[] primitives)' });
     }
     if (!body.problems.every(isProblem)) {
-      return res.status(400).json({ success: false, error: 'each problem requires string id and acceptanceTest' });
+      return res.status(400).json({ success: false, error: 'each problem requires string id, domain, title, statement, and acceptanceTest' });
     }
-    if (body.knownPairs !== undefined && !Array.isArray(body.knownPairs)) {
+    if (body.knownPairs !== undefined && !isStringArray(body.knownPairs)) {
       return res.status(400).json({ success: false, error: 'knownPairs must be an array of strings' });
     }
     try {
@@ -131,6 +146,7 @@ export function createSynergyRouter(): Router {
   });
 
   router.post('/synergy/resolve', (req, res) => {
+    if (!requireMutationAuth(req, res)) return;
     const body = (req.body ?? {}) as { candidate?: unknown; acceptanceTest?: unknown; sourceCode?: unknown; adaptedBy?: unknown };
     const candidate = body.candidate;
     if (!isTransferCandidate(candidate) || typeof body.acceptanceTest !== 'string' || typeof body.sourceCode !== 'string') {

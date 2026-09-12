@@ -143,8 +143,12 @@ export class ${compName} {
   }
 
   static reverseComplement(raw: string): string {
-    const comp: Record<string, string> = { A: 'T', T: 'A', G: 'C', C: 'G', N: 'N', a: 't', t: 'a', g: 'c', c: 'g', n: 'n' };
-    return ${compName}.asSeq(raw).split('').reverse().map((b) => comp[b] ?? b).join('');
+    const seq = ${compName}.asSeq(raw);
+    const isRna = /[Uu]/.test(seq) && !/[Tt]/.test(seq);
+    const comp: Record<string, string> = isRna
+      ? { A: 'U', U: 'A', G: 'C', C: 'G', N: 'N', a: 'u', u: 'a', g: 'c', c: 'g', n: 'n' }
+      : { A: 'T', T: 'A', G: 'C', C: 'G', N: 'N', a: 't', t: 'a', g: 'c', c: 'g', n: 'n' };
+    return seq.split('').reverse().map((b) => comp[b] ?? b).join('');
   }
 
   static findOrfs(raw: string, minLength = 20) {
@@ -231,6 +235,7 @@ assert stats.gcContent === 50;
 assert stats.length === 4;
 assert Math.abs(stats.molecularWeight - 1173.84) < 0.01;
 assert ${compName}.reverseComplement('ATGC') === 'GCAT';
+assert ${compName}.reverseComplement('AUGC') === 'GCAU';
 assert ${compName}.translate('ATGGAA') === 'ME';
 assert ${compName}.translate('ATGTAA') === 'M';
 assert ${compName}.detectType('ACDEFGHIKLMNPQRSTVWY') === 'PROTEIN';

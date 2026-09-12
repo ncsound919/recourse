@@ -265,6 +265,7 @@ import { createToolsRouter } from './src/routes/tools.js';
 import { createServicesRouter } from './src/routes/services.js';
 import { createSynergyRouter } from './src/routes/synergy.js';
 import { createVizRouter } from './src/routes/viz.js';
+import { requireMutationAuth, requireMutationAuthIfConfigured } from './src/lib/mutationAuth.js';
 const STATE_FILE = path.join(process.cwd(), 'recourse_storage.json');
 
 // Math solver state. Hoisted to module top so the function declaration at
@@ -737,60 +738,8 @@ function lintVerdictNote(lint: LintReport): string {
 }
 
 // ---------------------------------------------------------------------------
-// Local mutation guard — mirrors api/recourse/_guard.ts for the Express monolith.
-// Any mutating route that writes to disk or the registry must sit behind this so
-// a caller who can reach the port cannot mutate Recourse without the secret.
-// Fail-closed: when RECOURSE_API_SECRET is unset the mutating route is disabled
-// (503) rather than silently open. GET/HEAD/OPTIONS are never gated.
+// Mutation guard — see src/lib/mutationAuth.ts (shared with extracted routers).
 // ---------------------------------------------------------------------------
-const MUTATION_SECRET_ENV = 'RECOURSE_API_SECRET';
-
-function presentedSecret(req: express.Request): string {
-  const auth = req.headers.authorization;
-  if (auth && /^Bearer\s+/i.test(auth)) return auth.replace(/^Bearer\s+/i, '').trim();
-  const h = req.headers['x-api-secret'];
-  if (typeof h === 'string') return h.trim();
-  return '';
-}
-
-function secretsEqual(a: string, b: string): boolean {
-  const ab = Buffer.from(a, 'utf-8');
-  const bb = Buffer.from(b, 'utf-8');
-  if (ab.length !== bb.length) return false;
-  return crypto.timingSafeEqual(ab, bb);
-}
-
-/** Express variant of requireMutationAuth. Returns true when the request is
- *  allowed to proceed; on refusal it has already written the error response. */
-function requireMutationAuth(req: express.Request, res: express.Response): boolean {
-  const method = (req.method || 'GET').toUpperCase();
-  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return true;
-  const secret = process.env[MUTATION_SECRET_ENV];
-  if (!secret || secret.trim() === '') {
-    res.status(503).json({ success: false, error: `mutating API disabled: ${MUTATION_SECRET_ENV} not configured (fail-closed)` });
-    return false;
-  }
-  const presented = presentedSecret(req);
-  if (!presented || !secretsEqual(presented, secret.trim())) {
-    res.status(401).json({ success: false, error: 'unauthorized' });
-    return false;
-  }
-  return true;
-}
-
-/**
- * Config-gated variant for routes the mission-control UI also drives. When
- * RECOURSE_API_SECRET is UNSET the route stays open (backward compatible with
- * default local runs); when it IS set the route is enforced — so MCP/scripts
- * can authenticate full-loop writes without breaking an unconfigured local
- * dashboard. Prefer `requireMutationAuth` (always fail-closed) for routes that
- * must never be open (skills import/export, patch revert).
- */
-function requireMutationAuthIfConfigured(req: express.Request, res: express.Response): boolean {
-  const secret = process.env[MUTATION_SECRET_ENV];
-  if (!secret || secret.trim() === '') return true;
-  return requireMutationAuth(req, res);
-}
 
 /** Re-derive live pass state for each tool's CURRENT promoted version at boot.
  *  Historical superseded versions are labeled as such and never re-executed;
