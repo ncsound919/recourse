@@ -271,4 +271,4 @@ Known Plan-2 limitations (honest, not yet fixed):
   projections. MAC/FAC (`macFac.ts`) is implemented and unit-tested but is not
   yet wired into `discover`.
 
-Cross-domain significance now uses the Fisher-z test (requires n>3) with Benjamini–Hochberg FDR across the scan; the old `|r|>=0.5` rule is removed. Granger causality, transfer entropy, and forced stationarity differencing are not yet wired (utilities exist in `stats.ts`).
+Cross-domain significance now uses the Fisher-z test (requires n>3) with Benjamini–Hochberg FDR across the scan; the old `|r|>=0.5` rule is removed. Granger causality and transfer entropy are not yet wired, and no utility for them exists yet; forced stationarity differencing is also not wired (`needsDifferencing`/`difference` are implemented in `stats.ts`).
