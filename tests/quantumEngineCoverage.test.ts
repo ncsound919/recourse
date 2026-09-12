@@ -41,7 +41,7 @@ describe('synthesizeBellState (jsqubits wrapper)', () => {
 
   it('is maximally entangled (von Neumann entropy = 1 bit across the bipartition)', () => {
     const r = synthesizeBellState();
-    // Reduced state of qubit 0: p(|0>) = p00 + p10 = 0.5, p(|1>) = p01 + p11 = 0.5
+    // Reduced state of qubit 0: p(|0>) = p00 + p01 = 0.5, p(|1>) = p10 + p11 = 0.5
     const p0 = r.probabilities[0] + r.probabilities[1];
     const p1 = r.probabilities[2] + r.probabilities[3];
     const expectedEntropy = p0 > 0 ? -p0 * Math.log2(p0) : 0;
