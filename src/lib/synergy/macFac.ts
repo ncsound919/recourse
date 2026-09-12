@@ -9,7 +9,10 @@ import { align, type DGroup } from './sme.js';
 /** Functor-frequency content vector over the controlled FUNCTORS vocabulary. */
 export function contentVector(d: DGroup): number[] {
   const counts = new Map<string, number>();
-  for (const r of d.relations) counts.set(r.functor, (counts.get(r.functor) ?? 0) + 1);
+  for (const r of d.relations) {
+    const f = canonicalizeTerm(r.functor);
+    counts.set(f, (counts.get(f) ?? 0) + 1);
+  }
   return FUNCTORS.map((f) => counts.get(canonicalizeTerm(f)) ?? 0);
 }
 

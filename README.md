@@ -220,3 +220,18 @@ Known Plan-1 limitations (honest, not yet fixed):
   only shared bridge is over-general (`df == docCount`).
 - `decisionEngine.crossDomainSynergy` still uses hardcoded constants; the rewire
   to `crossDomainSynergyFor` is Plan 5.
+
+Known Plan-2 limitations (honest, not yet fixed):
+
+- Alignment is **fail-closed**: it is only computed when both the method and
+  problem carry relations flagged `relationBasis: 'declared'`. The internal
+  method/problem indexes currently derive relations from primitives and flag
+  them `'placeholder'`, so production candidates carry no `alignment`/
+  `farTransfer` yet. The SME path is exercised by tests that declare real
+  relations; a real relational source is still required to turn it on.
+- `gmapWeight` normalization is approximate (calibration constants, not
+  measured), and `sme` does not enforce full separate-gmap parallel
+  connectivity across the chosen match set. Candidate `inferences` are coverage
+  flags (base relations whose arguments all mapped), not true target-side
+  projections. MAC/FAC (`macFac.ts`) is implemented and unit-tested but is not
+  yet wired into `discover`.

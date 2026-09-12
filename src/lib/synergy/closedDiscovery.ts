@@ -114,7 +114,8 @@ export function discover(
       const useAlign = opts.align !== false;
       let alignment;
       let far;
-      if (useAlign && m.relations.length > 0 && p.relations.length > 0) {
+      const relationsDeclared = m.relationBasis === 'declared' && p.relationBasis === 'declared';
+      if (useAlign && relationsDeclared && m.relations.length > 0 && p.relations.length > 0) {
         const bd = dgroupFromRelations(m.domain, m.relations, m.relations.flatMap((r) => r.args));
         const td = dgroupFromRelations(p.domain, p.relations, p.relations.flatMap((r) => r.args));
         alignment = smeAlign(bd, td);

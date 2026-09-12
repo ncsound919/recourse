@@ -31,6 +31,7 @@ export function extractProblem(p: RecourseProblem): ProblemSignature {
     testHash: sha256Hex(p.acceptanceTest),
     extraction: 'heuristic',
     relations: relationsFromPrimitives(requiredPrimitives, p.domain),
+    relationBasis: 'placeholder',
   };
 }
 

@@ -30,12 +30,26 @@ export const SME_CALIBRATION = {
 } as const;
 
 export function dgroupFromRelations(domain: string, relations: Rel[], entities: string[]): DGroup {
-  return { domain, entities: entities.map(canonicalizeTerm), relations };
+  return {
+    domain,
+    entities: entities.map(canonicalizeTerm),
+    relations: relations.map((r) => ({
+      ...r,
+      functor: canonicalizeTerm(r.functor),
+      args: r.args.map(canonicalizeTerm),
+    })),
+  };
 }
 
 export function matchHypotheses(base: DGroup, target: DGroup): MatchHypothesis[] {
   const out: MatchHypothesis[] = [];
+  const relFunctors = new Set<string>();
   for (const br of base.relations) {
+    if (br.type !== 'rel') continue;
+    if (target.relations.some((tr) => tr.functor === br.functor)) relFunctors.add(br.functor);
+  }
+  for (const br of base.relations) {
+    if (br.type === 'attr' && !relFunctors.has(br.functor)) continue;
     for (const tr of target.relations) {
       if (br.functor !== tr.functor) continue;
       const argPairs: Array<[string, string]> = [];
@@ -87,10 +101,15 @@ export function align(base: DGroup, target: DGroup): AlignmentResult {
   const raw = chosen.reduce((s, m) => s + m.score, 0) + (chosen.length > 1 ? systematic : 0);
   const gmapWeight = Math.round(Math.min(1, raw / (SME_CALIBRATION.relationSameFunctor + SME_CALIBRATION.argMatch + SME_CALIBRATION.orderSame + 1)) * 1000) / 1000;
 
-  const mappings: AlignmentMapping[] = [];
+  const mappingByPair = new Map<string, AlignmentMapping>();
   for (const mh of chosen) {
-    for (const [b, t] of mh.argPairs) mappings.push({ base: b, target: t, evidence: mh.score });
+    for (const [b, t] of mh.argPairs) {
+      const key = `${b}\u0000${t}`;
+      const existing = mappingByPair.get(key);
+      if (!existing || mh.score > existing.evidence) mappingByPair.set(key, { base: b, target: t, evidence: mh.score });
+    }
   }
+  const mappings = [...mappingByPair.values()];
   // Candidate inferences: base relations whose constituents all mapped, but with no target match.
   const targetFunctors = new Set(target.relations.map((r) => r.functor));
   const inferences: string[] = [];

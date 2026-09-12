@@ -38,6 +38,7 @@ export interface MethodSignature {
   complexity?: string;
   deterministic: boolean;
   relations: Rel[];
+  relationBasis?: 'declared' | 'placeholder';
   suiteHash?: string;
 }
 
@@ -51,6 +52,7 @@ export interface ProblemSignature {
   testHash: string;
   extraction: 'heuristic' | 'declared';
   relations: Rel[];
+  relationBasis?: 'declared' | 'placeholder';
 }
 
 export interface BridgeEvidence {

@@ -2,15 +2,17 @@ import { describe, it, expect } from 'vitest';
 import { discover, findBridges, SYNERGY_ENGINE_VERSION } from '../../src/lib/synergy/closedDiscovery.js';
 import type { MethodSignature, ProblemSignature } from '../../src/lib/synergy/types.js';
 
-function method(id: string, domain: string, primitives: string[]): MethodSignature {
+function method(id: string, domain: string, primitives: string[], relationBasis: 'declared' | 'placeholder' = 'placeholder'): MethodSignature {
   return {
     id, name: id, domain, source: 'tool', primitives, deterministic: true,
+    relationBasis,
     relations: primitives.map((p, i) => ({ functor: p, type: 'rel', args: [domain], order: i + 1 })),
   };
 }
-function problem(id: string, domain: string, requiredPrimitives: string[], acceptanceTest = 'assert true;'): ProblemSignature {
+function problem(id: string, domain: string, requiredPrimitives: string[], acceptanceTest = 'assert true;', relationBasis: 'declared' | 'placeholder' = 'placeholder'): ProblemSignature {
   return {
     id, name: id, domain, requiredPrimitives, acceptanceTest, testHash: 'x', extraction: 'heuristic',
+    relationBasis,
     relations: requiredPrimitives.map((p, i) => ({ functor: p, type: 'rel', args: [domain], order: i + 1 })),
   };
 }
@@ -37,7 +39,7 @@ describe('closed discovery', () => {
     const b = discover([...methods].reverse(), [...problems].reverse());
     expect(a.manifest).toBe(b.manifest);
     // Golden manifest: pins version + vocabulary + options + canonical ordering.
-    expect(a.manifest).toBe('ca19c15b147931016e3b0267f729a9866810c380ecc93909a0ce275fad8b20f2');
+    expect(a.manifest).toBe('aa3a019595812bd2074ca63fa6b57259ef6e3f53a2abd81d3900e4ed822956b3');
   });
 
   it('excludes same-domain pairs', () => {
@@ -64,14 +66,24 @@ describe('closed discovery', () => {
     expect(findBridges(graph, 'missing', 'problem:b')).toEqual([]);
   });
 
-  it('attaches an alignment and farTransfer when relations allow', () => {
-    const { candidates } = discover(methods, problems);
+  it('attaches an alignment and farTransfer when relations are declared', () => {
+    const declaredMethods = methods.map((m) => ({ ...m, relationBasis: 'declared' as const }));
+    const declaredProblems = problems.map((p) => ({ ...p, relationBasis: 'declared' as const }));
+    const { candidates } = discover(declaredMethods, declaredProblems);
     expect(candidates[0].alignment).toBeDefined();
     expect(typeof candidates[0].farTransfer).toBe('number');
   });
 
+  it('fails closed: no alignment when relations are placeholders', () => {
+    const { candidates } = discover(methods, problems);
+    expect(candidates[0].alignment).toBeUndefined();
+    expect(candidates[0].farTransfer).toBeUndefined();
+  });
+
   it('can disable alignment via opts', () => {
-    const { candidates } = discover(methods, problems, { align: false });
+    const declaredMethods = methods.map((m) => ({ ...m, relationBasis: 'declared' as const }));
+    const declaredProblems = problems.map((p) => ({ ...p, relationBasis: 'declared' as const }));
+    const { candidates } = discover(declaredMethods, declaredProblems, { align: false });
     expect(candidates[0].alignment).toBeUndefined();
   });
 });

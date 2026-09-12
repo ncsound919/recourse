@@ -1,7 +1,7 @@
 // tests/synergy/macFac.test.ts
 import { describe, it, expect } from 'vitest';
 import { contentVector, macFilter, macFac } from '../../src/lib/synergy/macFac.js';
-import { dgroupFromRelations } from '../../src/lib/synergy/sme.js';
+import { dgroupFromRelations, type DGroup } from '../../src/lib/synergy/sme.js';
 import type { Rel } from '../../src/lib/synergy/types.js';
 
 const rel = (functor: string, args: string[]): Rel => ({ functor, type: 'rel', args, order: 1 });
@@ -26,5 +26,11 @@ describe('mac/fac', () => {
     const results = macFac(target, [far, near], { k: 2 });
     expect(results).toHaveLength(2);
     expect(results[0]).toHaveProperty('gmapWeight');
+  });
+
+  it('canonicalizes functor spelling in content vectors', () => {
+    const messy: DGroup = { domain: 'm', entities: ['a', 'b'], relations: [rel('Maps_To', ['a', 'b'])] };
+    const clean = dgroupFromRelations('c', [rel('maps_to', ['a', 'b'])], ['a', 'b']);
+    expect(contentVector(messy)).toEqual(contentVector(clean));
   });
 });

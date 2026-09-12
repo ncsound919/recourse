@@ -56,4 +56,20 @@ describe('sme dgroups + match hypotheses', () => {
     expect(high).toBeGreaterThan(nearTransfer);
     expect(high).toBeLessThanOrEqual(1);
   });
+
+  it('canonicalizes functors so Maps_To matches maps_to', () => {
+    const a = dgroupFromRelations('a', [{ functor: 'Maps_To', type: 'rel', args: ['X'], order: 1 }], ['X']);
+    const b = dgroupFromRelations('b', [{ functor: 'maps_to', type: 'rel', args: ['Y'], order: 1 }], ['Y']);
+    const mh = matchHypotheses(a, b);
+    expect(mh.map((m) => m.baseFunctor)).toContain('maps_to');
+  });
+
+  it('dedupes alignment mappings to one row per (base,target) pair', () => {
+    const b: DGroup = dgroupFromRelations('b', [rel('p', ['b', 'y']), rel('q', ['a', 'b'])], ['a', 'b', 'y']);
+    const t: DGroup = dgroupFromRelations('t', [rel('p', ['y']), rel('q', ['x', 'y'])], ['x', 'y']);
+    const { mappings } = align(b, t);
+    const keys = mappings.map((m) => `${m.base}->${m.target}`);
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(mappings.filter((m) => m.base === 'b' && m.target === 'y')).toHaveLength(1);
+  });
 });
