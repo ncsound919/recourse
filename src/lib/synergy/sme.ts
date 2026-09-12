@@ -51,7 +51,7 @@ export function matchHypotheses(base: DGroup, target: DGroup): MatchHypothesis[]
   for (const br of base.relations) {
     if (br.type === 'attr' && !relFunctors.has(br.functor)) continue;
     for (const tr of target.relations) {
-      if (br.functor !== tr.functor) continue;
+      if (br.functor !== tr.functor || br.type !== tr.type || br.args.length !== tr.args.length) continue;
       const argPairs: Array<[string, string]> = [];
       const n = Math.min(br.args.length, tr.args.length);
       for (let i = 0; i < n; i++) argPairs.push([canonicalizeTerm(br.args[i]), canonicalizeTerm(tr.args[i])]);
