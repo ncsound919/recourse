@@ -141,7 +141,7 @@ export interface TransferResult {
 
 export interface AdmissionDecision {
   candidateId: string;
-  status: EvidenceStatus; // 'reproduced' | 'refuted' | 'tested'
+  status: 'reproduced' | 'refuted' | 'tested';
   admitted: boolean;
   reason: string;
 }
