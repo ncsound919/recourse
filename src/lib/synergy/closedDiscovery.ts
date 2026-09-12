@@ -152,7 +152,7 @@ export function discover(
     stableStringify(resolved),
     ...methods.map((m) => m.id).sort(),
     ...problems.map((p) => p.id).sort(),
-    ...candidates.map((c) => `${c.id}:${c.score}:${c.farTransfer ?? ''}:${c.bridges.map((b) => b.term).join(',')}`),
+    ...candidates.map((c) => `${c.id}:${c.score}:${c.farTransfer ?? ''}:${stableStringify(c.alignment ?? null)}:${c.bridges.map((b) => b.term).join(',')}`),
   ]);
   return { candidates, graph, manifest };
 }
