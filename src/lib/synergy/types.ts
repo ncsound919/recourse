@@ -124,3 +124,24 @@ export interface AlignmentResult {
   /** structural consistency (one-to-one + parallel connectivity) held */
   consistent: boolean;
 }
+
+export type TransferOutcome = 'passed' | 'failed' | 'error';
+export type AdmissionProof = 'executable_test' | 'oracle_metric' | 'formal_proof' | 'human_signoff';
+
+export interface TransferResult {
+  candidateId: string;
+  outcome: TransferOutcome;
+  proofType: AdmissionProof;
+  /** sha256 over the deterministic parts of the verifier result (no timing) */
+  sandboxReportHash: string;
+  durationMs: number;
+  adaptedBy: 'none' | 'operator_ladder' | 'model';
+  detail: string;
+}
+
+export interface AdmissionDecision {
+  candidateId: string;
+  status: EvidenceStatus; // 'reproduced' | 'refuted' | 'tested'
+  admitted: boolean;
+  reason: string;
+}
