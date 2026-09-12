@@ -17,10 +17,18 @@
  *   - Tracks lastRun/lastOk/lastError/runCount/failCount per job, exposed for
  *     dashboards and provenance.
  *
- * Scheduling supports either a fixed `cadenceMs` interval OR a 5-field cron
- * expression (minute/hour/dom/mon/dow — the common subset: `*`, step `N`,
- * single `N`, `N-M`, comma lists). For cron jobs with dom/mon/dow constraints
- * beyond `*`, the computed next-run is conservative (daily).
+ * SCHEDULING ENGINE: the actual firing is delegated to the mature `node-cron`
+ * library (v4). One `node-cron` task is created per registered job and
+ * started/stopped as the job's `enabled` toggle + scheduler lifecycle change.
+ * `node-cron` owns the wall-clock timing; this module owns the registry, the
+ * per-job bookkeeping, and the public API.
+ *
+ * A job is scheduled from its `cadenceMs` (fixed interval) OR its `cron`
+ * 5/6-field expression. `cadenceMs` is translated to an equivalent cron
+ * expression — see `intervalMsToCron` below for the exact (and honest)
+ * mapping rules. Because node-cron is cron-shaped, a fixed interval is only
+ * reproduced EXACTLY when it evenly divides the relevant period; every other
+ * cadence is mapped to the closest cron step and the divergence documented.
  *
  * Honesty contract: the scheduler is pure orchestration. It never fabricates
  * a job's result — it records what the job returned. A job that is disabled,
@@ -30,6 +38,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import cron, { type ScheduledTask } from 'node-cron';
 
 // ----------------------------------------------------------------------------
 // Types
@@ -48,7 +57,7 @@ export interface ScheduledJobDef {
   run: () => Promise<JobRunResult> | JobRunResult;
   /** Fixed-interval cadence, OR provide `cron`. One of the two required. */
   cadenceMs?: number;
-  /** 5-field cron expression (minute hour dom mon dow). */
+  /** 5/6-field cron expression (minute hour dom mon dow [second]). */
   cron?: string;
   /** Enabled when the scheduler starts (overridden by persisted toggles). */
   enabledByDefault: boolean;
@@ -118,8 +127,13 @@ function saveToggles(): void {
 }
 
 // ----------------------------------------------------------------------------
-// Cron subset parser
+// Cron-subset next-run estimator (reporting only)
 // ----------------------------------------------------------------------------
+
+// NOTE: node-cron is the actual scheduling engine. This legacy parser is kept
+// for (a) the exported `nextRunForCron` helper and (b) estimating `nextRunAt`
+// for jobs defined by a raw cron expression, where there is no cadenceMs to
+// derive a projection from. Actual fire times are node-cron's.
 
 function parseField(field: string, min: number, max: number): Set<number> {
   const out = new Set<number>();
@@ -183,14 +197,140 @@ export function nextRunForCron(expr: string, from: number): number {
 }
 
 // ----------------------------------------------------------------------------
+// Fixed-interval → cron translation
+// ----------------------------------------------------------------------------
+
+/**
+ * Translate a fixed `cadenceMs` interval into a node-cron expression.
+ *
+ * node-cron fires on wall-clock cron boundaries, so a pure interval is only
+ * reproduced EXACTLY when it evenly divides its unit's period:
+ *   - whole seconds < 1 min  → step must divide 60  → `* /<sec>` on the seconds field
+ *   - whole minutes < 1 hour → step must divide 60  → `* /<min>` on the minutes field
+ *   - whole hours            → step must divide 24  → `* /<hour>` on the hours field
+ *
+ * Honest mapping notes:
+ *   - Cadences that are clean whole-second/minute/hour/day multiples map to a
+ *     star-slash step expression and fire on the same cadence, but aligned to
+ *     the wall clock instead of to registration/completion time (the old
+ *     setInterval restarted cadenceMs after each run finished).
+ *   - A sub-minute cadence whose seconds do not divide 60 (e.g. 7 s) maps to a
+ *     second-step expression: node-cron re-aligns on the minute boundary, so
+ *     the last gap of each minute is shorter than the cadence.
+ *   - A cadence that is not a whole second/minute/hour (e.g. 90 s, 36 h)
+ *     cannot be expressed exactly in cron; it is approximated to the nearest
+ *     representable step (never firing more often than the requested cadence
+ *     where avoidable). No current Recourse job registers such a cadence.
+ * All cadences are validated to be >= 1000 ms at registration.
+ */
+function intervalMsToCron(cadenceMs: number): string {
+  const seconds = cadenceMs / 1000;
+
+  // Whole multiples of an hour.
+  if (seconds % 3600 === 0) {
+    const hours = seconds / 3600;
+    if (hours === 24) return '0 0 * * *';
+    if (hours > 24 && hours % 24 === 0) {
+      const days = hours / 24;
+      return days === 1 ? '0 0 * * *' : `0 0 */${days} * *`;
+    }
+    if (hours < 24) return hours === 1 ? '0 * * * *' : `0 */${hours} * * *`;
+    // > 24 h but not a whole number of days (e.g. 36 h): approximate down to
+    // the nearest whole-day step.
+    const days = Math.max(1, Math.round(hours / 24));
+    return days === 1 ? '0 0 * * *' : `0 0 */${days} * *`;
+  }
+
+  // Whole multiples of a minute (but not of an hour).
+  if (seconds % 60 === 0) {
+    const minutes = seconds / 60;
+    if (minutes <= 59) return minutes === 1 ? '* * * * *' : `*/${minutes} * * * *`;
+    // >= 1 h but not a whole-hour multiple (e.g. 100 min): approximate to
+    // the nearest hour step.
+    const hours = Math.min(23, Math.max(1, Math.round(minutes / 60)));
+    return hours === 1 ? '0 * * * *' : `0 */${hours} * * *`;
+  }
+
+  // Whole seconds under a minute → second-step expression.
+  if (seconds < 60) {
+    const sec = Math.max(1, Math.round(seconds));
+    return `*/${sec} * * * * *`;
+  }
+
+  // >= 60 s but not a whole minute (e.g. 90 s): approximate to the nearest
+  // whole minute.
+  const minutes = Math.max(1, Math.round(seconds / 60));
+  return minutes === 1 ? '* * * * *' : `*/${minutes} * * * *`;
+}
+
+// ----------------------------------------------------------------------------
 // Registry + scheduler state
 // ----------------------------------------------------------------------------
 
+/** The cron expression a job's def drives. cadenceMs wins when both present. */
+function cronExpressionFor(def: ScheduledJobDef): string {
+  return def.cadenceMs ? intervalMsToCron(def.cadenceMs) : (def.cron as string);
+}
+
 const jobs = new Map<string, ScheduledJobState>();
-const globalForScheduler = globalThis as unknown as { __recourseScheduler?: { running: boolean; startedAt: number | null; timer: NodeJS.Timeout | null } };
-const scheduler =
-  globalForScheduler.__recourseScheduler ?? { running: false, startedAt: null, timer: null };
+/** node-cron task per registered job, created stopped at registration. */
+const cronTasks = new Map<string, ScheduledTask>();
+
+const globalForScheduler = globalThis as unknown as {
+  __recourseScheduler?: { running: boolean; startedAt: number | null };
+};
+const scheduler = globalForScheduler.__recourseScheduler ?? { running: false, startedAt: null };
 globalForScheduler.__recourseScheduler = scheduler;
+
+/** Projection of the next run for reporting (mirrors legacy cadence model). */
+function estimateNextRunAt(job: Pick<ScheduledJobState, 'cadenceMs' | 'cron'>): number {
+  const now = Date.now();
+  if (job.cadenceMs) return now + job.cadenceMs;
+  if (job.cron) return nextRunForCron(job.cron, now);
+  return now + 60_000;
+}
+
+/** Run the handler once, recording state exactly like a scheduled fire. */
+async function runJobOnce(job: ScheduledJobState): Promise<JobRunResult> {
+  if (job.running) return { skipped: 'overlap guard' }; // belt-and-braces w/ noOverlap
+  job.running = true;
+  try {
+    const result = await job.run();
+    job.lastRunAt = Date.now();
+    job.lastOk = true;
+    job.lastError = null;
+    job.runCount += 1;
+    return result;
+  } catch (err) {
+    job.lastRunAt = Date.now();
+    job.lastOk = false;
+    job.lastError = err instanceof Error ? err.message : String(err);
+    job.runCount += 1;
+    job.failCount += 1;
+    return null;
+  } finally {
+    job.running = false;
+    job.nextRunAt = estimateNextRunAt(job);
+  }
+}
+
+/** Should this job's node-cron task currently be ticking? */
+function taskShouldRun(job: ScheduledJobState): boolean {
+  return scheduler.running && job.enabled;
+}
+
+/** Bring one job's node-cron task in line with its enabled + scheduler state. */
+function syncCronTask(job: ScheduledJobState): void {
+  const task = cronTasks.get(job.id);
+  if (!task) return;
+  const status = task.getStatus();
+  const shouldRun = taskShouldRun(job);
+  if (shouldRun && status !== 'running') {
+    void task.start();
+  } else if (!shouldRun && (status === 'idle' || status === 'running')) {
+    void task.stop();
+  }
+}
 
 export function registerScheduledJob(def: ScheduledJobDef): { ok: boolean; error?: string } {
   if (!def || typeof def.id !== 'string' || !def.id) return { ok: false, error: 'job id required' };
@@ -198,11 +338,13 @@ export function registerScheduledJob(def: ScheduledJobDef): { ok: boolean; error
   if (typeof def.run !== 'function') return { ok: false, error: `job "${def.id}" requires a run() function` };
   if (!def.cadenceMs && !def.cron) return { ok: false, error: `job "${def.id}" requires cadenceMs or cron` };
   if (def.cadenceMs && def.cadenceMs < 1000) return { ok: false, error: `job "${def.id}" cadenceMs too fast (<1000)` };
+  if (!def.cadenceMs && def.cron && !cron.validate(def.cron)) {
+    return { ok: false, error: `job "${def.id}" has invalid cron expression ("${def.cron}")` };
+  }
 
   const persisted = loadToggles().enabled;
   const enabled = persisted[def.id] ?? def.enabledByDefault;
-  const now = Date.now();
-  jobs.set(def.id, {
+  const job: ScheduledJobState = {
     ...def,
     enabled,
     lastRunAt: null,
@@ -211,8 +353,23 @@ export function registerScheduledJob(def: ScheduledJobDef): { ok: boolean; error
     runCount: 0,
     failCount: 0,
     running: false,
-    nextRunAt: now + (def.cadenceMs ?? 60_000),
-  });
+    nextRunAt: estimateNextRunAt(def),
+  };
+  jobs.set(def.id, job);
+
+  // Create the node-cron task STOPPED (createTask, not schedule), so a job is
+  // only armed when the scheduler is running AND the job is enabled.
+  try {
+    const task = cron.createTask(cronExpressionFor(def), () => runJobOnce(job), {
+      name: def.id,
+      noOverlap: true, // never run a job concurrently with itself
+    });
+    cronTasks.set(def.id, task);
+    syncCronTask(job);
+  } catch (err) {
+    jobs.delete(def.id);
+    return { ok: false, error: `job "${def.id}" could not be scheduled: ${(err as Error)?.message ?? err}` };
+  }
   return { ok: true };
 }
 
@@ -220,7 +377,8 @@ export function setJobEnabled(id: string, enabled: boolean): SchedulerToggleResu
   const job = jobs.get(id);
   if (!job) return { ok: false, error: `unknown job "${id}"` };
   job.enabled = enabled;
-  job.nextRunAt = Date.now() + (job.cadenceMs ?? 60_000);
+  job.nextRunAt = estimateNextRunAt(job);
+  syncCronTask(job);
   saveToggles();
   return { ok: true, state: { ...job } };
 }
@@ -230,69 +388,27 @@ export async function triggerJob(id: string): Promise<SchedulerTriggerResult> {
   const job = jobs.get(id);
   if (!job) return { ok: false, error: `unknown job "${id}"` };
   if (job.running) return { ok: false, error: `job "${id}" is already running (overlap guard)` };
-  job.running = true;
-  try {
-    const result = await job.run();
-    job.lastRunAt = Date.now();
-    job.lastOk = true;
-    job.lastError = null;
-    job.runCount += 1;
-    job.nextRunAt = Date.now() + (job.cadenceMs ?? 60_000);
-    return { ok: true, result, ran: true, state: { ...job } };
-  } catch (err) {
-    job.lastRunAt = Date.now();
-    job.lastOk = false;
-    job.lastError = err instanceof Error ? err.message : String(err);
-    job.runCount += 1;
-    job.failCount += 1;
-    job.nextRunAt = Date.now() + (job.cadenceMs ?? 60_000);
-    return { ok: true, result: null, ran: true, state: { ...job } };
-  } finally {
-    job.running = false;
-  }
+  const result = await runJobOnce(job);
+  return { ok: true, result, ran: true, state: { ...job } };
 }
 
-async function runDueJobs(): Promise<void> {
-  const now = Date.now();
-  for (const job of jobs.values()) {
-    if (!job.enabled) continue;
-    if (job.running) continue; // overlap guard
-    if (now < job.nextRunAt) continue;
-    job.running = true;
-    void (async () => {
-      try {
-        await job.run();
-        job.lastRunAt = Date.now();
-        job.lastOk = true;
-        job.lastError = null;
-        job.runCount += 1;
-      } catch (err) {
-        job.lastRunAt = Date.now();
-        job.lastOk = false;
-        job.lastError = err instanceof Error ? err.message : String(err);
-        job.runCount += 1;
-        job.failCount += 1;
-      } finally {
-        job.running = false;
-        job.nextRunAt = Date.now() + (job.cadenceMs ?? 60_000);
-      }
-    })();
-  }
-}
-
-export function startScheduler(tickMs = 1000): { started: boolean; reason?: string } {
+export function startScheduler(_tickMs = 1000): { started: boolean; reason?: string } {
   if (scheduler.running) return { started: false, reason: 'already running' };
   scheduler.running = true;
   scheduler.startedAt = Date.now();
-  scheduler.timer = setInterval(() => void runDueJobs().catch(() => {}), tickMs);
+  // _tickMs is accepted for API compatibility with the legacy polling loop;
+  // node-cron owns timing now, so there is no tick interval to honour.
+  for (const job of jobs.values()) syncCronTask(job);
   return { started: true };
 }
 
 export function stopScheduler(): { stopped: boolean } {
-  if (scheduler.timer) clearInterval(scheduler.timer);
-  scheduler.timer = null;
   scheduler.running = false;
   scheduler.startedAt = null;
+  for (const task of cronTasks.values()) {
+    const status = task.getStatus();
+    if (status === 'idle' || status === 'running') void task.stop();
+  }
   return { stopped: true };
 }
 
@@ -318,7 +434,8 @@ export function resetSchedule(): void {
   const persisted = loadToggles().enabled;
   for (const job of jobs.values()) {
     job.enabled = persisted[job.id] ?? job.enabledByDefault;
-    job.nextRunAt = Date.now() + (job.cadenceMs ?? 60_000);
+    job.nextRunAt = estimateNextRunAt(job);
   }
+  for (const job of jobs.values()) syncCronTask(job);
   saveToggles();
 }

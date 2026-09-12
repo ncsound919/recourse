@@ -27,7 +27,8 @@ const STOPWORDS = new Set([
 ]);
 
 function sigTokens(text: string): string[] {
-  return (text.toLowerCase().match(/[a-z0-9]+/g) ?? []).filter((t) => t.length > 2 && !STOPWORDS.has(t));
+  const matched: string[] = text.toLowerCase().match(/[a-z0-9]+/g) ?? [];
+  return matched.filter((t) => t.length > 2 && !STOPWORDS.has(t));
 }
 
 function jaccard(a: Set<string>, b: Set<string>): number {

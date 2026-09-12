@@ -88,6 +88,14 @@ export const biosimLod95Req = z.object({
   depth: z.coerce.number().int().min(1).max(10_000_000),
 });
 
+// --- Data Visualizer sidecar -------------------------------------------------
+export const vizRenderReq = z.object({
+  id: z.string().trim().min(1).max(64),
+  width: z.coerce.number().int().min(320).max(1920).optional(),
+  height: z.coerce.number().int().min(240).max(1440).optional(),
+  params: z.record(z.string(), z.unknown()).optional(),
+});
+
 // --- Grant engine (oncology) -------------------------------------------------
 export const grantHypothesesReq = z.object({
   problemId: z.string().trim().min(1).max(120),

@@ -23,9 +23,18 @@ export interface LintReport {
 }
 
 function oxlintBin(): string | null {
+  // Safe in both ESM and the CJS esbuild bundle: import.meta is empty in CJS.
+  const _importMetaUrl: string | undefined =
+    typeof import.meta !== 'undefined' && import.meta.url ? import.meta.url : undefined;
+  const moduleDir =
+    typeof __filename !== 'undefined'
+      ? path.dirname(__filename)
+      : _importMetaUrl
+        ? path.dirname(new URL(_importMetaUrl).pathname)
+        : process.cwd();
   const candidates = [
     path.join(process.cwd(), 'node_modules', 'oxlint', 'bin', 'oxlint'),
-    path.join(path.dirname(new URL(import.meta.url).pathname), '..', '..', '..', 'node_modules', 'oxlint', 'bin', 'oxlint'),
+    path.join(moduleDir, '..', '..', '..', 'node_modules', 'oxlint', 'bin', 'oxlint'),
   ];
   for (const c of candidates) {
     try {

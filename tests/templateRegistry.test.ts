@@ -30,6 +30,29 @@ describe('plugin template registry (Phase 4 item 15)', () => {
     expect(out.testSuiteCode.length).toBeGreaterThan(0);
   });
 
+  it('registers the BlackMind-ported biotech plugins (sequence analyzer + CRISPR) as synthesizing templates', () => {
+    expect(isTemplateRegistered('tpl_sequence_analyzer')).toBe(true);
+    const seq = getComponentTemplate('tpl_sequence_analyzer');
+    expect(seq).toBeTruthy();
+    expect(seq!.domain).toBe('biotech');
+    expect(seq!.selfHost).toBeTruthy();
+    const seqOut = seq!.synthesizer({}, { withSelfHealing: true });
+    expect(seqOut.sourceCode.length).toBeGreaterThan(0);
+    expect(seqOut.testSuiteCode.length).toBeGreaterThan(0);
+    expect(seqOut.sourceCode).toContain('detectType');
+    expect(seqOut.sourceCode).toContain('reverseComplement');
+
+    expect(isTemplateRegistered('tpl_crispr_designer')).toBe(true);
+    const crispr = getComponentTemplate('tpl_crispr_designer');
+    expect(crispr).toBeTruthy();
+    expect(crispr!.domain).toBe('biotech');
+    expect(crispr!.selfHost).toBeTruthy();
+    const crisprOut = crispr!.synthesizer({}, { withSelfHealing: true });
+    expect(crisprOut.sourceCode.length).toBeGreaterThan(0);
+    expect(crisprOut.testSuiteCode.length).toBeGreaterThan(0);
+    expect(crisprOut.sourceCode).toContain('design');
+  });
+
   it('lists templates filtered by domain and category', () => {
     const coding = listComponentTemplates('coding');
     expect(Array.isArray(coding)).toBe(true);

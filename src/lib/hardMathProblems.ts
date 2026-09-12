@@ -187,6 +187,7 @@ export const HARD_MATH_PROBLEMS: HardMathProblem[] = [
     tier: 'open',
     title: 'Riemann Hypothesis — search for zeros off the critical line Re(s)=1/2',
     statement: 'The Riemann Hypothesis: all nontrivial zeros of ζ(s) lie on the critical line Re(s) = 1/2. For each tested T, search the rectangle 0 ≤ σ ≤ 1, 0 < t ≤ T for any zero with σ ≠ 1/2.',
+    toolName: 'riemannSearch',
     acceptanceTest: [
       "assert typeof riemannSearch === 'function';",
       "const __r = riemannSearch(10);",
@@ -203,6 +204,7 @@ export const HARD_MATH_PROBLEMS: HardMathProblem[] = [
     tier: 'open',
     title: 'Beal conjecture — search for A^x + B^y = C^z counter-examples with A, B, C coprime and x, y, z > 2',
     statement: 'Beal conjecture (1993): if A, B, C are coprime positive integers and x, y, z > 2, then A^x + B^y ≠ C^z. Search all quadruples (A, B, C, x, y, z) with min(A, B, C) ≥ 1 and A^x + B^y ≤ BOUND for any counter-example.',
+    toolName: 'bealSearch',
     acceptanceTest: [
       "assert typeof bealSearch === 'function';",
       "const __r = bealSearch(10000);",

@@ -17,6 +17,8 @@ import './templatePlugins/artifactKinds.js';
 import { bloomFilterPlugin } from './templatePlugins/bloomFilter';
 import { abmCancerSimPlugin } from './templatePlugins/abmCancerSim';
 import { biosimTrialPlugin } from './templatePlugins/biosimTrial';
+import { sequenceAnalyzerPlugin } from './templatePlugins/sequenceAnalyzer';
+import { crisprDesignerPlugin } from './templatePlugins/crisprDesigner';
 import { premierTrendPlugin } from './templatePlugins/premierTrend';
 import { premierValidatorsPlugin } from './templatePlugins/premierValidators';
 import { ocrPreprocessPlugin } from './templatePlugins/ocrPreprocess';
@@ -1052,6 +1054,8 @@ for (const tpl of Object.values(BUILTIN_TEMPLATE_LIBRARY)) {
 registerComponentTemplatePlugin(bloomFilterPlugin);
 registerComponentTemplatePlugin(abmCancerSimPlugin);
 registerComponentTemplatePlugin(biosimTrialPlugin);
+registerComponentTemplatePlugin(sequenceAnalyzerPlugin);
+registerComponentTemplatePlugin(crisprDesignerPlugin);
 registerComponentTemplatePlugin(premierTrendPlugin);
 registerComponentTemplatePlugin(premierValidatorsPlugin);
 registerComponentTemplatePlugin(ocrPreprocessPlugin);

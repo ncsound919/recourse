@@ -1,110 +1,123 @@
 // src/dream/autograd.ts — Scalar Autograd Engine
 //
-// A minimalist scalar automatic differentiation engine implementing
-// exact reverse-mode computation graphs (backpropagation). This provides
-// the exact forward-cache/backward-recurrence pattern for the chain rule,
-// ensuring strict determinism based on the mathematical topology.
+// This module now DELEGATES to the mature `autograd-ts` library instead of the
+// original hand-rolled micrograd-style engine. All computation-graph
+// construction, reverse-mode chain-rule backward passes, and deterministic
+// topological ordering come from autograd-ts's `Value` class.
 //
-// Each Value node caches its forward pass output and its local gradient
-// derivative, recursively applying the chain rule in reverse topological
-// order (from the loss function backwards to the parameters).
+// The public API preserved for consumers is identical to the old engine:
+//   constructor(data, _children = [])   data   grad
+//   add / mul / pow / sub / div / relu / sigmoid   backward()
+//
+// autograd-ts's `Value` provides add/sub/mul/div/pow/tanh/relu/backward but NOT
+// `sigmoid()`. Two small bridges restore the full original surface:
+//
+//   1. autograd-ts builds every intermediate graph node as an instance of its
+//      own base `Value` class, so `sigmoid()` is patched onto that base
+//      prototype (guarded, idempotent). Without this, chained calls like
+//      `qkDot.mul(k).sigmoid()` would fail at runtime on library-produced
+//      nodes.
+//   2. A thin subclass restores the original two-argument constructor
+//      `(data, _children)` contract and re-declares the value-returning ops
+//      with covariant types so callers keep seeing `Value` everywhere.
+//
+// The math (including sigmoid's derivative sig*(1-sig) * out.grad) matches the
+// old engine exactly, so forward values and accumulated gradients are
+// unchanged.
 
-export class Value {
-  data: number;
-  grad: number;
-  private _backward: () => void;
-  private _prev: Set<Value>;
+// Deep path import: `autograd-ts`'s package.json `exports` map only exposes an
+// `import` condition, so the CJS esbuild bundle's `require('autograd-ts')`
+// fails with ERR_PACKAGE_PATH_NOT_EXPORTED at boot. Pointing at the actual
+// `dist/index.js` (a CJS file, matching the package `main`) resolves in both
+// ESM dev (tsx) and the production CJS bundle.
+// Runtime load that works in BOTH ESM dev (tsx) and the production CJS bundle:
+// the package `exports` map only exposes an `import` condition, so resolving the
+// bare specifier fails with ERR_PACKAGE_PATH_NOT_EXPORTED under createRequire.
+// Pointing at the real `dist/index.js` file path (the package `main`) bypasses
+// the exports map entirely — the file itself is CJS.
+// Runtime load that works in BOTH ESM dev (tsx) and the production CJS bundle:
+// the package `exports` map only exposes an `import` condition, so resolving the
+// bare specifier fails with ERR_PACKAGE_PATH_NOT_EXPORTED under createRequire.
+// `require.resolve('autograd-ts')` with the package's OWN directory as a search
+// path still honors exports, so instead we build the path from the install
+// root (node_modules is always beside the app) and require the CJS file
+// directly. The file at dist/index.js is CJS.
+import { createRequire } from 'node:module';
+import { join } from 'node:path';
+import type { Value as AutogradValueType } from 'autograd-ts';
 
-  constructor(data: number, _children: Value[] = []) {
-    this.data = data;
-    this.grad = 0; // The derivative of the loss with respect to this value
-    this._backward = () => {};
-    this._prev = new Set(_children);
+const _importMetaUrl: string | undefined =
+  typeof import.meta !== 'undefined' && import.meta.url ? import.meta.url : undefined;
+const _require =
+  typeof __filename !== 'undefined'
+    ? createRequire(__filename)
+    : createRequire(_importMetaUrl ?? process.cwd());
+const { Value: AutogradValue } = _require(join(process.cwd(), 'node_modules', 'autograd-ts', 'dist', 'index.js')) as typeof import('autograd-ts');
+
+/** Builds a sigmoid node: out = 1 / (1 + exp(-x)), with the chain-rule
+ *  backward pass d x.grad += sig * (1 - sig) * out.grad. */
+function makeSigmoid(x: AutogradValueType): AutogradValueType {
+  const sig = 1 / (1 + Math.exp(-x.data));
+  const out = new AutogradValue(sig, {
+    prev: [x],
+    op: 'sigmoid',
+    backward: () => {
+      x.grad += sig * (1 - sig) * out.grad;
+    },
+  });
+  return out;
+}
+
+// autograd-ts constructs every intermediate node as its base `Value`, so the
+// activation must exist on that prototype for chained `.sigmoid()` calls on
+// library-produced nodes to keep working.
+const baseProto = AutogradValue.prototype as unknown as {
+  sigmoid?: (this: AutogradValueType) => AutogradValueType;
+};
+baseProto.sigmoid = function (this: AutogradValueType): AutogradValueType {
+    return makeSigmoid(this);
+  };
+
+/** Scalar computation-graph node (reverse-mode autodiff), backed by
+ *  autograd-ts. Public surface is API-compatible with the original engine. */
+export class Value extends AutogradValue {
+  constructor(data: number, children: Value[] = []) {
+    super(data, children.length > 0 ? { prev: children } : undefined);
   }
 
-  add(other: Value | number): Value {
-    const otherVal = other instanceof Value ? other : new Value(other);
-    const out = new Value(this.data + otherVal.data, [this, otherVal]);
-    
-    out._backward = () => {
-      this.grad += 1.0 * out.grad;
-      otherVal.grad += 1.0 * out.grad;
-    };
-    
-    return out;
+  add(v: Value | number): Value {
+    return super.add(v) as Value;
   }
 
-  mul(other: Value | number): Value {
-    const otherVal = other instanceof Value ? other : new Value(other);
-    const out = new Value(this.data * otherVal.data, [this, otherVal]);
-    
-    out._backward = () => {
-      // Local derivative times the output error signal (chain rule)
-      this.grad += otherVal.data * out.grad;
-      otherVal.grad += this.data * out.grad;
-    };
-    
-    return out;
+  mul(v: Value | number): Value {
+    return super.mul(v) as Value;
   }
 
-  pow(other: number): Value {
-    const out = new Value(Math.pow(this.data, other), [this]);
-    out._backward = () => {
-      this.grad += (other * Math.pow(this.data, other - 1)) * out.grad;
-    };
-    return out;
+  pow(n: number): Value {
+    return super.pow(n) as Value;
   }
-  
-  sub(other: Value | number): Value {
-    const otherVal = other instanceof Value ? other : new Value(other);
-    return this.add(otherVal.mul(-1));
+
+  sub(v: Value | number): Value {
+    return super.sub(v) as Value;
   }
-  
-  div(other: Value | number): Value {
-    const otherVal = other instanceof Value ? other : new Value(other);
-    return this.mul(otherVal.pow(-1));
+
+  div(v: Value | number): Value {
+    return super.div(v) as Value;
   }
 
   relu(): Value {
-    const out = new Value(this.data < 0 ? 0 : this.data, [this]);
-    out._backward = () => {
-      this.grad += (out.data > 0 ? 1.0 : 0.0) * out.grad;
-    };
-    return out;
+    return super.relu() as Value;
+  }
+
+  tanh(): Value {
+    return super.tanh() as Value;
+  }
+
+  neg(): Value {
+    return super.neg() as Value;
   }
 
   sigmoid(): Value {
-    const sig = 1 / (1 + Math.exp(-this.data));
-    const out = new Value(sig, [this]);
-    out._backward = () => {
-      this.grad += (sig * (1 - sig)) * out.grad;
-    };
-    return out;
-  }
-
-  backward() {
-    // Topological sort of all nodes in the graph
-    const topo: Value[] = [];
-    const visited = new Set<Value>();
-    
-    const buildTopo = (v: Value) => {
-      if (!visited.has(v)) {
-        visited.add(v);
-        for (const child of v._prev) {
-          buildTopo(child);
-        }
-        topo.push(v);
-      }
-    };
-    
-    buildTopo(this);
-    
-    // Seed the gradient of the loss with 1.0
-    this.grad = 1.0;
-    
-    // Reverse topological order: apply chain rule backward through the graph
-    for (let i = topo.length - 1; i >= 0; i--) {
-      topo[i]._backward();
-    }
+    return makeSigmoid(this) as Value;
   }
 }
