@@ -211,12 +211,25 @@ model may draft `sourceCode`, but only execution sets status. Oracle, formal, an
 human-signoff proof types are declared but not yet automated; only
 `executable_test` is wired.
 
-Adaptations are caller-supplied: the deterministic CBR operator-ladder adaptation
-is not yet implemented.
+Adaptations are otherwise caller-supplied: the deterministic CBR operator-ladder
+adaptation is not yet implemented.
+
+AI adapter drafting (Plan 5): `src/lib/synergy/aiAdapter.ts` may ask the model to
+draft an adaptation (`createModelDrafter`), but only the resolver's execution
+sets status — `attemptTransfer` runs the acceptance test and admits solely on the
+result. Offline drafting is reported honestly (`{ ok: false, offline: true }`)
+and never fabricates source. `createModelDrafter` is untested (it makes a
+network call); tests exercise the injected `Drafter` seam with no network.
+
+Decision-engine rewire (Plan 5): `crossDomainSynergy` in `decisionEngine.ts` is
+now sourced from the real synergy map (build the per-domain record with
+`domainScoresFromMap`) and the hardcoded `0.4/0.3/0.5/0.85/0.95` constants are
+removed. The new argument defaults to `{}`, so callers that omit it get an
+honest `0` rather than a fabricated constant.
 
 Deferred to later plans: SME structural alignment wiring, corrected statistics
-(stationarity, Granger/transfer entropy, FDR), AI adapter drafting, and the
-decision-engine rewire.
+(stationarity, Granger/transfer entropy, FDR), and a deterministic CBR
+operator-ladder adapter.
 
 Known Plan-1 limitations (honest, not yet fixed):
 
@@ -231,8 +244,6 @@ Known Plan-1 limitations (honest, not yet fixed):
   cover bridge weights, `support`, `prediction`, or `filters`.
 - Small corpora (one method + one problem) yield zero candidates because the
   only shared bridge is over-general (`df == docCount`).
-- `decisionEngine.crossDomainSynergy` still uses hardcoded constants; the rewire
-  to `crossDomainSynergyFor` is Plan 5.
 
 Known Plan-2 limitations (honest, not yet fixed):
 
