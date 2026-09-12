@@ -20,7 +20,7 @@ function verifierDetail(res: {
   if (res.summary) parts.push(res.summary);
   if (Array.isArray(res.details)) parts.push(...res.details);
   if (res.stderr) parts.push(res.stderr);
-  return parts.join(' | ');
+  return parts.join(' | ').replace(/\b\d+(?:\.\d+)?ms\b/g, '<timing>');
 }
 
 export function resolveTransfer(
