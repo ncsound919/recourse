@@ -57,7 +57,7 @@ export interface ScheduledJobDef {
   run: () => Promise<JobRunResult> | JobRunResult;
   /** Fixed-interval cadence, OR provide `cron`. One of the two required. */
   cadenceMs?: number;
-  /** 5/6-field cron expression (minute hour dom mon dow [second]). */
+/** 5/6-field cron expression (minute hour dom mon dow; optional seconds field comes first in 6-field form). */
   cron?: string;
   /** Enabled when the scheduler starts (overridden by persisted toggles). */
   enabledByDefault: boolean;
