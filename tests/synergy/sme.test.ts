@@ -1,6 +1,6 @@
 // tests/synergy/sme.test.ts
 import { describe, it, expect } from 'vitest';
-import { dgroupFromRelations, matchHypotheses, isStructurallyConsistent, type DGroup } from '../../src/lib/synergy/sme.js';
+import { dgroupFromRelations, matchHypotheses, isStructurallyConsistent, align, type DGroup } from '../../src/lib/synergy/sme.js';
 import type { Rel } from '../../src/lib/synergy/types.js';
 
 const rel = (functor: string, args: string[], order = 1): Rel => ({ functor, type: 'rel', args, order });
@@ -32,5 +32,20 @@ describe('sme dgroups + match hypotheses', () => {
   it('accepts a one-to-one + parallel mapping', () => {
     const good = [{ baseFunctor: 'maps_to', targetFunctor: 'maps_to', argPairs: [['graph', 'schema'], ['sequence', 'route']], score: 0.9 }];
     expect(isStructurallyConsistent(good)).toBe(true);
+  });
+
+  it('align prefers a systematic (multi-relation) mapping over an isolated one', () => {
+    const systematic = align(base, target);
+    const isolatedBase: DGroup = dgroupFromRelations('m2', [rel('maps_to', ['graph', 'sequence'])], ['graph', 'sequence']);
+    const isolated = align(isolatedBase, target);
+    expect(systematic.gmapWeight).toBeGreaterThan(isolated.gmapWeight);
+  });
+
+  it('align is deterministic and consistent', () => {
+    const a = align(base, target);
+    const b = align(base, target);
+    expect(a).toEqual(b);
+    expect(a.consistent).toBe(true);
+    expect(a.mappings.length).toBeGreaterThan(0);
   });
 });

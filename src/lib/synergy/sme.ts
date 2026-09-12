@@ -66,3 +66,39 @@ export function isStructurallyConsistent(mhs: MatchHypothesis[]): boolean {
   }
   return true;
 }
+
+export function align(base: DGroup, target: DGroup): AlignmentResult {
+  const mhs = matchHypotheses(base, target);
+  // Greedy merge into a maximal one-to-one consistent set (deterministic order).
+  const chosen: MatchHypothesis[] = [];
+  const usedBase = new Set<string>();
+  const usedTarget = new Set<string>();
+  for (const mh of mhs) {
+    if (!isStructurallyConsistent([...chosen, mh])) continue;
+    const [b0] = mh.argPairs[0] ?? ['', ''];
+    if (b0 && (usedBase.has(b0) || usedTarget.has(mh.argPairs[0][1]))) continue;
+    chosen.push(mh);
+    for (const [b, t] of mh.argPairs) { usedBase.add(b); usedTarget.add(t); }
+  }
+  // Systematicity: propagate evidence to relations that share entities with the core.
+  const coreEntities = new Set<string>();
+  for (const mh of chosen) for (const [b] of mh.argPairs) coreEntities.add(b);
+  const systematic = SME_CALIBRATION.higherOrderTrickle * (coreEntities.size / Math.max(1, base.entities.length));
+  const raw = chosen.reduce((s, m) => s + m.score, 0) + (chosen.length > 1 ? systematic : 0);
+  const gmapWeight = Math.round(Math.min(1, raw / (SME_CALIBRATION.relationSameFunctor + SME_CALIBRATION.argMatch + SME_CALIBRATION.orderSame + 1)) * 1000) / 1000;
+
+  const mappings: AlignmentMapping[] = [];
+  for (const mh of chosen) {
+    for (const [b, t] of mh.argPairs) mappings.push({ base: b, target: t, evidence: mh.score });
+  }
+  // Candidate inferences: base relations whose constituents all mapped, but with no target match.
+  const targetFunctors = new Set(target.relations.map((r) => r.functor));
+  const inferences: string[] = [];
+  for (const br of base.relations) {
+    if (targetFunctors.has(br.functor)) continue;
+    if (br.args.every((a) => usedBase.has(canonicalizeTerm(a)))) inferences.push(br.functor);
+  }
+  mappings.sort((a, b) => (a.base < b.base ? -1 : a.base > b.base ? 1 : a.target < b.target ? -1 : 1));
+  inferences.sort();
+  return { gmapWeight, mappings, inferences, consistent: isStructurallyConsistent(chosen) };
+}
