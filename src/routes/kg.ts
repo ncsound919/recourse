@@ -124,7 +124,7 @@ export function createKgRouter(): Router {
   router.post('/live/optimize', async (req, res) => {
     const diseaseId = typeof req.body?.diseaseId === 'string' && req.body.diseaseId ? req.body.diseaseId : undefined;
     const doses = Array.isArray(req.body?.doses)
-      ? req.body.doses.filter((d: unknown) => typeof d === 'number' && d > 0).slice(0, 8)
+      ? req.body.doses.filter((d: unknown) => typeof d === 'number' && Number.isFinite(d) && d > 0 && d <= 100).slice(0, 8)
       : undefined;
     const modes = Array.isArray(req.body?.modes)
       ? req.body.modes.filter((m: unknown) => typeof m === 'string')
