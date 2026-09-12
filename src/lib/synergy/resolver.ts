@@ -33,6 +33,7 @@ export function resolveTransfer(
   let passed = false;
   let detail = '';
   try {
+    if (!acceptanceTest.trim()) throw new Error('acceptance test cannot be empty');
     const res = verifyCodingCode(sourceCode, acceptanceTest);
     passed = Boolean(res.passed);
     detail = verifierDetail(res) || (passed ? 'suite passed' : 'suite failed');
