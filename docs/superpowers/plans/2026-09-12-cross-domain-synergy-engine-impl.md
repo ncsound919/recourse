@@ -854,6 +854,29 @@ describe('controlled-token graph', () => {
     expect(edgeWeight(g, 'x', 'term:nope')).toBe(0);
     expect(edgeWeight(g, 'missing', 'term:graph')).toBe(0);
   });
+
+  it('handles zero-token docs and empty input', () => {
+    const g = buildGraph([{ id: 'a', domain: 'd', text: 'nothing controlled here' }]);
+    expect(edgeWeight(g, 'a', 'term:graph')).toBe(0);
+    expect(termDocFrequency(g, 'term:graph')).toBe(0);
+    const empty = buildGraph([]);
+    expect(empty.docCount).toBe(0);
+    expect(empty.nodes).toEqual([]);
+  });
+
+  it('throws on duplicate doc ids instead of corrupting df', () => {
+    expect(() =>
+      buildGraph([
+        { id: 'dup', domain: 'd', text: 'graph' },
+        { id: 'dup', domain: 'e', text: 'graph' },
+      ]),
+    ).toThrow(/duplicate doc id/);
+  });
+
+  it('matches underscore/spaced forms via canonicalization', () => {
+    const g = buildGraph([{ id: 'x', domain: 'd', text: 'linear algebra and linear_algebra' }]);
+    expect(edgeWeight(g, 'x', 'term:linear_algebra')).toBe(1);
+  });
 });
 ```
 
@@ -876,6 +899,7 @@ import { bridgeTerms } from './vocabulary.js';
 
 export interface GraphDoc {
   id: string;
+  /** Provenance only; buildGraph does not key on domain (used by callers). */
   domain: string;
   text: string;
 }
@@ -901,12 +925,15 @@ export function controlledTokens(text: string): string[] {
 export function buildGraph(docs: GraphDoc[]): WeightedGraph {
   const adjacency = new Map<string, Map<string, number>>();
   const docFrequency = new Map<string, number>();
+  const seen = new Set<string>();
   for (const doc of docs) {
+    if (seen.has(doc.id)) throw new Error(`buildGraph: duplicate doc id "${doc.id}"`);
+    seen.add(doc.id);
     const counts = new Map<string, number>();
     for (const t of controlledTokens(doc.text)) counts.set(t, (counts.get(t) ?? 0) + 1);
     const max = Math.max(1, ...counts.values());
     const row = new Map<string, number>();
-    for (const [t, c] of [...counts.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+    for (const [t, c] of [...counts.entries()].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))) {
       const key = `term:${t}`;
       row.set(key, Math.round((c / max) * 1000) / 1000);
       docFrequency.set(key, (docFrequency.get(key) ?? 0) + 1);
@@ -970,7 +997,8 @@ const baseCtx: FilterContext = {
   knownPairs: [],
 };
 
-const bridge: BridgeEvidence = { term: 'term:graph', weightAB: 1, weightBC: 1, score: 1, docs: 2 };
+const bridge: BridgeEvidence = { term: 'term:sequence', weightAB: 1, weightBC: 1, score: 1, docs: 1 };
+const general: BridgeEvidence = { term: 'term:graph', weightAB: 1, weightBC: 1, score: 1, docs: 2 };
 
 describe('bridge filters', () => {
   it('passes a known primitive with sufficient evidence', () => {
@@ -990,8 +1018,8 @@ describe('bridge filters', () => {
   });
 
   it('rejects over-general terms and known pairs', () => {
-    const general = filterBridge(bridge, { ...baseCtx, maxDocFrequency: 0.5 });
-    expect(general.find((x) => x.gate === 'generalness')?.passed).toBe(false);
+    const over = filterBridge(general, baseCtx);
+    expect(over.find((x) => x.gate === 'generalness')?.passed).toBe(false);
     const known = filterBridge(bridge, { ...baseCtx, knownPairs: ['mathematics->logistics'] });
     expect(known.find((x) => x.gate === 'novelty')?.passed).toBe(false);
   });
@@ -1047,8 +1075,8 @@ export function filterBridge(bridge: BridgeEvidence, ctx: FilterContext): Filter
     },
     {
       gate: 'generalness',
-      passed: !ctx.stoplist.includes(term) && df <= ctx.maxDocFrequency,
-      reason: `df=${df} max=${ctx.maxDocFrequency}`,
+      passed: !ctx.stoplist.includes(term) && df <= ctx.maxDocFrequency * ctx.graph.docCount,
+      reason: `df=${df} max=${Math.round(ctx.maxDocFrequency * ctx.graph.docCount * 100) / 100} (${ctx.maxDocFrequency} of ${ctx.graph.docCount})`,
     },
     {
       gate: 'evidence',
