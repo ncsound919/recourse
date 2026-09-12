@@ -306,7 +306,7 @@ Expected: FAIL — module not found.
  * only these tokens become graph bridge terms, which is what keeps the
  * closed-discovery baseline from degenerating into free-text lexical noise.
  */
-import { sha256Hex } from './manifest.js';
+import { manifestHash } from './manifest.js';
 
 export const VOCAB_VERSION = '1.0.0';
 
@@ -329,10 +329,16 @@ export function isKnownPrimitive(x: string): boolean {
 }
 
 export function canonicalizeTerm(s: string): string {
-  return String(s)
+  return s
     .toLowerCase()
     .replace(/[^a-z0-9_]+/g, '_')
     .replace(/^_+|_+$/g, '');
+}
+
+/** Primitives only — the only tokens allowed as graph bridge terms. Functors
+ *  are relational and are rejected by the semantic_type gate by design. */
+export function bridgeTerms(): string[] {
+  return PRIMITIVES.map(canonicalizeTerm);
 }
 
 export function vocabularyTerms(): string[] {
@@ -340,7 +346,13 @@ export function vocabularyTerms(): string[] {
 }
 
 export function vocabularyHash(): string {
-  return sha256Hex([VOCAB_VERSION, ...PRIMITIVES, ...FUNCTORS].join('|'));
+  // Length-prefixed (via manifestHash) over separate P:/F: lists so a term
+  // moving across the primitive/functor boundary changes the digest.
+  return manifestHash([
+    VOCAB_VERSION,
+    ...PRIMITIVES.map((p) => `P:${p}`),
+    ...FUNCTORS.map((f) => `F:${f}`),
+  ]);
 }
 ```
 
@@ -797,7 +809,7 @@ Expected: FAIL — module not found.
  * generalness filter. Only vocabulary tokens become terms — this is the
  * precision lever from the spec's representation-bottleneck warning.
  */
-import { vocabularyTerms } from './vocabulary.js';
+import { bridgeTerms } from './vocabulary.js';
 
 export interface GraphDoc {
   id: string;
@@ -815,7 +827,7 @@ export interface WeightedGraph {
 export function controlledTokens(text: string): string[] {
   const lower = text.toLowerCase();
   const out: string[] = [];
-  for (const term of vocabularyTerms()) {
+  for (const term of bridgeTerms()) {
     const re = new RegExp(`\\b${term.replace(/_/g, '[_ ]?')}\\b`, 'g');
     const matches = lower.match(re);
     if (matches) for (let i = 0; i < matches.length; i++) out.push(term);
@@ -1097,6 +1109,7 @@ import type {
 import { buildGraph, termDocFrequency, type GraphDoc, type WeightedGraph } from './graph.js';
 import { filterBridge, allPassed, type FilterContext } from './filters.js';
 import { manifestHash, sha256Hex } from './manifest.js';
+import { vocabularyHash } from './vocabulary.js';
 
 export const SYNERGY_ENGINE_VERSION = '0.1.0';
 
@@ -1205,6 +1218,7 @@ export function discover(
   candidates.sort((a, b) => b.score - a.score || (a.id < b.id ? -1 : 1));
   const manifest = manifestHash([
     SYNERGY_ENGINE_VERSION,
+    vocabularyHash(),
     ...methods.map((m) => m.id),
     ...problems.map((p) => p.id),
     ...candidates.map((c) => `${c.id}:${c.score}:${c.bridges.map((b) => b.term).join(',')}`),
