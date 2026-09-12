@@ -49,7 +49,9 @@ describe('bridges router (extracted from server monolith)', () => {
       await handler({} as any, res);
       const payload = res.json.mock.calls[0][0];
       expect(payload.success).toBe(true);
-      expect(typeof payload.online).toBe('boolean');
+      expect(payload.success).toBe(true);
+      expect(payload.online).toBe(false);
+      expect(typeof payload.error).toBe('string');
     }
   });
 });
