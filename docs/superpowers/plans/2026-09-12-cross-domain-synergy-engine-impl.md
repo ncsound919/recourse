@@ -1017,9 +1017,21 @@ describe('bridge filters', () => {
     expect(d.find((x) => x.gate === 'cross_domain')?.passed).toBe(false);
   });
 
-  it('rejects over-general terms and known pairs', () => {
+  it('rejects over-general terms', () => {
     const over = filterBridge(general, baseCtx);
     expect(over.find((x) => x.gate === 'generalness')?.passed).toBe(false);
+  });
+
+  it('rejects stoplisted terms with a stoplist reason', () => {
+    const d = filterBridge(bridge, { ...baseCtx, stoplist: ['sequence'] });
+    const g = d.find((x) => x.gate === 'generalness');
+    expect(g?.passed).toBe(false);
+    expect(g?.reason).toContain('stoplisted');
+  });
+
+  it('rejects insufficient evidence and known pairs', () => {
+    const thin = filterBridge({ ...bridge, docs: 0 }, baseCtx);
+    expect(thin.find((x) => x.gate === 'evidence')?.passed).toBe(false);
     const known = filterBridge(bridge, { ...baseCtx, knownPairs: ['mathematics->logistics'] });
     expect(known.find((x) => x.gate === 'novelty')?.passed).toBe(false);
   });
@@ -1038,7 +1050,9 @@ Expected: FAIL — module not found.
 /**
  * Deterministic bridge gates (spec §8.6). Order: cross_domain, semantic_type,
  * generalness, evidence, novelty. Every decision (pass or fail) is returned
- * with a reason so rejections are auditable.
+ * with a reason so rejections are auditable. The spec's `direction` and
+ * `cross-cluster` gates are intentionally deferred (cross_domain covers the
+ * cross-sector requirement; direction needs typed predicates from Plan 2).
  */
 import type { FilterDecision, BridgeEvidence } from './types.js';
 import { termDocFrequency, type WeightedGraph } from './graph.js';
@@ -1062,6 +1076,11 @@ export function filterBridge(bridge: BridgeEvidence, ctx: FilterContext): Filter
   const term = termId(bridge.term);
   const pair = `${ctx.fromDomain}->${ctx.toDomain}`;
   const df = termDocFrequency(ctx.graph, bridge.term);
+  const known = isKnownPrimitive(term);
+  const stoplisted = ctx.stoplist.includes(term);
+  const maxDf = ctx.maxDocFrequency * ctx.graph.docCount;
+  // docCount === 0 is vacuously non-general; unknown terms are still caught by semantic_type.
+  const overGeneral = ctx.graph.docCount > 0 && df > maxDf + 1e-9;
   return [
     {
       gate: 'cross_domain',
@@ -1070,13 +1089,15 @@ export function filterBridge(bridge: BridgeEvidence, ctx: FilterContext): Filter
     },
     {
       gate: 'semantic_type',
-      passed: isKnownPrimitive(term),
-      reason: isKnownPrimitive(term) ? 'known primitive' : `unknown term "${term}"`,
+      passed: known,
+      reason: known ? 'known primitive' : `unknown term "${term}"`,
     },
     {
       gate: 'generalness',
-      passed: !ctx.stoplist.includes(term) && df <= ctx.maxDocFrequency * ctx.graph.docCount,
-      reason: `df=${df} max=${Math.round(ctx.maxDocFrequency * ctx.graph.docCount * 100) / 100} (${ctx.maxDocFrequency} of ${ctx.graph.docCount})`,
+      passed: !stoplisted && !overGeneral,
+      reason: stoplisted
+        ? `"${term}" is stoplisted`
+        : `df=${df} max=${Math.round(maxDf * 100) / 100} (${ctx.maxDocFrequency} of ${ctx.graph.docCount})`,
     },
     {
       gate: 'evidence',
@@ -1099,7 +1120,7 @@ export function allPassed(decisions: FilterDecision[]): boolean {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run tests/synergy/filters.test.ts`
-Expected: PASS (4 tests).
+Expected: PASS (6 tests).
 
 - [ ] **Step 5: Commit**
 
