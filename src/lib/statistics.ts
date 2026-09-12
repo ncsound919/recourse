@@ -166,7 +166,7 @@ export interface FdrResult {
 /** Benjamini-Hochberg FDR correction via @stdlib/stats-padjust (method 'bh'). */
 export function benjaminiHochberg(pvalues: number[]): FdrResult {
   const n = pvalues.length;
-  const out = n > 0 ? padjust(pvalues, 'bh') : [];
+  const out = n > 0 ? Array.from(padjust(pvalues, 'bh')) : [];
   return {
     corrected: out.map((p) => Math.round(p * 1e6) / 1e6),
     method: 'benjamini_hochberg',
