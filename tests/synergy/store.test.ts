@@ -27,8 +27,13 @@ describe('synergy map store', () => {
     expect(readSynergyMap()).toEqual(map);
   });
 
-  it('returns null on corrupt content rather than throwing', () => {
+  it('throws on corrupt content rather than treating it as absent', () => {
     fs.writeFileSync(TEST_FILE, '{not json', 'utf-8');
-    expect(readSynergyMap()).toBeNull();
+    expect(() => readSynergyMap()).toThrow(/corrupt/);
+  });
+
+  it('throws on an unexpected shape', () => {
+    fs.writeFileSync(TEST_FILE, JSON.stringify({ nope: true }), 'utf-8');
+    expect(() => readSynergyMap()).toThrow(/corrupt/);
   });
 });

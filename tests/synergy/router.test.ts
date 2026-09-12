@@ -58,4 +58,34 @@ describe('synergy router', () => {
     expect(res.payload.candidates.length).toBeGreaterThan(0);
     expect(res.payload.manifest).toHaveLength(64);
   });
+
+  it('rejects malformed scan bodies with structured 400s', async () => {
+    const cases: unknown[] = [
+      { methods: 'x', problems: [] },
+      { methods: [], problems: [] },
+      { methods: [null], problems: [{ id: 'p', acceptanceTest: 'assert true;' }] },
+      { methods: [{ id: 'm', name: 'M', domain: 'd', source: 'tool' }], problems: [{ id: 'p' }] },
+      { methods: [{ id: 'm', name: 'M', domain: 'd', source: 'tool' }], problems: [{ id: 'p', acceptanceTest: 'x' }], knownPairs: 5 },
+    ];
+    for (const body of cases) {
+      const res: any = {
+        status: (c: number) => { res.code = c; return res; },
+        json: (v: unknown) => { res.payload = v; return res; },
+      };
+      await handler('/synergy/scan')({ body } as any, res);
+      expect(res.code).toBe(400);
+      expect(res.payload.success).toBe(false);
+    }
+  });
+
+  it('returns a structured 500 when the stored map is corrupt', async () => {
+    fs.writeFileSync(TEST_FILE, '{not json', 'utf-8');
+    const res: any = {
+      status: (c: number) => { res.code = c; return res; },
+      json: (v: unknown) => { res.payload = v; return res; },
+    };
+    await handler('/synergy/map')({} as any, res);
+    expect(res.code).toBe(500);
+    expect(res.payload.success).toBe(false);
+  });
 });

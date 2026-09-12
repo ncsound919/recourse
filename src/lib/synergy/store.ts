@@ -15,14 +15,25 @@ export function synergyMapPath(): string {
 
 export function readSynergyMap(): SynergyMap | null {
   const file = synergyMapPath();
+  let raw: string;
   try {
-    if (!fs.existsSync(file)) return null;
-    const raw = fs.readFileSync(file, 'utf-8');
-    if (!raw.trim()) return null;
-    return JSON.parse(raw) as SynergyMap;
-  } catch {
-    return null;
+    raw = fs.readFileSync(file, 'utf-8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw err;
   }
+  if (!raw.trim()) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(`synergy map corrupt (invalid JSON): ${file}`);
+  }
+  const shape = parsed as SynergyMap;
+  if (!shape || typeof shape !== 'object' || !Array.isArray(shape.edges) || !Array.isArray(shape.candidates)) {
+    throw new Error(`synergy map corrupt (unexpected shape): ${file}`);
+  }
+  return shape;
 }
 
 export function writeSynergyMap(map: SynergyMap): void {
