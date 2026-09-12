@@ -93,7 +93,7 @@ describe('trend engine: momentum + cross-domain', () => {
 
   it('cross-correlation reports a Fisher-z p-value and requires enough points', () => {
     const a = flatSeries([1, 2, 3, 4, 5, 6, 7, 8], 'a', 'A');
-    const b = flatSeries([1, 2, 3, 4, 5, 6, 7, 8], 'b', 'B');
+    const b = flatSeries([1, 2, 4, 3, 5, 7, 6, 9], 'b', 'B');
     const lc = laggedCorrelation(a, b, 2);
     expect(lc.pValue ?? 1).toBeLessThan(0.05);
     // Tiny series: n<=3 cannot be significant.
