@@ -204,3 +204,19 @@ Routes (mounted under `/api/recourse`):
 Deferred to later plans: SME structural alignment, corrected statistics
 (stationarity, Granger/transfer entropy, FDR), the sandbox resolver + admission
 gate, AI adapter drafting, and the decision-engine rewire.
+
+Known Plan-1 limitations (honest, not yet fixed):
+
+- Three filter gates are effectively inert in the real pipeline: `cross_domain`
+  is pre-empted by the same-domain skip, `semantic_type` always passes because
+  only controlled-vocabulary terms become bridges, and `evidence` always passes
+  at the default `minDocsPerLeg: 1`. Only `generalness` and `novelty` can reject
+  a real candidate today.
+- Evidence uses global document frequency, not per-leg support; the spec's
+  `minDocsPerLeg: 2` default is not yet in force.
+- A scan manifest receipts candidates by `id:score:top-terms` only; it does not
+  cover bridge weights, `support`, `prediction`, or `filters`.
+- Small corpora (one method + one problem) yield zero candidates because the
+  only shared bridge is over-general (`df == docCount`).
+- `decisionEngine.crossDomainSynergy` still uses hardcoded constants; the rewire
+  to `crossDomainSynergyFor` is Plan 5.
