@@ -118,11 +118,29 @@ near-duplicates. `GET /health`, `POST /fuzz/match {needle, candidates}`,
 `POST /fuzz/dedup {names}` (group near-duplicates, reports real `dedup_savings`).
 Configured via `FUZZ_SIDECAR_URL`; client `src/lib/fuzzSidecarClient.ts`.
 
+### Data Visualizer (`python/viz_service`, port 8505)
+
+Renders a curated subset of the `Data_Visualization-main` teaching repo
+(~350 matplotlib/plotly math-physics-statistics scripts) as real PNG artifacts.
+Not all 350 are hosted: most are near-duplicate variants, several need
+interactive-only APIs (ipywidgets/`plt.show()`/plotly animations), and some are
+outright broken (undefined symbols, `np.math.comb`). The 12 curated scenes are
+faithful ports, each documenting its SOURCE file and `adapted:true` where a bug
+was fixed or an interactive backend was replaced by the Agg capture. Endpoints:
+`GET /health`, `GET /viz/catalog`, `POST /viz/render {id, width?, height?,
+params?}` → base64 PNG + derived metrics. Configured via `VIZ_SIDECAR_URL`;
+client `src/lib/vizSidecarClient.ts`; proxy routes under `/api/recourse/viz/*`.
+
+Honest scope: these are fixed teaching scenarios (each hardcodes its own
+data/formula) — they are not yet parameterized "visualize Recourse's data"
+endpoints. That is a separate, future capability.
+
 ```bash
 # one terminal per service
 cd python/kg_service  && pip install -r requirements.txt && uvicorn main:app --host 127.0.0.1 --port 8500
 cd python/pdf_service && pip install -r requirements.txt && uvicorn main:app --host 127.0.0.1 --port 8600
 cd python/fuzz_service && pip install -r requirements.txt && uvicorn main:app --host 127.0.0.1 --port 8700
+cd python/viz_service && pip install -r requirements.txt && uvicorn main:app --host 127.0.0.1 --port 8505
 ```
 
 Recourse proxy routes live under `/api/recourse/kg/sidecar*`,
@@ -151,3 +169,38 @@ Recourse proxy routes live under `/api/recourse/kg/sidecar*`,
 
 - `npm run lint` — typecheck
 - `npm test` — vitest suite (includes the honest-sandbox contract tests)
+
+## Cross-domain synergy engine (deterministic core)
+
+`src/lib/synergy/` maps transferable structure across the sectors this instance
+works in (health/oncology, mathematics, cybersecurity, neuro/music, aging,
+sports, logistics). It is a **closed-discovery** engine: A = method, C = problem,
+B = a shared controlled-vocabulary term.
+
+Honesty contract:
+
+- Only pure functions are indexed as methods. Sources that call `Date.now()`,
+  `new Date()`, `Math.random()`, `performance.now()`, or `crypto.random*` are
+  rejected with a reason (see `methodIndex.detectNonDeterminism`). Example:
+  Truck Buddy's `deriveStatus`/`dossierVerdict` are indexed; `buildDossier` is not.
+- Bridges are only controlled-vocabulary terms, never free text. An unknown
+  term is rejected at the `semantic_type` gate.
+- Missing evidence is excluded, never imputed; a pair with no passing bridge is
+  dropped.
+- Every scan carries a `manifestHash` over its version, vocabulary fingerprint,
+  resolved options, canonical doc ids, and candidates, so re-runs are diffable
+  bit-for-bit and config changes are visible.
+- Candidate scores are **calibration**, not measured properties. Scoring
+  constants live in `closedDiscovery.SYNERGY_CALIBRATION`.
+- A candidate is a **hypothesis**, not a discovery. Promotion to a resolved
+  edge requires execution verification (Plan 4, admission gate).
+- The store distinguishes an absent map from a corrupt one: corrupt content is
+  surfaced as a structured error, never silently treated as "no data".
+
+Routes (mounted under `/api/recourse`):
+`GET /synergy/domains`, `GET /synergy/map`, `GET /synergy/candidates`,
+`GET /synergy/score/:domain`, `POST /synergy/scan`.
+
+Deferred to later plans: SME structural alignment, corrected statistics
+(stationarity, Granger/transfer entropy, FDR), the sandbox resolver + admission
+gate, AI adapter drafting, and the decision-engine rewire.
