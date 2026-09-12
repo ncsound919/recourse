@@ -12,7 +12,9 @@ import { discover } from '../lib/synergy/closedDiscovery.js';
 import { extractMethods, type RawMethod } from '../lib/synergy/methodIndex.js';
 import { extractProblems } from '../lib/synergy/problemIndex.js';
 import { recordSynergyScan } from '../lib/synergy/ledger.js';
+import { resolveTransfer, admit, applyTransferResult, recordTransferResult } from '../lib/synergy/resolver.js';
 import type { RecourseProblem } from '../lib/problemArchive.js';
+import type { TransferCandidate, TransferResult } from '../lib/synergy/types.js';
 
 function isRawMethod(x: unknown): x is RawMethod {
   if (!x || typeof x !== 'object') return false;
@@ -30,6 +32,17 @@ function isProblem(x: unknown): x is RecourseProblem {
   if (!x || typeof x !== 'object') return false;
   const p = x as Record<string, unknown>;
   return typeof p.id === 'string' && typeof p.acceptanceTest === 'string';
+}
+
+function isTransferCandidate(x: unknown): x is TransferCandidate {
+  if (!x || typeof x !== 'object') return false;
+  const c = x as Record<string, unknown>;
+  return (
+    typeof c.id === 'string' &&
+    typeof c.fromDomain === 'string' &&
+    typeof c.toDomain === 'string' &&
+    typeof c.score === 'number'
+  );
 }
 
 function readError(res: import('express').Response, err: unknown): void {
@@ -105,6 +118,30 @@ export function createSynergyRouter(): Router {
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'synergy scan failed';
+      res.status(500).json({ success: false, error: message });
+    }
+  });
+
+  router.post('/synergy/resolve', (req, res) => {
+    const body = (req.body ?? {}) as { candidate?: unknown; acceptanceTest?: unknown; sourceCode?: unknown; adaptedBy?: unknown };
+    const candidate = body.candidate;
+    if (!isTransferCandidate(candidate) || typeof body.acceptanceTest !== 'string' || typeof body.sourceCode !== 'string') {
+      return res.status(400).json({ success: false, error: 'candidate (id/fromDomain/toDomain/score), acceptanceTest, sourceCode required' });
+    }
+    const adaptedBy = body.adaptedBy as TransferResult['adaptedBy'] | undefined;
+    if (adaptedBy !== undefined && adaptedBy !== 'none' && adaptedBy !== 'operator_ladder' && adaptedBy !== 'model') {
+      return res.status(400).json({ success: false, error: 'adaptedBy must be none|operator_ladder|model' });
+    }
+    try {
+      const result = resolveTransfer(candidate, body.acceptanceTest, body.sourceCode, adaptedBy ?? 'operator_ladder');
+      const decision = admit(result);
+      const map = readSynergyMap();
+      const next = map ? applyTransferResult(map, result, candidate) : null;
+      if (next) writeSynergyMap(next);
+      recordTransferResult(result, next?.manifestHash ?? candidate.id);
+      res.json({ success: true, result, decision, map: next });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'synergy resolve failed';
       res.status(500).json({ success: false, error: message });
     }
   });

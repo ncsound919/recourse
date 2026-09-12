@@ -1,8 +1,11 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import fs from 'node:fs';
 import { createSynergyRouter } from '../../src/routes/synergy.js';
+import { writeSynergyMap } from '../../src/lib/synergy/store.js';
+import { buildSynergyMap } from '../../src/lib/synergy/synergyMap.js';
 import type { RawMethod } from '../../src/lib/synergy/methodIndex.js';
 import type { RecourseProblem } from '../../src/lib/problemArchive.js';
+import type { TransferCandidate } from '../../src/lib/synergy/types.js';
 
 const TEST_FILE = `${process.cwd()}\\data\\test-synergy-router-map.json`;
 const TEST_LEDGER = `${process.cwd()}\\data\\test-synergy-router-ledger.jsonl`;
@@ -73,6 +76,51 @@ describe('synergy router', () => {
         json: (v: unknown) => { res.payload = v; return res; },
       };
       await handler('/synergy/scan')({ body } as any, res);
+      expect(res.code).toBe(400);
+      expect(res.payload.success).toBe(false);
+    }
+  });
+
+  it('resolve runs the acceptance test, admits a passing adaptation, and records a resolved edge', async () => {
+    const candidate: TransferCandidate = {
+      id: 'tc_resolve', methodId: 'm', problemId: 'p', fromDomain: 'mathematics', toDomain: 'logistics',
+      bridges: [], score: 0.8, support: 1, prediction: 'pass', falsification: 'f', filters: [], engineVersion: '0.1.0',
+    };
+    writeSynergyMap(buildSynergyMap([candidate], { generatedAtRun: 'run:resolve' }));
+    const body = {
+      candidate,
+      acceptanceTest: 'const a = Mod.f([1,2,3]); assert a === 6;',
+      sourceCode: 'export class Mod { static f(xs) { return xs.reduce(function (s, x) { return s + x; }, 0); } }',
+    };
+    const res: any = { json: (v: unknown) => (res.payload = v) };
+    await handler('/synergy/resolve')({ body } as any, res);
+    expect(res.payload.success).toBe(true);
+    expect(res.payload.result.outcome).toBe('passed');
+    expect(res.payload.decision.status).toBe('reproduced');
+    expect(res.payload.map.manifestHash).toHaveLength(64);
+    const stored = JSON.parse(fs.readFileSync(TEST_FILE, 'utf-8'));
+    const edge = stored.edges.find((e: any) => e.from === 'mathematics' && e.to === 'logistics' && e.kind === 'resolved');
+    expect(edge).toBeTruthy();
+    expect(edge.passes).toBe(1);
+  });
+
+  it('rejects malformed resolve bodies with structured 400s', async () => {
+    const good: TransferCandidate = {
+      id: 'tc_bad', methodId: 'm', problemId: 'p', fromDomain: 'a', toDomain: 'b',
+      bridges: [], score: 0.5, support: 1, prediction: 'pass', falsification: 'f', filters: [], engineVersion: '0.1.0',
+    };
+    const cases: unknown[] = [
+      {},
+      { candidate: { id: 'x' }, acceptanceTest: 'a', sourceCode: 'c' },
+      { candidate: good, acceptanceTest: 5, sourceCode: 'c' },
+      { candidate: good, acceptanceTest: 'a', sourceCode: 'c', adaptedBy: 'nope' },
+    ];
+    for (const body of cases) {
+      const res: any = {
+        status: (c: number) => { res.code = c; return res; },
+        json: (v: unknown) => { res.payload = v; return res; },
+      };
+      await handler('/synergy/resolve')({ body } as any, res);
       expect(res.code).toBe(400);
       expect(res.payload.success).toBe(false);
     }

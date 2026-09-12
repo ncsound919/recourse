@@ -5,6 +5,7 @@
  */
 import { verifyCodingCode } from '../verifiers.js';
 import { sha256Hex } from './manifest.js';
+import { appendInsight, type LedgerInsight } from '../trendLedger.js';
 import type {
   TransferCandidate, TransferResult, AdmissionDecision, SynergyMap, SynergyEdge,
 } from './types.js';
@@ -81,4 +82,17 @@ export function applyTransferResult(map: SynergyMap, result: TransferResult, can
   }
   edges.sort((a, b) => (a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : a.from < b.from ? -1 : a.from > b.from ? 1 : a.to < b.to ? -1 : a.to > b.to ? 1 : 0));
   return { ...map, edges };
+}
+
+/** Append a ledger insight recording the transfer outcome (hash-chained). */
+export function recordTransferResult(result: TransferResult, manifestRoot: string): LedgerInsight | null {
+  return appendInsight({
+    createdRun: 'synergy:resolve',
+    hypothesisId: result.candidateId,
+    templateId: result.outcome === 'passed' ? 'crossdomain_transfer_passed' : 'crossdomain_transfer_refuted',
+    statement: `Transfer ${result.candidateId} ${result.outcome} via ${result.proofType} (${result.detail.slice(0, 120)})`,
+    confidence: result.outcome === 'passed' ? 1 : 0,
+    provenanceRoot: manifestRoot,
+    payload: { proofType: result.proofType, sandboxReportHash: result.sandboxReportHash, adaptedBy: result.adaptedBy },
+  });
 }
