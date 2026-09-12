@@ -553,15 +553,26 @@ describe('method index', () => {
     if (r.ok === false) expect(r.rejected).toContain('new Date');
   });
 
-  it('extractMethods sorts and reports rejections', () => {
+  it('extractMethods sorts by id and reports rejections', () => {
     const { methods, rejected } = extractMethods([
-      pure,
       { ...pure, id: 'zMethod', name: 'Z' },
+      pure,
       { ...pure, id: 'buildDossier', sourceCode: 'return Date.now();' },
     ]);
-    expect(methods.map((m) => m.name)).toEqual(['Predictive maintenance', 'Z']);
+    const ids = methods.map((m) => m.id);
+    expect(ids[0]).toBe('method:tool:predictmaintenance');
+    expect(ids[1]).toBe('method:tool:zmethod');
     expect(rejected).toHaveLength(1);
     expect(rejected[0].id).toBe('buildDossier');
+  });
+
+  it('flags additional non-deterministic sources and declarative rejection', () => {
+    expect(detectNonDeterminism('return performance.now();')).toContain('performance.now');
+    expect(detectNonDeterminism('const d = Date();')).toContain('Date');
+    expect(detectNonDeterminism('crypto.randomUUID();')).toContain('crypto.random');
+    expect(detectNonDeterminism('const t = process.hrtime();')).toContain('process.hrtime');
+    expect(extractMethod({ ...pure, id: 'x', deterministic: false }).ok).toBe(false);
+    expect(extractMethod({ ...pure, id: '' }).ok).toBe(false);
   });
 });
 ```
@@ -598,14 +609,27 @@ export interface RawMethod {
   deterministic?: boolean;
 }
 
+/**
+ * Best-effort non-determinism denylist. Over-rejection is safe (a pure method
+ * is dropped); false positives on comments/strings are possible. Sources not
+ * listed here are caught by the Plan 4 admission gate.
+ */
 export function detectNonDeterminism(code: string): string | null {
   if (/\bDate\.now\s*\(/.test(code)) return 'wall-clock: Date.now()';
   if (/\bnew\s+Date\s*\(/.test(code)) return 'wall-clock: new Date()';
+  if (/\bDate\s*\(/.test(code)) return 'wall-clock: Date()';
+  if (/\bperformance\.now\s*\(/.test(code)) return 'wall-clock: performance.now()';
   if (/\bMath\.random\s*\(/.test(code)) return 'rng: Math.random()';
+  if (/\bcrypto\.(randomUUID|randomBytes|getRandomValues)\s*\(/.test(code)) return 'rng: crypto.random';
   if (/\bprocess\.hrtime\b/.test(code)) return 'wall-clock: process.hrtime';
   return null;
 }
 
+/**
+ * Coarse structural placeholder: maps primitives to relations for the
+ * closed-discovery stage only. SME (Plan 2) must NOT use these for same-functor
+ * matching — real relational predicates must come from `raw.relations`.
+ */
 export function relationsFromPrimitives(primitives: string[], domain: string): Rel[] {
   return primitives.map((p, i) => ({
     functor: canonicalizeTerm(p),
@@ -691,7 +715,7 @@ const problem: RecourseProblem = {
   id: 'repro:trend-analyzer',
   domain: 'mathematics',
   title: 'Reproduce: Time-Series Trend & Breakout Analyzer',
-  statement: 'Implement a capability that satisfies the acceptance criteria. Analyze the trend and detect a breakout over the series.',
+  statement: 'Implement a capability that produces a prediction and reports statistics over the series.',
   acceptanceTest: 'const a = TrendAnalyzer.analyzeTrend([{value:1},{value:2}]); assert a.slope > 0;',
 };
 
