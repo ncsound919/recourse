@@ -76,7 +76,7 @@ export function lag1Autocorr(v: number[]): number {
 
 /** Labeled heuristic: near-unit-root lag-1 autocorrelation. */
 export function needsDifferencing(v: number[], threshold = 0.8): boolean {
-  return Math.abs(lag1Autocorr(v)) > threshold;
+  return lag1Autocorr(v) > threshold;
 }
 
 export function difference(v: number[]): number[] {
