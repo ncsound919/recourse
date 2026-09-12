@@ -76,7 +76,7 @@ export function extractMethod(raw: RawMethod): ExtractResult {
       complexity: raw.complexity,
       deterministic: true,
       relations: raw.relations ?? relationsFromPrimitives(primitives, raw.domain),
-      relationBasis: raw.relations ? 'declared' : 'placeholder',
+      relationBasis: raw.relations && raw.relations.length > 0 ? 'declared' : 'placeholder',
       suiteHash: raw.suite ? sha256Hex(raw.suite) : undefined,
     },
   };
