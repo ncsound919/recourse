@@ -153,7 +153,10 @@ export interface HypergeomResult {
 export function hypergeomEnrichment(n: number, k: number, m: number, x: number): HypergeomResult | null {
   if (x < 0 || k > n || m > n) return null;
   // P(X >= x) = 1 - P(X <= x-1) with jStat's parameter order (x, N, m, n_drawn).
-  const p = 1 - jStat.hypgeom.cdf(x - 1, n, m, k);
+  const lo = Math.max(x, k + m - n);
+  const hi = Math.min(k, m);
+  let p = 0;
+  for (let i = lo; i <= hi; i++) p += jStat.hypgeom.pdf(i, n, m, k);
   return { test: 'hypergeometric', p: roundP(p), n, k, x, m };
 }
 
