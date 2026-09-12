@@ -34,7 +34,7 @@ export function macFilter(target: DGroup, candidates: DGroup[], k: number): DGro
   return [...candidates]
     .map((c) => ({ c, sim: Math.round(cosine(tv, contentVector(c)) * 1000) / 1000 }))
     .sort((a, b) => b.sim - a.sim || (a.c.domain < b.c.domain ? -1 : 1))
-    .slice(0, Math.max(1, k))
+    .slice(0, Math.max(0, k))
     .map((x) => x.c);
 }
 
