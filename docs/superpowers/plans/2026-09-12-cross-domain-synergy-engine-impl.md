@@ -466,7 +466,7 @@ export const DEFAULT_DOMAINS: DomainSpec[] = [
   { id: 'mathematics', label: 'Mathematics', toolDomains: ['math'], corpusProjects: [], translationEngines: [], verified: true },
   { id: 'cybersecurity', label: 'Cybersecurity', toolDomains: ['cyber_defense'], corpusProjects: [], translationEngines: [], verified: true },
   { id: 'neuro_music', label: 'Neuroscience / music therapy / auditory', toolDomains: ['neuro_symbolic'], corpusProjects: [], translationEngines: [], verified: true },
-  { id: 'aging', label: 'Aging / geroscience / longevity', toolDomains: ['biotech'], corpusProjects: [], seriesTerms: ['senescence', 'rapamycin', 'metformin', 'longevity', 'telomere'], verified: true },
+  { id: 'aging', label: 'Aging / geroscience / longevity', toolDomains: ['biotech'], corpusProjects: [], translationEngines: [], seriesTerms: ['senescence', 'rapamycin', 'metformin', 'longevity', 'telomere'], verified: true },
   { id: 'sports', label: 'Sports (basketball, golf)', toolDomains: ['biotech'], corpusProjects: ['bb-tech', 'sports-science', 'golf-surgery'], translationEngines: ['bbtech', 'golf-surgery'], verified: true },
   { id: 'logistics', label: 'Logistics & freight', toolDomains: ['systemic', 'coding'], corpusProjects: ['truck-buddy'], translationEngines: [], verified: true },
 ];
