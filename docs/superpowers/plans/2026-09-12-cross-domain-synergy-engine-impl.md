@@ -1715,9 +1715,23 @@ describe('synergy ledger wiring', () => {
     expect(rec).not.toBeNull();
     expect(rec?.templateId).toBe('crossdomain_bridge');
     expect(rec?.provenanceRoot).toBe('abc123');
+    expect(rec?.hypothesisId).toBe('tc_1');
+    expect(rec?.confidence).toBe(0.8);
     const verify = verifyLedgerChain();
     expect(verify.valid).toBe(true);
     expect(verify.length).toBe(before + 1);
+  });
+
+  it('handles an empty map honestly', () => {
+    const rec = recordSynergyScan({ ...map, candidates: [] });
+    expect(rec?.hypothesisId).toBe('none');
+    expect(rec?.confidence).toBe(0);
+  });
+
+  it('chains consecutive records', () => {
+    const r1 = recordSynergyScan(map);
+    const r2 = recordSynergyScan({ ...map, manifestHash: 'def456' });
+    expect(r2?.prevInsightHash).toBe(r1?.hash);
   });
 });
 ```
@@ -1739,17 +1753,24 @@ import { appendInsight, type LedgerInsight } from '../trendLedger.js';
 import type { SynergyMap } from './types.js';
 
 export function recordSynergyScan(map: SynergyMap): LedgerInsight | null {
+  // Invariant: buildSynergyMap emits candidates sorted by score desc, so [0] is the top.
+  const top = map.candidates[0];
   return appendInsight({
     createdRun: map.generatedAtRun,
-    hypothesisId: map.candidates[0]?.id ?? 'none',
+    hypothesisId: top?.id ?? 'none',
     templateId: 'crossdomain_bridge',
-    statement: `${map.candidates.length} cross-domain transfer candidate(s) across ${map.domains.length} sector(s) (manifest ${map.manifestHash.slice(0, 12)})`,
-    confidence: map.candidates.length ? map.candidates[0].score : 0,
+    statement: `${map.candidates.length} cross-domain transfer candidate(s) across ${map.domains.length} sector(s) (manifest ${map.manifestHash.slice(0, 12) || 'unspecified'})`,
+    confidence: top ? top.score : 0,
     provenanceRoot: map.manifestHash,
     payload: {
       edges: map.edges.length,
       candidates: map.candidates.slice(0, 10).map((c) => ({
-        id: c.id, from: c.fromDomain, to: c.toDomain, score: c.score,
+        id: c.id,
+        from: c.fromDomain,
+        to: c.toDomain,
+        score: c.score,
+        prediction: c.prediction,
+        falsification: c.falsification.slice(0, 200),
       })),
     },
   });
@@ -1860,12 +1881,16 @@ describe('synergy router', () => {
 
   it('scan builds and persists a map from real method/problem payloads', async () => {
     const method: RawMethod = { id: 'trendAnalyzer', name: 'Trend analyzer', domain: 'mathematics', source: 'tool', primitives: ['prediction', 'statistics'] };
+    // A third non-overlapping method keeps the corpus at 3 docs so the shared
+    // bridges are not over-general (df=2 <= 0.9 * 3) and a candidate can form.
+    const cipher: RawMethod = { id: 'cipher', name: 'Cipher', domain: 'cybersecurity', source: 'tool', primitives: ['control'] };
     const problem: RecourseProblem = {
-      id: 'repro:forecast', domain: 'logistics', title: 'Forecast demand', statement: 'Predict demand from a series.',
+      id: 'repro:forecast', domain: 'logistics', title: 'Forecast demand',
+      statement: 'Compute a prediction and statistics from a series.',
       acceptanceTest: 'assert true;',
     };
     const res = { json: (v: unknown) => (res as any).payload = v } as any;
-    await handler('/synergy/scan')({ body: { methods: [method], problems: [problem] } } as any, res);
+    await handler('/synergy/scan')({ body: { methods: [method, cipher], problems: [problem] } } as any, res);
     expect(res.payload.success).toBe(true);
     expect(res.payload.candidates.length).toBeGreaterThan(0);
     expect(res.payload.manifest).toHaveLength(64);
