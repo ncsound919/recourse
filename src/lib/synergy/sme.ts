@@ -102,3 +102,21 @@ export function align(base: DGroup, target: DGroup): AlignmentResult {
   inferences.sort();
   return { gmapWeight, mappings, inferences, consistent: isStructurallyConsistent(chosen) };
 }
+
+/** Jaccard of entity sets (surface similarity). */
+function surfaceSimilarity(a: DGroup, b: DGroup): number {
+  const sa = new Set(a.entities);
+  const sb = new Set(b.entities);
+  if (sa.size === 0 && sb.size === 0) return 1;
+  let inter = 0;
+  for (const x of sa) if (sb.has(x)) inter += 1;
+  const union = sa.size + sb.size - inter;
+  return union === 0 ? 0 : inter / union;
+}
+
+/** High structural weight + low surface similarity = far (true analogy) transfer. */
+export function farTransfer(base: DGroup, target: DGroup): number {
+  const structural = align(base, target).gmapWeight;
+  const surface = surfaceSimilarity(base, target);
+  return Math.round(structural * (1 - surface) * 1000) / 1000;
+}

@@ -1,6 +1,6 @@
 // tests/synergy/sme.test.ts
 import { describe, it, expect } from 'vitest';
-import { dgroupFromRelations, matchHypotheses, isStructurallyConsistent, align, type DGroup, type MatchHypothesis } from '../../src/lib/synergy/sme.js';
+import { dgroupFromRelations, matchHypotheses, isStructurallyConsistent, align, farTransfer, type DGroup, type MatchHypothesis } from '../../src/lib/synergy/sme.js';
 import type { Rel } from '../../src/lib/synergy/types.js';
 
 const rel = (functor: string, args: string[], order = 1): Rel => ({ functor, type: 'rel', args, order });
@@ -47,5 +47,13 @@ describe('sme dgroups + match hypotheses', () => {
     expect(a).toEqual(b);
     expect(a.consistent).toBe(true);
     expect(a.mappings.length).toBeGreaterThan(0);
+  });
+
+  it('farTransfer is high for high structure at low surface similarity', () => {
+    const high = farTransfer(base, target);
+    const near: DGroup = dgroupFromRelations('m', base.relations.map((r) => ({ ...r })), base.entities);
+    const nearTransfer = farTransfer(base, near);
+    expect(high).toBeGreaterThan(nearTransfer);
+    expect(high).toBeLessThanOrEqual(1);
   });
 });
