@@ -37,7 +37,7 @@ describe('closed discovery', () => {
     const b = discover([...methods].reverse(), [...problems].reverse());
     expect(a.manifest).toBe(b.manifest);
     // Golden manifest: pins version + vocabulary + options + canonical ordering.
-    expect(a.manifest).toBe('263b5d28d2eec2427c75f68c9e25707c89c334ba5da467ad68646e183e073ab0');
+    expect(a.manifest).toBe('ca19c15b147931016e3b0267f729a9866810c380ecc93909a0ce275fad8b20f2');
   });
 
   it('excludes same-domain pairs', () => {
@@ -62,5 +62,16 @@ describe('closed discovery', () => {
     const { graph } = discover(methods, problems);
     expect(findBridges(graph, 'method:a', 'problem:b').length).toBeGreaterThan(0);
     expect(findBridges(graph, 'missing', 'problem:b')).toEqual([]);
+  });
+
+  it('attaches an alignment and farTransfer when relations allow', () => {
+    const { candidates } = discover(methods, problems);
+    expect(candidates[0].alignment).toBeDefined();
+    expect(typeof candidates[0].farTransfer).toBe('number');
+  });
+
+  it('can disable alignment via opts', () => {
+    const { candidates } = discover(methods, problems, { align: false });
+    expect(candidates[0].alignment).toBeUndefined();
   });
 });

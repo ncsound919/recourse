@@ -15,6 +15,7 @@ import { buildGraph, termDocFrequency, type GraphDoc, type WeightedGraph } from 
 import { filterBridge, allPassed, type FilterContext } from './filters.js';
 import { manifestHash, sha256Hex, stableStringify } from './manifest.js';
 import { vocabularyHash } from './vocabulary.js';
+import { dgroupFromRelations, align as smeAlign, farTransfer } from './sme.js';
 
 export const SYNERGY_ENGINE_VERSION = '0.1.0';
 
@@ -26,6 +27,7 @@ export interface DiscoverOptions {
   coverageExponent?: number;
   stoplist?: string[];
   knownPairs?: string[];
+  align?: boolean;
 }
 
 export const SYNERGY_CALIBRATION = {
@@ -109,6 +111,15 @@ export function discover(
       const base = top.reduce((s, b) => s + b.score, 0) / top.length;
       const coverage = passing.length / bridges.length;
       const score = Math.round(base * Math.pow(coverage, coverageExponent) * 1000) / 1000;
+      const useAlign = opts.align !== false;
+      let alignment;
+      let far;
+      if (useAlign && m.relations.length > 0 && p.relations.length > 0) {
+        const bd = dgroupFromRelations(m.domain, m.relations, m.relations.flatMap((r) => r.args));
+        const td = dgroupFromRelations(p.domain, p.relations, p.relations.flatMap((r) => r.args));
+        alignment = smeAlign(bd, td);
+        far = farTransfer(bd, td);
+      }
       const id = `tc_${sha256Hex([
         m.id, p.id, SYNERGY_ENGINE_VERSION, String(score),
         top.map((b) => b.term).join(','),
@@ -123,6 +134,8 @@ export function discover(
         bridges: top,
         score,
         support: passing.length,
+        alignment,
+        farTransfer: far,
         prediction: score >= passThreshold ? 'pass' : 'fail',
         falsification: `If a sandbox run of "${m.name}" against the acceptance test for "${p.name}" fails, this transfer is rejected (engine ${SYNERGY_ENGINE_VERSION}).`,
         filters: failed,
@@ -138,7 +151,7 @@ export function discover(
     stableStringify(resolved),
     ...methods.map((m) => m.id).sort(),
     ...problems.map((p) => p.id).sort(),
-    ...candidates.map((c) => `${c.id}:${c.score}:${c.bridges.map((b) => b.term).join(',')}`),
+    ...candidates.map((c) => `${c.id}:${c.score}:${c.farTransfer ?? ''}:${c.bridges.map((b) => b.term).join(',')}`),
   ]);
   return { candidates, graph, manifest };
 }
