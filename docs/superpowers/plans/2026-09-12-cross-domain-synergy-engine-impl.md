@@ -534,7 +534,7 @@ describe('method index', () => {
   it('extracts a pure method with stable id, primitives, and suite hash', () => {
     const r = extractMethod(pure);
     expect(r.ok).toBe(true);
-    if (r.ok) {
+    if (r.ok === true) {
       expect(r.method.id).toBe('method:tool:predictmaintenance');
       expect(r.method.primitives).toEqual(['prediction', 'statistics']);
       expect(r.method.deterministic).toBe(true);
@@ -550,7 +550,7 @@ describe('method index', () => {
 
     const r = extractMethod({ ...pure, id: 'buildDossier', sourceCode: 'return new Date().toISOString();' });
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.rejected).toContain('new Date');
+    if (r.ok === false) expect(r.rejected).toContain('new Date');
   });
 
   it('extractMethods sorts and reports rejections', () => {
@@ -651,7 +651,7 @@ export function extractMethods(raws: RawMethod[]): {
   const rejected: Array<{ id: string; reason: string }> = [];
   for (const raw of raws) {
     const r = extractMethod(raw);
-    if (r.ok) methods.push(r.method);
+    if (r.ok === true) methods.push(r.method);
     else rejected.push({ id: raw.id, reason: r.rejected });
   }
   methods.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
