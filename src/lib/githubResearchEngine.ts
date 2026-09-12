@@ -133,7 +133,7 @@ async function listCodeFiles(repo: string, ref: string, prefix = ''): Promise<st
 
 /** Fetch a real file. If no path given, pick the most likely code entrypoint. */
 export async function fetchRepoSource(repo: string, path?: string): Promise<GitHubFileCandidate> {
-  const cleanRepo = repo.replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '').replace(/\/+$/, '');
+  const cleanRepo = repo.replace(/^https?:\/\/github\.com\//, '').replace(/\/+$/, '').replace(/\.git$/, '');
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(cleanRepo)) {
     throw ghError('Invalid repository name. Use owner/repo or a full GitHub URL.', 'http');
   }

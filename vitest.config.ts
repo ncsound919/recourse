@@ -7,6 +7,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
+    exclude: ['**/node_modules/**', '**/dist/**', '**/recourse-fix-bundle/**'],
     // Real service probes in science/orchestrator tests need room under
     // full-suite parallel load (vitest default 5s was flaky).
     testTimeout: 30000,
