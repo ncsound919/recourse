@@ -1,6 +1,6 @@
 // tests/synergy/sme.test.ts
 import { describe, it, expect } from 'vitest';
-import { dgroupFromRelations, matchHypotheses, isStructurallyConsistent, align, type DGroup } from '../../src/lib/synergy/sme.js';
+import { dgroupFromRelations, matchHypotheses, isStructurallyConsistent, align, type DGroup, type MatchHypothesis } from '../../src/lib/synergy/sme.js';
 import type { Rel } from '../../src/lib/synergy/types.js';
 
 const rel = (functor: string, args: string[], order = 1): Rel => ({ functor, type: 'rel', args, order });
@@ -25,12 +25,12 @@ describe('sme dgroups + match hypotheses', () => {
   });
 
   it('rejects a mapping where one base entity maps to two targets (one-to-one)', () => {
-    const bad = [{ baseFunctor: 'maps_to', targetFunctor: 'maps_to', argPairs: [['graph', 'schema'], ['graph', 'route']], score: 0.9 }];
+    const bad: MatchHypothesis[] = [{ baseFunctor: 'maps_to', targetFunctor: 'maps_to', argPairs: [['graph', 'schema'], ['graph', 'route']], score: 0.9 }];
     expect(isStructurallyConsistent(bad)).toBe(false);
   });
 
   it('accepts a one-to-one + parallel mapping', () => {
-    const good = [{ baseFunctor: 'maps_to', targetFunctor: 'maps_to', argPairs: [['graph', 'schema'], ['sequence', 'route']], score: 0.9 }];
+    const good: MatchHypothesis[] = [{ baseFunctor: 'maps_to', targetFunctor: 'maps_to', argPairs: [['graph', 'schema'], ['sequence', 'route']], score: 0.9 }];
     expect(isStructurallyConsistent(good)).toBe(true);
   });
 
