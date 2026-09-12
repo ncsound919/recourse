@@ -1,7 +1,9 @@
 // src/lib/synergy/domainRegistry.ts
 /**
  * Sector registry. Each DomainSpec binds a sector to its real evidence
- * sources. A sector with no source stays verified:false and is reported as an
+ * sources. `verified` means the sector has at least one bound real evidence
+ * source (a tool domain, a corpus project, a translation engine, or series
+ * terms). A sector with no evidence stays verified:false and is reported as an
  * honest empty node — never padded.
  */
 import type { ToolDomain } from '../../types.js';
@@ -27,18 +29,29 @@ export const DEFAULT_DOMAINS: DomainSpec[] = [
   { id: 'logistics', label: 'Logistics & freight', toolDomains: ['systemic', 'coding'], corpusProjects: ['truck-buddy'], translationEngines: [], verified: true },
 ];
 
+function cloneDomain(d: DomainSpec): DomainSpec {
+  return {
+    ...d,
+    toolDomains: [...d.toolDomains],
+    corpusProjects: [...d.corpusProjects],
+    translationEngines: [...d.translationEngines],
+    seriesTerms: d.seriesTerms ? [...d.seriesTerms] : undefined,
+  };
+}
+
 export function listDomains(): DomainSpec[] {
-  return [...DEFAULT_DOMAINS];
+  return DEFAULT_DOMAINS.map(cloneDomain);
 }
 
 export function getDomain(id: string): DomainSpec | undefined {
-  return DEFAULT_DOMAINS.find((d) => d.id === id);
+  const found = DEFAULT_DOMAINS.find((d) => d.id === id);
+  return found ? cloneDomain(found) : undefined;
 }
 
 export function unverifiedDomains(): DomainSpec[] {
-  return DEFAULT_DOMAINS.filter((d) => !d.verified);
+  return DEFAULT_DOMAINS.filter((d) => !d.verified).map(cloneDomain);
 }
 
 export function domainsForToolDomain(td: ToolDomain): DomainSpec[] {
-  return DEFAULT_DOMAINS.filter((d) => d.toolDomains.includes(td));
+  return DEFAULT_DOMAINS.filter((d) => d.toolDomains.includes(td)).map(cloneDomain);
 }

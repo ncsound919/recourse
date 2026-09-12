@@ -5,6 +5,7 @@ import {
   unverifiedDomains,
   domainsForToolDomain,
 } from '../../src/lib/synergy/domainRegistry.js';
+import { DEFAULT_CORPUS_ROOTS } from '../../src/intake/corpus/index.js';
 
 describe('domain registry', () => {
   it('includes the seven operator sectors and marks logistics verified', () => {
@@ -24,5 +25,21 @@ describe('domain registry', () => {
   it('reports unverified sectors honestly', () => {
     expect(unverifiedDomains()).toEqual([]);
     expect(getDomain('does_not_exist')).toBeUndefined();
+  });
+
+  it('binds every verified sector to real evidence', () => {
+    const rootIds = new Set(DEFAULT_CORPUS_ROOTS.map((r) => r.project));
+    for (const d of listDomains()) {
+      if (!d.verified) continue;
+      const bound =
+        d.toolDomains.length > 0 ||
+        d.translationEngines.length > 0 ||
+        (d.seriesTerms?.length ?? 0) > 0 ||
+        d.corpusProjects.length > 0;
+      expect(bound, `${d.id} claims verified with no evidence`).toBe(true);
+      for (const p of d.corpusProjects) {
+        expect(rootIds.has(p), `${d.id} cites unknown corpus project ${p}`).toBe(true);
+      }
+    }
   });
 });
