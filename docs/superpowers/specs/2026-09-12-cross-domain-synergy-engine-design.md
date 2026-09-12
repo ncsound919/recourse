@@ -54,7 +54,7 @@ Operator-selected sectors, each bound to real evidence:
 | Neuroscience / music therapy / auditory | music-therapy research modules, corpus | yes |
 | Aging / geroscience / longevity | `trendSources` terms, corpus | yes |
 | Sports (basketball, golf) | `bb_tech_core`, `golf_surgery_core`, `sports_science` corpus roots | yes |
-| Logistics | none found in-repo | **no — configured, `verified:false`** until a real source is supplied |
+| Logistics | Truck Buddy (`C:\Users\User\Downloads\Truck Buddy\web`): `src/lib/{boards,compliance,contracts,domain,geo,perspective,predict,vetting}.ts`, `src/lib/mechanic/{engine,budget,search}.ts`, with matching `tests/*.test.ts` suites | yes (pure/tested functions only; see §8.1 determinism admission) |
 
 `DomainSpec` shape:
 
@@ -184,6 +184,8 @@ interface SynergyEdge {
 
 ### 8.1 Canonicalize + freeze
 Map every surface term to a canonical ID from the versioned `vocabulary.ts` + corpus topics. Record `vocabularyHash`, corpus snapshot id, and code commit in the manifest. Never match on raw strings.
+
+**Determinism admission for methods:** only pure functions are indexed as `MethodSignature`s. A candidate that calls wall clock (`Date.now`, `new Date`) or an RNG is either excluded or indexed with `deterministic:false` and is **never** admitted to the resolved graph. Worked example (Truck Buddy logistics): index `deriveStatus` / `dossierVerdict` (pure, tested), but not `buildDossier` (calls `new Date()`). The extractor records a rejection reason per excluded candidate.
 
 ### 8.2 Weighted graph (LION-style)
 Nodes = canonical ids (methods, problems, concepts). Edges weighted by a fixed, selectable statistic:
