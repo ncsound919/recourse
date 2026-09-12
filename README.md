@@ -199,11 +199,24 @@ Honesty contract:
 
 Routes (mounted under `/api/recourse`):
 `GET /synergy/domains`, `GET /synergy/map`, `GET /synergy/candidates`,
-`GET /synergy/score/:domain`, `POST /synergy/scan`.
+`GET /synergy/score/:domain`, `POST /synergy/scan`,
+`POST /synergy/resolve`.
 
-Deferred to later plans: SME structural alignment, corrected statistics
-(stationarity, Granger/transfer entropy, FDR), the sandbox resolver + admission
-gate, AI adapter drafting, and the decision-engine rewire.
+Resolver + admission gate (Plan 4):
+
+`POST /api/recourse/synergy/resolve` runs a candidate's `acceptanceTest` against
+an adaptation's `sourceCode` in the existing sandbox and admits
+`hypothesis → reproduced` only on an admissible proof (`executable_test`). The
+model may draft `sourceCode`, but only execution sets status. Oracle, formal, and
+human-signoff proof types are declared but not yet automated; only
+`executable_test` is wired.
+
+Adaptations are caller-supplied: the deterministic CBR operator-ladder adaptation
+is not yet implemented.
+
+Deferred to later plans: SME structural alignment wiring, corrected statistics
+(stationarity, Granger/transfer entropy, FDR), AI adapter drafting, and the
+decision-engine rewire.
 
 Known Plan-1 limitations (honest, not yet fixed):
 
