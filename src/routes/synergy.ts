@@ -144,7 +144,7 @@ export function createSynergyRouter(): Router {
       const result = resolveTransfer(candidate, body.acceptanceTest, body.sourceCode, adaptedBy ?? 'operator_ladder');
       const decision = admit(result);
       const map = readSynergyMap();
-      const next = map ? applyTransferResult(map, result, candidate) : null;
+      const next = map ? applyTransferResult(map, result) : null;
       if (next) writeSynergyMap(next);
       recordTransferResult(result, next?.manifestHash ?? candidate.id);
       res.json({ success: true, result, decision, map: next });
