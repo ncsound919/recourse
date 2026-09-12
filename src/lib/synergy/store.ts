@@ -39,5 +39,7 @@ export function readSynergyMap(): SynergyMap | null {
 export function writeSynergyMap(map: SynergyMap): void {
   const file = synergyMapPath();
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(map, null, 2), 'utf-8');
+  const tmp = `${file}.tmp-${process.pid}`;
+  fs.writeFileSync(tmp, JSON.stringify(map, null, 2), 'utf-8');
+  fs.renameSync(tmp, file);
 }
