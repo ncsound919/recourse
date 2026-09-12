@@ -8,6 +8,7 @@ import { Router } from 'express';
 import { listDomains, unverifiedDomains } from '../lib/synergy/domainRegistry.js';
 import { readSynergyMap, writeSynergyMap } from '../lib/synergy/store.js';
 import { buildSynergyMap, crossDomainSynergyFor } from '../lib/synergy/synergyMap.js';
+import { decisionSynergyInputs } from '../lib/synergy/decisionBridge.js';
 import { discover } from '../lib/synergy/closedDiscovery.js';
 import { extractMethods, type RawMethod } from '../lib/synergy/methodIndex.js';
 import { extractProblems } from '../lib/synergy/problemIndex.js';
@@ -82,6 +83,13 @@ export function createSynergyRouter(): Router {
     } catch (err) {
       readError(res, err);
     }
+  });
+
+  // The exact inputs the growth decision engine consumes, so non-UI callers can
+  // fetch map-derived synergy without re-deriving the sector -> ToolDomain map.
+  router.post('/synergy/decision-inputs', (_req, res) => {
+    const inputs = decisionSynergyInputs();
+    res.json({ success: true, ...inputs });
   });
 
   router.post('/synergy/scan', (req, res) => {

@@ -27,7 +27,7 @@ describe('synergy router', () => {
   it('registers the synergy routes', () => {
     const router = createSynergyRouter() as any;
     const paths = (router.stack ?? []).map((l: any) => l?.route?.path).filter(Boolean);
-    for (const p of ['/synergy/domains', '/synergy/map', '/synergy/candidates', '/synergy/score/:domain', '/synergy/scan']) {
+    for (const p of ['/synergy/domains', '/synergy/map', '/synergy/candidates', '/synergy/score/:domain', '/synergy/decision-inputs', '/synergy/scan']) {
       expect(paths).toContain(p);
     }
   });
@@ -43,6 +43,21 @@ describe('synergy router', () => {
     const res = { json: (v: unknown) => (res as any).payload = v } as any;
     await handler('/synergy/score/:domain')({ params: { domain: 'logistics' } } as any, res);
     expect(res.payload.value).toBe(0);
+  });
+
+  it('decision-inputs returns map-derived ToolDomain synergy and its honest source', async () => {
+    const candidate: TransferCandidate = {
+      id: 'tc_decision', methodId: 'm', problemId: 'p', fromDomain: 'mathematics', toDomain: 'logistics',
+      bridges: [], score: 0.8, support: 1, prediction: 'pass', falsification: 'f', filters: [], engineVersion: '0.1.0',
+    };
+    writeSynergyMap(buildSynergyMap([candidate], { generatedAtRun: 'run:decision' }));
+    const res = { json: (v: unknown) => (res as any).payload = v } as any;
+    await handler('/synergy/decision-inputs')({} as any, res);
+    expect(res.payload.success).toBe(true);
+    expect(res.payload.source).toBe('map');
+    expect(res.payload.manifestHash).toHaveLength(64);
+    // mathematics -> math; logistics -> systemic + coding
+    expect(Object.keys(res.payload.crossDomainSynergyByDomain).sort()).toEqual(['coding', 'math', 'systemic']);
   });
 
   it('scan builds and persists a map from real method/problem payloads', async () => {

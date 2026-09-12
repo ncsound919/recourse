@@ -297,7 +297,7 @@ export function evaluateGrowthDecision(
     targetDomain: 'coding',
     title: 'Baseline Architectural Expansion: Coding',
     description: 'Autonomous standard gene evolution step.',
-    rawFactorScores: { domainDeficit: 0.5, vulnerabilityUrgency: 0.1, passRateGap: 0.1, noveltyPotential: 0.5, crossDomainSynergy: 0.2 },
+    rawFactorScores: { domainDeficit: 0.5, vulnerabilityUrgency: 0.1, passRateGap: 0.1, noveltyPotential: 0.5, crossDomainSynergy: 0 },
     computedUtilityScore: 0.5,
     rank: 1,
     deterministicRationale: 'Fallback baseline progression'

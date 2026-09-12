@@ -78,6 +78,7 @@ import { zod400, kgNeighborhoodReq, kgBridgesReq, biotechClaimExtra } from './sr
 import helmet from 'helmet';
 import { rateLimit } from 'express-rate-limit';
 import { evaluateGrowthDecision, DEFAULT_GROWTH_WEIGHTS } from './src/lib/decisionEngine.js';
+import { decisionSynergyInputs } from './src/lib/synergy/decisionBridge.js';
 import { DreamingEngine } from './src/dream/engine.js';
 import { createDreamStore } from './src/dream/store.js';
 import {
@@ -1435,7 +1436,8 @@ app.get('/api/recourse/status', async (req, res) => {
     growthWeights,
     status.generation,
     dreamState.recentThoughts,
-    gitHubBlueprints
+    gitHubBlueprints,
+    decisionSynergyInputs().crossDomainSynergyByDomain
   );
 
   // Real, durable progress (not math-loop readiness). Measured artifacts only.
@@ -4234,16 +4236,18 @@ app.get('/api/recourse/reports', (req, res) => {
 // =========================================================================
 app.get('/api/recourse/decision/evaluate', async (req, res) => {
   dreamState = await dreamEngine.status();
+  const synergy = decisionSynergyInputs();
   const decision = evaluateGrowthDecision(
     registry,
     anomalies,
     growthWeights,
     status.generation,
     dreamState.recentThoughts,
-    gitHubBlueprints
+    gitHubBlueprints,
+    synergy.crossDomainSynergyByDomain
   );
   lastGrowthDecision = decision;
-  res.json({ success: true, decision });
+  res.json({ success: true, decision, synergy: { source: synergy.source, manifestHash: synergy.manifestHash } });
 });
 
 app.post('/api/recourse/decision/weights', async (req, res) => {
@@ -4253,29 +4257,33 @@ app.post('/api/recourse/decision/weights', async (req, res) => {
     saveStateToDisk();
   }
   dreamState = await dreamEngine.status();
+  const synergy = decisionSynergyInputs();
   const decision = evaluateGrowthDecision(
     registry,
     anomalies,
     growthWeights,
     status.generation,
     dreamState.recentThoughts,
-    gitHubBlueprints
+    gitHubBlueprints,
+    synergy.crossDomainSynergyByDomain
   );
   lastGrowthDecision = decision;
-  res.json({ success: true, weights: growthWeights, decision });
+  res.json({ success: true, weights: growthWeights, decision, synergy: { source: synergy.source, manifestHash: synergy.manifestHash } });
 });
 
 app.post('/api/recourse/decision/execute', async (req, res) => {
   try {
     const { actionId } = req.body;
     dreamState = await dreamEngine.status();
+    const synergy = decisionSynergyInputs();
     const decision = evaluateGrowthDecision(
       registry,
       anomalies,
       growthWeights,
       status.generation,
       dreamState.recentThoughts,
-      gitHubBlueprints
+      gitHubBlueprints,
+      synergy.crossDomainSynergyByDomain
     );
     const actionToExec = actionId
       ? decision.candidateActions.find(a => a.id === actionId) || decision.selectedAction

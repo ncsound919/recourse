@@ -227,6 +227,17 @@ now sourced from the real synergy map (build the per-domain record with
 removed. The new argument defaults to `{}`, so callers that omit it get an
 honest `0` rather than a fabricated constant.
 
+Decision-engine bridge (Plan 6): `src/lib/synergy/decisionBridge.ts` reads the
+persisted map (`readSynergyMap`, fail-soft) and maps sector scores onto
+`ToolDomain`s (a sector may map to several; merged by max). The
+`/api/recourse/decision/evaluate`, `/weights`, and `/execute` routes in
+`server.ts` now pass that record into `evaluateGrowthDecision`, so the Plan-5
+seam is live rather than inert. Responses carry
+`synergy: { source: 'map' | 'none', manifestHash? }`, which the UI displays;
+`source: 'none'` means no map was read and the factor is honestly `0`. Non-UI
+callers can fetch the same record from
+`POST /api/recourse/synergy/decision-inputs`.
+
 Deferred to later plans: SME structural alignment wiring, corrected statistics
 (stationarity, Granger/transfer entropy, FDR), and a deterministic CBR
 operator-ladder adapter.
