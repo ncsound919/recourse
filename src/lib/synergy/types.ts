@@ -76,6 +76,9 @@ export interface TransferCandidate {
   bridges: BridgeEvidence[];
   score: number;
   support: number;
+  alignment?: AlignmentResult;
+  /** high structure + low surface similarity = far (true analogy) transfer, [0,1] */
+  farTransfer?: number;
   prediction: 'pass' | 'fail';
   falsification: string;
   filters: FilterDecision[];
@@ -99,4 +102,23 @@ export interface SynergyMap {
   edges: SynergyEdge[];
   candidates: TransferCandidate[];
   manifestHash: string;
+}
+
+export interface AlignmentMapping {
+  /** base functor or entity */
+  base: string;
+  /** target functor or entity */
+  target: string;
+  /** [0,1] evidence weight for this match */
+  evidence: number;
+}
+
+export interface AlignmentResult {
+  /** summed positive evidence of the chosen gmap, normalized to [0,1] */
+  gmapWeight: number;
+  mappings: AlignmentMapping[];
+  /** base predicates projected onto the target */
+  inferences: string[];
+  /** structural consistency (one-to-one + parallel connectivity) held */
+  consistent: boolean;
 }
