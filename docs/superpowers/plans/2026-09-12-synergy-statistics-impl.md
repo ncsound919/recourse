@@ -59,10 +59,12 @@ describe('statistics', () => {
   });
 
   it('lag-1 autocorrelation flags a random walk and not white noise', () => {
+    let s = 12345 >>> 0;
+    const rnd = () => { s = (s + 0x6d2b79f5) | 0; let t = Math.imul(s ^ (s >>> 15), 1 | s); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
     const walk: number[] = []; let v = 0;
-    for (let i = 0; i < 200; i++) { v += ((i * 2654435761) % 100) / 100 - 0.5; walk.push(v); }
+    for (let i = 0; i < 200; i++) { v += rnd() - 0.5; walk.push(v); }
     expect(needsDifferencing(walk)).toBe(true);
-    const white = Array.from({ length: 200 }, (_, i) => ((i * 1103515245 + 12345) % 1000) / 1000 - 0.5);
+    const white = Array.from({ length: 200 }, () => rnd() - 0.5);
     expect(needsDifferencing(white)).toBe(false);
     expect(difference(walk).length).toBe(walk.length - 1);
   });
