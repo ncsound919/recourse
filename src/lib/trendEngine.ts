@@ -17,6 +17,8 @@
  * and every scan returns a manifest hash so reruns are diffable.
  */
 
+import { pearsonSignificance, benjaminiHochberg } from './synergy/stats.js';
+
 // --- Types -------------------------------------------------------------------
 
 export interface SeriesPoint {
@@ -84,6 +86,10 @@ export interface LaggedCorrelation {
   bestLag: number;
   correlation: number;
   significant: boolean;
+  /** Fisher-z two-sided p-value for the best lag correlation. */
+  pValue?: number;
+  /** Pair count at the best lag. */
+  n?: number;
 }
 
 export interface TrendScanResult {
@@ -360,6 +366,7 @@ function scoreHypothesis(
 /** Lagged Pearson cross-correlation: best lag (b leads a when lag>0). */
 export function laggedCorrelation(a: TrendSeries, b: TrendSeries, maxLag = 5): LaggedCorrelation {
   let best = { lag: 0, corr: 0 };
+  let bestN = 0;
   let any = false;
   for (let lag = -maxLag; lag <= maxLag; lag++) {
     const pairs: Array<[number, number]> = [];
@@ -378,17 +385,23 @@ export function laggedCorrelation(a: TrendSeries, b: TrendSeries, maxLag = 5): L
     for (const [x, y] of pairs) cov += (x - mx) * (y - my);
     const r = sx === 0 || sy === 0 ? 0 : cov / (pairs.length * sx * sy);
     any = true;
-    if (Math.abs(r) >= Math.abs(best.corr)) best = { lag, corr: r };
+    if (Math.abs(r) >= Math.abs(best.corr)) {
+      best = { lag, corr: r };
+      bestN = pairs.length;
+    }
   }
   if (!any) {
-    return { a: a.id, b: b.id, bestLag: 0, correlation: 0, significant: false };
+    return { a: a.id, b: b.id, bestLag: 0, correlation: 0, pValue: 1, n: 0, significant: false };
   }
+  const sig = pearsonSignificance(best.corr, bestN);
   return {
     a: a.id,
     b: b.id,
     bestLag: best.lag,
     correlation: Math.round(best.corr * 1000) / 1000,
-    significant: Math.abs(best.corr) >= 0.5,
+    pValue: sig.p,
+    n: bestN,
+    significant: sig.significant,
   };
 }
 
@@ -412,15 +425,21 @@ export function runTrendScan(
     momentum.push(momentumOf(s));
   }
 
-  // Cross-domain: all ordered pairs, keep significant.
-  const crossDomain: LaggedCorrelation[] = [];
+  // Cross-domain: all ordered pairs.
+  let crossDomain: LaggedCorrelation[] = [];
   for (const a of seriesList) {
     for (const b of seriesList) {
       if (a.id === b.id) continue;
-      const lc = laggedCorrelation(a, b, maxLag);
-      if (lc.significant) crossDomain.push(lc);
+      crossDomain.push(laggedCorrelation(a, b, maxLag));
     }
   }
+
+  // Multiple-testing correction across every cross-domain pair test. BH-FDR is
+  // applied before hypotheses/manifest construction so both reflect the
+  // corrected decision; only surviving pairs are retained.
+  const { rejected } = benjaminiHochberg(crossDomain.map((c) => c.pValue ?? 1));
+  crossDomain.forEach((c, i) => { c.significant = rejected[i]; });
+  crossDomain = crossDomain.filter((c) => c.significant);
 
   // Hypotheses from templates, driven by anomaly + cross-domain context.
   const hypotheses: Hypothesis[] = [];
