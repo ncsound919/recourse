@@ -169,8 +169,8 @@ describe('evaluateGrowthDecision', () => {
     const longHypothesis = 'z'.repeat(120);
     const recentThoughts = [
       thought({ id: 'low', readiness: 0.2, hypothesis: 'nothing here' }),
-      thought({ id: 'ready', readiness: 0.9, phase: 'lucid_crystallization', domain: 'cyber_defense', hypothesis: longHypothesis }),
       thought({ id: 'mid', readiness: 0.74, hypothesis: 'just below the 0.75 bar' }),
+      thought({ id: 'ready', readiness: 0.9, phase: 'lucid_crystallization', domain: 'cyber_defense', hypothesis: longHypothesis }),
     ];
     const generation = 7;
     const report = evaluateGrowthDecision(registry, anomalies, weights, generation, recentThoughts, blueprints);
