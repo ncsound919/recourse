@@ -347,7 +347,7 @@ function runAcceptanceTest(
 ): { passed: boolean; score: number; error: string | null } {
   try {
     installMathReferenceGlobals();
-    const runnable = sourceCode.replace(/^export\s+/gm, '');
+const runnable = sourceCode.replace(/^export\s+(?:default\s+)?/gm, '');
     const suite = normalizeAssertions(acceptanceTest);
     const wrapped =
       `"use strict";\n` +
