@@ -325,7 +325,7 @@ function syncCronTask(job: ScheduledJobState): void {
   if (!task) return;
   const status = task.getStatus();
   const shouldRun = taskShouldRun(job);
-  if (shouldRun && status !== 'running') {
+if (shouldRun && status === 'stopped') {
     void task.start();
   } else if (!shouldRun && (status === 'idle' || status === 'running')) {
     void task.stop();
