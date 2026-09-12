@@ -52,7 +52,12 @@ const _require =
   typeof __filename !== 'undefined'
     ? createRequire(__filename)
     : createRequire(_importMetaUrl ?? process.cwd());
-const { Value: AutogradValue } = _require(join(process.cwd(), 'node_modules', 'autograd-ts', 'dist', 'index.js')) as typeof import('autograd-ts');
+const _packagePath = _require.resolve.paths('autograd-ts')
+  ?.map((base) => join(base, 'autograd-ts', 'dist', 'index.js'))
+  .find((candidate) => _require('node:fs').existsSync(candidate));
+const { Value: AutogradValue } = _require(
+  _packagePath ?? join(process.cwd(), 'node_modules', 'autograd-ts', 'dist', 'index.js'),
+) as typeof import('autograd-ts');
 
 /** Builds a sigmoid node: out = 1 / (1 + exp(-x)), with the chain-rule
  *  backward pass d x.grad += sig * (1 - sig) * out.grad. */
