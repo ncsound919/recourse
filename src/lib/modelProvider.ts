@@ -164,8 +164,10 @@ export function pickGenerationProfile(messages: ChatMessage[]): ProviderProfileI
   if (!localModelConfigured()) return 'api';
   const chars = messages.reduce((n, m) => n + (m.content ? m.content.length : 0), 0);
   if (chars > localAutoMaxChars()) return 'api';
-  // Unknown (never probed) => try local; chatComplete falls back to api if offline.
-  return onlineCache.local.online === false ? 'api' : 'local';
+  // Always try local; chatComplete falls back to api if it turns out to be
+  // offline. (Do NOT gate on a cached offline probe here — that would pin
+  // generation to api forever after a single transient probe failure.)
+  return 'local';
 }
 
 /** Route to a specific profile. 'local'/'api' force it (honest: 'local' falls
@@ -386,7 +388,9 @@ export async function chatComplete(
 ): Promise<ChatCompleteResult> {
   const profile = pickGenerationProfile(messages);
   const result = await chatCompleteFor(profile, messages, opts);
-  if (profile === 'local' && result.status === 'offline') {
+  if (profile === 'local' && result.status !== 'online') {
+    // Local failed (offline or error) — fall back to the API profile for this
+    // generation. The returned result reports the profile that actually answered.
     return chatCompleteFor('api', messages, opts);
   }
   return result;
