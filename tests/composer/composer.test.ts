@@ -83,10 +83,11 @@ describe('SoundLab .seq encoder', () => {
     expect(seq.version).toBe(2);
     expect(seq.stepLength).toBe(16);
     expect(seq.bpm).toBe(t.bpm);
-    // Conventional layer voices present.
-    for (const layer of ['bass', 'keys', 'lead', 'kick', 'snare', 'hat']) {
+    // Conventional layer voices present (chord voices are split per layer).
+    for (const layer of ['bass', 'lead', 'kick', 'snare', 'hat']) {
       expect(seq.pattern[layer]).toHaveLength(16);
     }
+    expect(Object.keys(seq.pattern).some((k) => k.startsWith('keys'))).toBe(true);
     // Chain repeats the 1-bar pocket to the requested bar count.
     expect(seq.songChain.order).toHaveLength(t.bars);
     const json = JSON.parse(seqToJson(seq));

@@ -151,14 +151,8 @@ export function voiceRootless(rootPc: number, quality: ChordQuality, lo = 55, hi
 export const DOMINANT_QUALITIES = new Set<ChordQuality>(['7', '9', '13', '7b9', '7#9', '7#11', '7b13', '7sus']);
 
 
-/** Cents/MIDI utils used by encoders. */
+/** MIDI timebase + tempo helpers used by the encoders. */
 export const PPQ = 480;
-export function beatsToTicks(beats: number): number {
-  return Math.round(beats * PPQ);
-}
-export function barTicks(_bpm: number): number {
-  return Math.round(4 * PPQ);
-}
 /** MIDI microseconds-per-quarter for a tempo (SMF tempo meta). */
 export function usPerQuarter(bpm: number): number {
   return Math.round(60000000 / bpm);

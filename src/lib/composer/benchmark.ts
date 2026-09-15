@@ -61,19 +61,29 @@ export interface BenchmarkReport {
   grade: string; // letter-ish summary
 }
 
-const WEIGHTS: Record<string, number> = {
-  integrity: 0.15,
-  harmony: 0.05,
-  closure: 0.1,
-  styleAdherence: 0.15,
-  voiceLeading: 0.15,
-  richness: 0.05,
-  nuance: 0.05,
-  spelling: 0.1, // every voiced chord note is a tone of that chord
-  bass: 0.08,    // bar-start bass is the chord root, below the voicing
-  melody: 0.07,  // every lead/hook note is a chord tone of its bar
-  spacing: 0.05, // voicings sit in register with no excessive gaps
+/**
+ * Weights for the QUALITY metrics (they sum to 1). The four certificates below
+ * are reported but weighted 0 — they are construction-guaranteed (the generator
+ * only emits chord tones / roots), so letting them score would inflate the
+ * aggregate. They act as pass/fail GATES instead (see `CERTIFICATE_KEYS`).
+ */
+export const WEIGHTS: Record<string, number> = {
+  integrity: 0.2143,
+  harmony: 0.0714,
+  closure: 0.1429,
+  styleAdherence: 0.2143,
+  voiceLeading: 0.2143,
+  richness: 0.0714,
+  nuance: 0.0714,
+  // Certificates — reported (must be ~1) but weighted 0.
+  spelling: 0,
+  bass: 0,
+  melody: 0,
+  spacing: 0,
 };
+
+/** Metrics that must pass (≈1) for a track to count as well-formed. */
+export const CERTIFICATE_KEYS = ['spelling', 'bass', 'melody', 'spacing'];
 
 // ---------------------------------------------------------------------------
 // metric primitives
@@ -280,9 +290,15 @@ export function scoreTrack(track: Track): TrackScore {
     metrics.push({ key: 'spacing', label: 'Register & spacing', value: clamp01(spacing), detail: `max adjacent gap ${maxGap} semitones` });
   }
 
-  let total = 0;
-  for (const m of metrics) total += (WEIGHTS[m.key] ?? 0) * m.value;
-  return { style: track.style, seed: track.seed, bars: track.bars, total: clamp01(total), metrics };
+  let raw = 0;
+  for (const m of metrics) raw += (WEIGHTS[m.key] ?? 0) * m.value;
+  // Certificates gate rather than score: a malformed track is halved, not
+  // rewarded for the correctness it gets by construction.
+  const certsPass = CERTIFICATE_KEYS.every(
+    (k) => (metrics.find((m) => m.key === k)?.value ?? 1) >= 0.99,
+  );
+  const total = clamp01(raw * (certsPass ? 1 : 0.5));
+  return { style: track.style, seed: track.seed, bars: track.bars, total, metrics };
 }
 
 function gradeLetter(total: number): string {
@@ -320,7 +336,7 @@ export function runBenchmark(cfg: BenchmarkConfig = {}): BenchmarkReport {
   return {
     generatedAt: Date.now(),
     method:
-      'objective computed metrics (integrity/harmony/closure/style-adherence/voice-leading/richness/nuance); does NOT grade taste or timbre — human ratings remain the aesthetic arbiter',
+      'objective computed metrics (integrity/harmony/closure/style-adherence/voice-leading/richness/nuance, weights sum to 1); spelling/bass/melody/spacing are reported as pass/fail CERTIFICATES (gate the score, not weighted). Does NOT grade taste or timbre — human ratings remain the aesthetic arbiter',
     styles: out,
     aggregate,
     grade: gradeLetter(aggregate),

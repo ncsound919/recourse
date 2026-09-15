@@ -29,6 +29,7 @@ import {
   SelfAssemblingLegoView,
   ProviderView,
   MusicTherapyView,
+  MusicView,
   IntakeAndGrowthView,
   CorpusView,
   SkillsView,
@@ -93,7 +94,8 @@ import {
    Box,
    Settings,
    Gamepad2,
-   BarChart3
+   BarChart3,
+  Music
 } from 'lucide-react';
 
 // ================================================================
@@ -240,6 +242,7 @@ type TabKey =
   | 'lego'
   | 'provider'
   | 'music-therapy'
+  | 'music'
   | 'recursive-math'
   | 'recursive-learner'
   | 'decision'
@@ -300,6 +303,16 @@ const TABS: Array<{
     badge: () => (
       <span className="px-1.5 py-0.2 bg-fuchsia-950 text-fuchsia-300 text-[10px] rounded border border-fuchsia-800 font-bold">
         432Hz
+      </span>
+    ),
+  },
+  {
+    key: 'music',
+    label: 'MUSIC (SOUNDLAB)',
+    icon: <Music className="w-4 h-4 text-emerald-400" />,
+    badge: () => (
+      <span className="px-1.5 py-0.2 bg-emerald-950 text-emerald-300 text-[10px] rounded border border-emerald-800 font-bold">
+        PROGRESSIONS
       </span>
     ),
   },
@@ -1088,6 +1101,10 @@ export default function App() {
 
             {activeTab === 'music-therapy' && (
               <MusicTherapyView />
+            )}
+
+            {activeTab === 'music' && (
+              <MusicView />
             )}
 
             {activeTab === 'recursive-math' && (

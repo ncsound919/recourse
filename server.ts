@@ -7406,6 +7406,78 @@ app.get('/api/recourse/compose/soundlab.json', (req, res) => {
   }
 });
 
+/**
+ * Read-only song payload for the SoundLab composer panel: the chord
+ * progression + key + BPM, plus the SoundLab-playable piece (loop mode) or the
+ * arrangement sections (arr mode). CORS-open like soundlab.json — GET requests
+ * are never mutation-gated. Example:
+ *   GET /api/recourse/compose/song.json?style=jasper-ballad&seed=1&bars=8&mode=loop
+ */
+app.get('/api/recourse/compose/song.json', (req, res) => {
+  try {
+    const style = typeof req.query.style === 'string' && listStyles().includes(req.query.style as any) ? req.query.style : 'steely-dan';
+    const seed = Number(req.query.seed) || 1;
+    const bars = [4, 8, 16].includes(Number(req.query.bars)) ? Number(req.query.bars) : 8;
+    const mode = req.query.mode === 'arr' ? 'arr' : 'loop';
+    const keyParam = req.query.key !== undefined && req.query.key !== '' ? Number(req.query.key) : undefined;
+    const major = req.query.major === 'true' ? true : req.query.major === 'false' ? false : undefined;
+    const bpmParam = req.query.bpm !== undefined && req.query.bpm !== '' ? Number(req.query.bpm) : undefined;
+    const brief = {
+      style: style as never,
+      seed,
+      bars,
+      title: `${style} ${mode}`,
+      ...(keyParam !== undefined && Number.isFinite(keyParam) ? { key: keyParam } : {}),
+      ...(major !== undefined ? { major } : {}),
+      ...(bpmParam !== undefined && Number.isFinite(bpmParam) && bpmParam > 0 ? { bpm: bpmParam } : {}),
+    };
+    const track = mode === 'arr' ? composeArrangement(brief) : compose(brief);
+    const names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+    const keyPc = ((track.key % 12) + 12) % 12;
+    const chords = track.chords.map((c) => `${names[((c.rootPc % 12) + 12) % 12]}${c.quality}`);
+    const payload: Record<string, unknown> = {
+      success: true,
+      mode,
+      style: track.style,
+      seed: track.seed,
+      bars: track.bars,
+      bpm: track.bpm,
+      key: `${names[keyPc]}${track.major ? '' : 'm'}`,
+      keyPc,
+      major: track.major,
+      chords,
+      events: track.events.length,
+    };
+    if (mode === 'arr') payload.sections = track.sections ?? [];
+    else payload.piece = encodeSoundlabPiece(track);
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Cache-Control', 'no-store');
+    res.json(payload);
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message ?? String(err) });
+  }
+});
+
+/**
+ * Music sector descriptor (read-only). Makes the sector a discoverable surface
+ * for the UI/MCP without mutating anything. Example:
+ *   GET /api/recourse/music/sector
+ */
+app.get('/api/recourse/music/sector', (_req, res) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Cache-Control', 'no-store');
+  res.json({
+    success: true,
+    sector: {
+      id: 'music',
+      label: 'Music / composition (SoundLab)',
+      verified: true,
+      sources: ['recourse composer (deterministic)', 'SoundLab chord/song bridge'],
+    },
+    styles: listStyles(),
+  });
+});
+
 // --- Music Therapy Oncology Research --------------------------------------
 // Turns the composer/DSP system into a research instrument for music therapy
 // in oncology (Cochrane 2021: anxiety/depression/pain/fatigue support). Each

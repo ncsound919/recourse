@@ -5,17 +5,18 @@
  * (the importer replicates them onto patterns A–D) and each cell is a single
  * monophonic note on a layer whose VOICE must already exist in your kit. So
  * `.seq` cannot carry a multi-bar chord progression — it expresses a playable
- * 1-bar "pocket" (head chord + groove) that chains to the requested bar count
- * and voices with whatever pitched layer(s) you name (bass/keys/lead + drums).
- * The full harmonic arrangement is delivered by the sibling `.mid` (DAW) file.
+ * 1-bar "pocket" that chains to the requested bar count. The full harmonic
+ * arrangement is delivered by the sibling `.mid` (DAW) file.
  *
- * Layer ids are conventional; a `.seq` only sounds for layers you already have
- * (or remap the rows to). This is documented, not hidden.
+ * FIDELITY: the pocket is DERIVED from the realized `track` (bar 0 of its real
+ * events), not a hardcoded groove — drums/velocity/duration come from the same
+ * NoteEvents the `.mid` writes. Because a SoundLab cell is monophonic per layer,
+ * each distinct chord voice is placed on its own `keys<N>` layer (mirroring the
+ * piece emitter in `soundlab.ts`) so the voicing is preserved rather than
+ * collapsed to one note.
  */
 
-import type { Chord, Track } from '../types.js';
-import { GROOVES } from '../lexicons.js';
-import { CHORD_TONES } from '../theory.js';
+import type { NoteEvent, Track } from '../types.js';
 
 export interface SeqCell {
   on: boolean;
@@ -38,73 +39,62 @@ export type SeqV2 = {
 };
 
 const STEPS = 16;
+/** Recourse PPQ is 480 → 16 steps per 4/4 bar = 120 ticks/step. */
+const STEP_TICKS = 120;
+const BAR_TICKS = 4 * 480;
+/** GM drum notes. */
+const GM = { kick: 36, snare: 38, hat: 42, openHat: 46 };
 
 function emptyRow(): SeqCell[] {
   return Array.from({ length: STEPS }, () => ({ on: false }));
 }
-function put(row: SeqCell[], step: number, note: number, dur: number, vel: number): void {
-  row[step] = { on: true, note, velocity: vel, duration: dur };
+
+function stepIndex(tick: number): number {
+  return Math.max(0, Math.min(STEPS - 1, Math.floor(tick / STEP_TICKS)));
 }
 
-/** A 16-step single-bar voicing of one chord on pitched layers. */
-function harmonicRow(chord: Chord, rootOctave: number): { bass: SeqCell[]; keys: SeqCell[]; lead: SeqCell[] } {
-  const bass = emptyRow();
-  const keys = emptyRow();
-  const lead = emptyRow();
-  const rootMidi = (rootOctave + 1) * 12 + chord.rootPc;
-  put(bass, 0, rootMidi, 14, 100);
-  put(bass, 8, rootMidi, 3, 84); // eighth pulse
-  // Roll the chord tones across the bar (monophonic arpeggio).
-  const tones = toneRow(chord, 4);
-  const pick = [0, 2, 1, 3, 0, 1, 2, 0]; // simple repeated contour over 16 steps (every 2nd step)
-  for (let s = 0; s < 16; s += 2) {
-    const idx = pick[(s / 2) % pick.length] % tones.length;
-    put(keys, s, tones[idx], 2, 78);
+function durSteps(dur: number): number {
+  return Math.max(1, Math.min(STEPS, Math.round(dur / STEP_TICKS)));
+}
+
+/** Collapse a monophonic part's bar-0 events onto 16 steps (louder wins a step). */
+function putMono(row: SeqCell[], events: NoteEvent[]): void {
+  for (const e of events) {
+    const s = stepIndex(e.tick);
+    const cell: SeqCell = { on: true, note: e.pitch, velocity: Math.round(e.velocity), duration: durSteps(e.dur) };
+    if (!row[s].on || (row[s].velocity ?? 0) < (cell.velocity ?? 0)) row[s] = cell;
   }
-  // Light top hook on chord tones.
-  put(lead, 2, tones[tones.length - 1], 2, 92);
-  put(lead, 10, tones[0] + 12, 3, 90);
-  return { bass, keys, lead };
 }
 
-function toneRow(chord: Chord, octave: number): number[] {
-  const base = (octave + 1) * 12 + chord.rootPc;
-  return CHORD_TONES[chord.quality].map((t) => base + t);
-}
-
-/** 16-step groove rows for the drum layers (GM notes). */
-function _drumRows(): Record<string, SeqCell[]> {
-  const out: Record<string, SeqCell[]> = {};
-  out.kick = emptyRow();
-  out.snare = emptyRow();
-  out.hat = emptyRow();
-  return out; // filled by caller using the style groove arrays
-}
-
-/**
- * Encode a realized track as a SoundLab `.seq` 1-bar pocket. `bars` controls the
- * chain length (the pocket repeats that many times). Returns the JSON object the
- * `.seq` file is written from.
- */
+/** Encode a realized track as a SoundLab `.seq` 1-bar pocket (chained `bars`×). */
 export function encodeToSeq(track: Track): SeqV2 {
-  const headChord = track.chords[0];
-  const style = track.style;
-  const groove = GROOVES[style];
-  const rootOctave = 2;
+  const bar0 = track.events.filter((e) => e.tick >= 0 && e.tick < BAR_TICKS);
+  const pattern: Record<string, SeqCell[]> = {};
 
-  const layers: Record<string, SeqCell[]> = {};
-  // Drums
-  layers.kick = emptyRow();
-  layers.snare = emptyRow();
-  layers.hat = emptyRow();
-  groove.kick.forEach((on, s) => { if (on) put(layers.kick, s, 36, 1, 100); });
-  groove.snare.forEach((on, s) => { if (on) put(layers.snare, s, 38, 1, 100); });
-  groove.hat.forEach((on, s) => { if (on) put(layers.hat, s, s % 4 === 2 ? 46 : 42, 1, 70); });
-  // Harmony (head chord) + drums on conventional ids.
-  const h = harmonicRow(headChord, rootOctave);
-  layers.bass = h.bass;
-  layers.keys = h.keys;
-  layers.lead = h.lead;
+  pattern.kick = emptyRow();
+  putMono(pattern.kick, bar0.filter((e) => e.part === 'drums' && e.drum === GM.kick));
+  pattern.snare = emptyRow();
+  putMono(pattern.snare, bar0.filter((e) => e.part === 'drums' && e.drum === GM.snare));
+  pattern.hat = emptyRow();
+  putMono(pattern.hat, bar0.filter((e) => e.part === 'drums' && (e.drum === GM.hat || e.drum === GM.openHat)));
+
+  // Keys: one layer per distinct chord voice (monophonic cells per layer).
+  const keyEvents = bar0.filter((e) => e.part === 'keys');
+  const voices = [...new Set(keyEvents.map((e) => e.pitch))].sort((a, b) => a - b);
+  if (voices.length === 0) {
+    pattern.keys = emptyRow();
+  } else {
+    voices.forEach((pitch, i) => {
+      const row = emptyRow();
+      putMono(row, keyEvents.filter((e) => e.pitch === pitch));
+      pattern[`keys${i}`] = row;
+    });
+  }
+
+  pattern.bass = emptyRow();
+  putMono(pattern.bass, bar0.filter((e) => e.part === 'bass'));
+  pattern.lead = emptyRow();
+  putMono(pattern.lead, bar0.filter((e) => e.part === 'lead'));
 
   const order: string[] = [];
   for (let i = 0; i < track.bars; i++) order.push('A'); // 1-bar pocket repeated
@@ -116,9 +106,9 @@ export function encodeToSeq(track: Track): SeqV2 {
     timeSignature: [4, 4],
     stepLength: 16,
     swing: 0,
-    steps: 16,
+    steps: STEPS,
     ppq: 96,
-    pattern: layers,
+    pattern,
     songChain: { order },
   };
 }

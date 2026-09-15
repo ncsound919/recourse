@@ -8,13 +8,14 @@ import {
 import { DEFAULT_CORPUS_ROOTS } from '../../src/intake/corpus/index.js';
 
 describe('domain registry', () => {
-  it('includes the seven operator sectors and marks logistics verified', () => {
+  it('includes the operator sectors and marks logistics verified', () => {
     const ids = listDomains().map((d) => d.id);
-    for (const id of ['health_oncology', 'mathematics', 'cybersecurity', 'neuro_music', 'aging', 'sports', 'logistics']) {
+    for (const id of ['health_oncology', 'mathematics', 'cybersecurity', 'neuro_music', 'aging', 'sports', 'logistics', 'music']) {
       expect(ids).toContain(id);
     }
     expect(getDomain('logistics')?.verified).toBe(true);
     expect(getDomain('logistics')?.corpusProjects).toContain('truck-buddy');
+    expect(getDomain('music')?.verified).toBe(true);
   });
 
   it('maps tool domains to sectors', () => {

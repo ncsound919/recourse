@@ -4,9 +4,9 @@
  * An EPISODE is a real, reproducible composition (captured deterministically by
  * (style, seed, ...)) plus a HUMAN rating. Ratings are the only signal: there is
  * no fake autonomy. From accumulated episodes the learner derives per-style
- * ADJUSTMENTS (root-motion and chord-quality boosts/penalties) that bias future
- * composition toward the DNA the operator actually liked, and it can SUGGEST
- * new briefs to explore near liked seeds.
+ * ADJUSTMENTS (chord-quality boosts/penalties) that bias future composition
+ * toward the DNA the operator actually liked, and it can SUGGEST new briefs to
+ * explore near liked seeds.
  *
  * Everything is file-backed (path injectable for tests) so learning survives
  * restarts. The pure engine in composer.ts stays seed-deterministic; learning is
@@ -18,6 +18,7 @@ import * as path from 'node:path';
 import { getLexicon, type StyleLexicon } from './lexicons.js';
 import { compose } from './composer.js';
 import { pcName } from './theory.js';
+import { createRng } from './types.js';
 import type { ComposeBrief, StyleId } from './types.js';
 
 export interface Episode {
@@ -115,23 +116,24 @@ export class ComposerLearner {
     return this.state[style]?.episodes ?? [];
   }
 
-  /** Candidate briefs to explore: around liked seeds + unrated seed range. */
+  /** Candidate briefs to explore: around liked seeds + unrated seed range.
+   *  Deterministic for a given learner state (no wall-clock input). */
   suggestNext(style: StyleId, count = 4, bars = 8): ComposeBrief[] {
-    const liked = this.episodesFor(style).filter((e) => e.rating >= 4);
+    const episodes = this.episodesFor(style);
+    const liked = episodes.filter((e) => e.rating >= 4);
     const out: ComposeBrief[] = [];
-    const rngState = { n: Date.now() % 0x7fffffff };
-    const rnd = () => { rngState.n = (rngState.n * 48271) % 0x7fffffff; return rngState.n; };
+    const rng = createRng(hashString(`${style}:${episodes.map((e) => e.id).join(',')}`));
     if (liked.length) {
       const base = liked[0];
       for (let i = 1; i <= count; i++) {
         out.push({ style, seed: base.brief.seed + i, bars, key: base.brief.key, major: base.brief.major, bpm: base.brief.bpm, title: `${style} explore ${i}` });
       }
     }
-    const existing = new Set(this.episodesFor(style).map((e) => e.brief.seed));
+    const existing = new Set(episodes.map((e) => e.brief.seed));
     let guard = 0;
     while (out.length < count && guard < 200) {
       guard++;
-      const seed = (rnd() % 1000) + 1;
+      const seed = Math.floor(rng() * 1000) + 1;
       if (existing.has(seed)) continue;
       out.push({ style, seed, bars, title: `${style} explore` });
       existing.add(seed);
@@ -187,6 +189,16 @@ function deriveAdjustments(episodes: Episode[]): Adjustment {
 
 function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
+}
+
+/** Stable string hash (FNV-1a) for deterministic, state-derived seeds. */
+function hashString(s: string): number {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
 }
 
 function load(file: string): Record<StyleId, StyleLearning> {

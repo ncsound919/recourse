@@ -36,7 +36,7 @@ describe('synergy router', () => {
     const res = { json: (v: unknown) => (res as any).payload = v } as any;
     await handler('/synergy/domains')({} as any, res);
     expect(res.payload.success).toBe(true);
-    expect(res.payload.domains.length).toBe(7);
+    expect(res.payload.domains.length).toBe(8);
   });
 
   it('score returns 0 when no map exists yet', async () => {

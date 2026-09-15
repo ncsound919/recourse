@@ -21,6 +21,7 @@ export { ArchitectForgeView } from './ArchitectForgeView';
 export { SelfAssemblingLegoView } from './SelfAssemblingLegoView';
 export { ProviderView } from './ProviderView';
 export { MusicTherapyView } from './MusicTherapyView';
+export { MusicView } from './MusicView';
 export { IntakeAndGrowthView } from './IntakeAndGrowthView';
 export { CorpusView } from './CorpusView';
 export { SkillsView } from './SkillsView';

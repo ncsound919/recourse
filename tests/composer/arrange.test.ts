@@ -43,4 +43,16 @@ describe('arrangement mode (non-loop, written-out arc)', () => {
     expect(t.sections).toBeUndefined();
     expect(t.chords[t.chords.length - 1].rootPc).toBe(t.key); // loop-closed
   });
+
+  it('honors the requested bar count for shorter arrangements', () => {
+    const eight = composeArrangement({ style: 'steely-dan', seed: 11, bars: 8 });
+    expect(eight.bars).toBe(8);
+    expect(eight.chords).toHaveLength(8);
+    expect(eight.sections!.map((s) => s.name)).toEqual(['intro', 'A', 'bridge', 'final', 'outro']);
+
+    const four = composeArrangement({ style: 'steely-dan', seed: 11, bars: 4 });
+    expect(four.bars).toBe(4);
+    expect(four.chords).toHaveLength(4);
+    expect(four.sections!.some((s) => s.name === 'final')).toBe(true);
+  });
 });

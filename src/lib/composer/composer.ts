@@ -18,7 +18,7 @@
 import type { ArrSection, Chord, ComposeBrief, NoteEvent, StyleId, Track } from './types.js';
 import { createRng, pickWeighted } from './types.js';
 import { getLexicon, GROOVES, type StyleLexicon } from './lexicons.js';
-import { PPQ, CHORD_TONES, voiceChord, voiceMuChord, voiceRootless, DOMINANT_QUALITIES, bassMidi, chordTonesMidi } from './theory.js';
+import { PPQ, CHORD_TONES, voiceMuChord, voiceRootless, DOMINANT_QUALITIES, bassMidi, chordTonesMidi } from './theory.js';
 
 const VALID_BARS = [4, 8, 16];
 
@@ -26,9 +26,19 @@ function resolveBrief(brief: ComposeBrief): Required<Pick<ComposeBrief, 'seed' |
   const lx = getLexicon(brief.style);
   const seed = brief.seed ?? Math.floor(Math.random() * 0x7fffffff);
   const rng = createRng(seed);
-  let key = brief.key;
-  let major = brief.major;
-  if (typeof key !== 'number' || typeof major !== 'boolean') {
+  let key: number;
+  let major: boolean;
+  if (typeof brief.key === 'number') {
+    // Key given: honor it. Color comes from the style's entry for that tonic
+    // (or major) — do NOT discard the requested key.
+    key = brief.key;
+    major = typeof brief.major === 'boolean' ? brief.major : lx.keys.find((k) => k.pc === key)?.major ?? true;
+  } else if (typeof brief.major === 'boolean') {
+    // Color given, key not: pick a weighted tonic of that color.
+    major = brief.major;
+    const pool = lx.keys.filter((k) => k.major === major);
+    key = (pool.length ? pickWeighted(rng, pool) : pickWeighted(rng, lx.keys)).pc;
+  } else {
     const pick = pickWeighted(rng, lx.keys);
     key = pick.pc;
     major = pick.major;
@@ -77,9 +87,18 @@ function generateChords(lx: StyleLexicon, rng: () => number, tonicPc: number, ba
       chords.push({ rootPc, quality: step.q });
       prevPc = rootPc;
     } else {
-      const rootPc = nextRoot(lx, rng, prevPc);
-      chords.push({ rootPc, quality: pickQuality(lx, rng) });
-      prevPc = rootPc;
+      // holdBarChance: prolong the previous chord instead of moving (the style
+      // DNA declares how often a bar holds). Never holds the closing bar so the
+      // loop still resolves to the tonic.
+      const holdChance = lx.signature.holdBarChance ?? 0;
+      if (i > 0 && i < bars - 1 && holdChance > 0 && rng() < holdChance) {
+        chords.push({ rootPc: chords[i - 1].rootPc, quality: chords[i - 1].quality });
+        prevPc = chords[i - 1].rootPc;
+      } else {
+        const rootPc = nextRoot(lx, rng, prevPc);
+        chords.push({ rootPc, quality: pickQuality(lx, rng) });
+        prevPc = rootPc;
+      }
     }
   }
   // Loop closure: final bar resolves back to the tonic to make the loop repeat.
@@ -97,16 +116,6 @@ interface RealizeCtx {
 
 const BAR_TICKS = 4 * PPQ; // 4/4
 const STEP = PPQ / 4; // 16th
-
-/** Choose the voicing engine for a chord based on the style's voicer. Steely
- *  uses the mu-adjacency rule and rootless dominants; other styles use spread. */
-function _voiceKeys(ch: Chord, lo: number, hi: number, n: number, voicer?: string): number[] {
-  if (voicer === 'steely') {
-    if (ch.quality === 'mu') return voiceMuChord(ch.rootPc, lo, hi);
-    if (DOMINANT_QUALITIES.has(ch.quality)) return voiceRootless(ch.rootPc, ch.quality, lo, hi);
-  }
-  return voiceChord(ch.rootPc, ch.quality, lo, hi, n);
-}
 
 function clampVel(v: number): number {
   return Math.max(1, Math.min(127, Math.round(v)));
@@ -142,12 +151,53 @@ function nearestPitch(pc: number, anchor: number, lo: number, hi: number): numbe
   return Math.max(lo, Math.min(hi, best));
 }
 
+/** All distinct octave-raised variants of a voicing that stay within [lo,hi].
+ *  V ≤ 4 notes, so this is bounded (≤ 2^V candidates). */
+function octaveVariants(base: number[], lo: number, hi: number): number[][] {
+  const seen = new Set<string>();
+  const work: number[][] = [];
+  const push = (arr: number[]) => {
+    const key = arr.join(',');
+    if (!seen.has(key)) {
+      seen.add(key);
+      work.push(arr);
+    }
+  };
+  push([...base].sort((a, b) => a - b));
+  for (let i = 0; i < work.length; i++) {
+    const v = work[i];
+    for (let k = 0; k < v.length; k++) {
+      if (v[k] + 12 <= hi) {
+        const raised = v.slice();
+        raised[k] += 12;
+        raised.sort((a, b) => a - b);
+        push(raised);
+      }
+    }
+  }
+  return work;
+}
+
 /** Deterministic candidate voicings for one chord (state-independent, so DP is
  *  a clean shortest path). V notes near a central register, plus octave variants. */
 function voicingCandidates(ch: Chord, lx: StyleLexicon): number[][] {
   const lo = lx.voicing.lo;
   const hi = lx.voicing.hi;
   const center = (lo + hi) / 2;
+
+  // Steely Dan DNA: the mu(add2) adjacency rule and rootless altered dominants
+  // are the style's identifying voicings. Apply them directly (the DP then picks
+  // among real mu/rootless candidates) instead of a generic spread.
+  if (lx.voicer === 'steely') {
+    if (ch.quality === 'mu') {
+      const mu = voiceMuChord(ch.rootPc, lo, hi);
+      if (mu.length >= 3) return [mu];
+    } else if (DOMINANT_QUALITIES.has(ch.quality)) {
+      const rootless = voiceRootless(ch.rootPc, ch.quality, lo, hi);
+      if (rootless.length >= 3) return octaveVariants(rootless, lo, hi);
+    }
+  }
+
   const pcs = voiceTonePcs(ch, lx);
   // Keep at most VL_VOICES pcs, dropping extremes if the chord is very dense.
   let usePcs = pcs;
@@ -157,25 +207,8 @@ function voicingCandidates(ch: Chord, lx: StyleLexicon): number[][] {
   }
   const voices = Math.max(3, Math.min(usePcs.length, VL_VOICES));
   const basePcs = usePcs.slice(0, voices).sort((a, b) => a - b);
-  // Octave variants: independently raise each voice by an octave when in range.
-  const out = new Set<string>();
-  const stack: number[][] = [basePcs.map((pc) => nearestPitch(pc, center, lo, hi))];
-  // Generate subset-raise variants iteratively.
-  const push = (arr: number[]) => { const s = arr.join(','); if (!out.has(s)) { out.add(s); } };
-  const work: number[][] = [stack[0]];
-  push(stack[0]);
-  for (const v of work) {
-    for (let k = 0; k < v.length; k++) {
-      const raised = v.slice();
-      if (raised[k] + 12 <= hi) {
-        raised[k] += 12;
-        raised.sort((a, b) => a - b);
-        const key = raised.join(',');
-        if (!out.has(key)) { out.add(key); work.push(raised); }
-      }
-    }
-  }
-  return [...out].map((s) => s.split(',').map(Number));
+  const baseNotes = basePcs.map((pc) => nearestPitch(pc, center, lo, hi));
+  return octaveVariants(baseNotes, lo, hi);
 }
 
 /** Minimal-assignment distance between two sorted voicings (voice motion). */
@@ -395,17 +428,40 @@ function staticChords(lx: StyleLexicon, rng: () => number, tonicPc: number, bars
   return out;
 }
 
-export function composeArrangement(brief: ComposeBrief): Track {
-  const res = resolveBrief(brief);
-  const lx = getLexicon(brief.style);
-  const tonic = res.key;
-  const layout: Array<{ name: string; kind: 'vamp' | 'closed' | 'open'; bars: number }> = [
+type SectionKind = 'vamp' | 'closed' | 'open';
+interface LayoutSection { name: string; kind: SectionKind; bars: number }
+
+/** Written-out arc for each supported length. `brief.bars` is honored; when it
+ *  isn't a supported value the full 16-bar arrangement is used. */
+const ARRANGEMENT_LAYOUTS: Record<number, LayoutSection[]> = {
+  4: [
+    { name: 'intro', kind: 'vamp', bars: 1 },
+    { name: 'A', kind: 'closed', bars: 1 },
+    { name: 'bridge', kind: 'open', bars: 1 },
+    { name: 'final', kind: 'closed', bars: 1 },
+  ],
+  8: [
+    { name: 'intro', kind: 'vamp', bars: 1 },
+    { name: 'A', kind: 'closed', bars: 2 },
+    { name: 'bridge', kind: 'open', bars: 2 },
+    { name: 'final', kind: 'closed', bars: 2 },
+    { name: 'outro', kind: 'vamp', bars: 1 },
+  ],
+  16: [
     { name: 'intro', kind: 'vamp', bars: 2 },
     { name: 'A', kind: 'closed', bars: 4 },
     { name: 'bridge', kind: 'open', bars: 4 }, // open => new changes, no tonic close
     { name: 'final', kind: 'closed', bars: 4 },
     { name: 'outro', kind: 'vamp', bars: 2 },
-  ];
+  ],
+};
+
+export function composeArrangement(brief: ComposeBrief): Track {
+  const res = resolveBrief(brief);
+  const lx = getLexicon(brief.style);
+  const tonic = res.key;
+  const total = VALID_BARS.includes(brief.bars as number) ? (brief.bars as number) : 16;
+  const layout = ARRANGEMENT_LAYOUTS[total];
   const chords: Chord[] = [];
   const sections: ArrSection[] = [];
   let at = 0;
@@ -431,10 +487,10 @@ export function composeArrangement(brief: ComposeBrief): Track {
     }
   }
 
-  const total = chords.length;
+  const realizedBars = chords.length;
   const track = realize(
-    { style: brief.style, seed: res.seed, bars: total, key: res.key, major: res.major, bpm: res.bpm, title: brief.title || `${brief.style} arrangement` } as ComposeBrief,
-    { ...res, bars: total },
+    { style: brief.style, seed: res.seed, bars: realizedBars, key: res.key, major: res.major, bpm: res.bpm, title: brief.title || `${brief.style} arrangement` } as ComposeBrief,
+    { ...res, bars: realizedBars },
     chords,
   );
   track.sections = sections;

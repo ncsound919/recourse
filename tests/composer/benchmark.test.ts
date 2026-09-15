@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { runBenchmark, scoreTrack, ratingFromScore, autoRateBenchmark, renderBenchmark, compose } from '../../src/lib/composer';
+import { WEIGHTS, CERTIFICATE_KEYS } from '../../src/lib/composer/benchmark';
+import type { Track } from '../../src/lib/composer/types';
 import { ComposerLearner } from '../../src/lib/composer/learner';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -84,5 +86,25 @@ describe('composer benchmark (objective grading)', () => {
     const sc = scoreTrack(t);
     expect(sc.metrics.find((m) => m.key === 'spelling')!.value).toBeGreaterThanOrEqual(0.99);
     expect(sc.metrics.find((m) => m.key === 'melody')!.value).toBeGreaterThanOrEqual(0.99);
+  });
+
+  it('reports certificates but does not weight them (no construction inflation)', () => {
+    for (const k of CERTIFICATE_KEYS) expect(WEIGHTS[k]).toBe(0);
+    const qualitySum = Object.entries(WEIGHTS)
+      .filter(([k]) => !CERTIFICATE_KEYS.includes(k))
+      .reduce((s, [, w]) => s + w, 0);
+    expect(qualitySum).toBeCloseTo(1, 3);
+  });
+
+  it('halves the score when a certificate fails (certificates gate, not score)', () => {
+    const t = compose({ style: 'steely-dan', seed: 3, bars: 8 });
+    const good = scoreTrack(t);
+    const broken = {
+      ...t,
+      events: t.events.map((e, i) => (e.part === 'keys' && i % 7 === 0 ? { ...e, pitch: e.pitch + 1 } : e)),
+    } as Track;
+    const bad = scoreTrack(broken);
+    expect(bad.metrics.find((m) => m.key === 'spelling')!.value).toBeLessThan(0.99);
+    expect(bad.total).toBeLessThan(good.total);
   });
 });
