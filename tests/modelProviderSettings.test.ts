@@ -38,7 +38,7 @@ describe('model provider profile switching', () => {
     const local = ps.find((p) => p.id === 'local')!;
     expect(local.baseUrl).toBe('http://localhost:11434/v1');
     expect(local.model).toBe('qwen-local');
-    expect(local.label).toBe('Local (disabled)');
+    expect(local.label).toBe('Local (configured)');
   });
 
   it('switches the live provider endpoint between local and api', () => {

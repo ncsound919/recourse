@@ -496,18 +496,19 @@ async function forgeChat(system: string, user: string, temperature = 0.1): Promi
   error?: string;
 }> {
   const cfg = forgeConfig();
-  // Resolve which shared-provider profile this endpoint maps to. Explicit
-  // FORGE_MODEL_* wins; otherwise match by base URL so API_MODEL_* (Phoenix
-  // Grove) and LOCAL_MODEL_* keep working exactly as before.
-  let profileId: 'api' | 'local' = 'api';
-  if (process.env.FORGE_MODEL_BASE_URL && cfg.baseUrl === (process.env.FORGE_MODEL_BASE_URL || '').replace(/\/+$/, '')) {
-    profileId = process.env.FORGE_MODEL_BASE_URL.includes(':11434') ? 'local' : 'api';
-  }
-  const { chatCompleteProfile } = await import('./modelProvider.js');
-  const res = await chatCompleteProfile(profileId, [
+  // Explicit FORGE_MODEL_BASE_URL wins (profile matched by base URL). Otherwise
+  // the forge joins the shared generation policy: local-first (colibri) with an
+  // automatic API fallback.
+  const explicitForge = Boolean(process.env.FORGE_MODEL_BASE_URL)
+    && cfg.baseUrl === (process.env.FORGE_MODEL_BASE_URL || '').replace(/\/+$/, '');
+  const { chatComplete, chatCompleteProfile } = await import('./modelProvider.js');
+  const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
     { role: 'system', content: system },
     { role: 'user', content: user },
-  ], { temperature });
+  ];
+  const res = explicitForge
+    ? await chatCompleteProfile((process.env.FORGE_MODEL_BASE_URL || '').includes(':11434') ? 'local' : 'api', messages, { temperature })
+    : await chatComplete(messages, { temperature });
   if (!res.ok || res.content === null) {
     return {
       ok: false,

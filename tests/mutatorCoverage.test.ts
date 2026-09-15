@@ -2,13 +2,16 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Episode } from '../src/lib/memory/types';
 
 const h = vi.hoisted(() => ({
-  chatCompleteProfile: vi.fn(),
+  chatComplete: vi.fn(),
   lintSource: vi.fn(),
 }));
 
 vi.mock('../src/lib/modelProvider', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/lib/modelProvider')>();
-  return { ...actual, chatCompleteProfile: h.chatCompleteProfile };
+  // mutator.ts uses the generation entry `chatComplete`; older callers used
+  // `chatCompleteProfile`. Point both at the same stub so the coverage tests
+  // drive one mock regardless of which entry the code calls.
+  return { ...actual, chatComplete: h.chatComplete, chatCompleteProfile: h.chatComplete };
 });
 vi.mock('../src/lib/lintGate', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/lib/lintGate')>();
@@ -57,7 +60,7 @@ class CaptureStore implements GeneRegistryStore {
 
 describe('mutator.ts coverage', () => {
   beforeEach(() => {
-    h.chatCompleteProfile.mockReset();
+    h.chatComplete.mockReset();
     h.lintSource.mockReset();
     // lintSource is synchronous in the real module -> use mockReturnValue.
     h.lintSource.mockReturnValue({ available: true, clean: true, errors: 0, warnings: 0, details: [] });
@@ -172,7 +175,7 @@ describe('mutator.ts coverage', () => {
     }
 
     it('promotes via api_model when the model returns a valid gene', async () => {
-      h.chatCompleteProfile.mockResolvedValue(ok(JSON.stringify({
+      h.chatComplete.mockResolvedValue(ok(JSON.stringify({
         source: VALID_SOURCE,
         testVectors: [1, 2],
         description: 'doubler',
@@ -188,7 +191,7 @@ describe('mutator.ts coverage', () => {
     });
 
     it('lands pending_approval under manual_approval policy', async () => {
-      h.chatCompleteProfile.mockResolvedValue(ok(JSON.stringify({
+      h.chatComplete.mockResolvedValue(ok(JSON.stringify({
         source: VALID_SOURCE, testVectors: [1], description: 'd',
       })));
       const store = new CaptureStore();
@@ -199,7 +202,7 @@ describe('mutator.ts coverage', () => {
     });
 
     it('rejects when the model gene fails verification', async () => {
-      h.chatCompleteProfile.mockResolvedValue(ok(JSON.stringify({
+      h.chatComplete.mockResolvedValue(ok(JSON.stringify({
         source: UNDEFINED_SOURCE, testVectors: [1], description: 'd',
       })));
       const store = new CaptureStore();
@@ -212,7 +215,7 @@ describe('mutator.ts coverage', () => {
     });
 
     it('falls back to deterministic synthesizer when the model is offline', async () => {
-      h.chatCompleteProfile.mockResolvedValue(fail);
+      h.chatComplete.mockResolvedValue(fail);
       const store = new CaptureStore();
       setActivePolicy('auto_promote');
       const res = await evolve(store, { domain: 'coding', instructions: 'lexical density' });
@@ -224,7 +227,7 @@ describe('mutator.ts coverage', () => {
     it.each(['math', 'biotech', 'systemic'])(
       'uses the %s deterministic fallback synthesizer branch',
       async (domain) => {
-        h.chatCompleteProfile.mockResolvedValue(fail);
+        h.chatComplete.mockResolvedValue(fail);
         const store = new CaptureStore();
         setActivePolicy('auto_promote');
         const res = await evolve(store, { domain, instructions: 'some instructions' });
@@ -236,7 +239,7 @@ describe('mutator.ts coverage', () => {
 
     it('falls back when the model returns an unparsable JSON block', async () => {
       // extractJsonBlock finds a '{' but JSON.parse throws -> parsed stays null.
-      h.chatCompleteProfile.mockResolvedValue(ok('here is {"source": not valid json'));
+      h.chatComplete.mockResolvedValue(ok('here is {"source": not valid json'));
       const store = new CaptureStore();
       setActivePolicy('auto_promote');
       const res = await evolve(store, { domain: 'coding', instructions: 'x' });
@@ -244,7 +247,7 @@ describe('mutator.ts coverage', () => {
     });
 
     it('falls back when the model returns non-JSON content', async () => {
-      h.chatCompleteProfile.mockResolvedValue(ok('no json here at all'));
+      h.chatComplete.mockResolvedValue(ok('no json here at all'));
       const store = new CaptureStore();
       setActivePolicy('auto_promote');
       const res = await evolve(store, { domain: 'coding', instructions: 'x' });
@@ -252,7 +255,7 @@ describe('mutator.ts coverage', () => {
     });
 
     it('falls back when the model returns too-short source', async () => {
-      h.chatCompleteProfile.mockResolvedValue(ok(JSON.stringify({ source: 'short', testVectors: [], description: '' })));
+      h.chatComplete.mockResolvedValue(ok(JSON.stringify({ source: 'short', testVectors: [], description: '' })));
       const store = new CaptureStore();
       setActivePolicy('auto_promote');
       const res = await evolve(store, { domain: 'coding', instructions: 'x' });
@@ -260,7 +263,7 @@ describe('mutator.ts coverage', () => {
     });
 
     it('throws when deterministic fallback is disabled and model is offline', async () => {
-      h.chatCompleteProfile.mockResolvedValue(fail);
+      h.chatComplete.mockResolvedValue(fail);
       process.env.ALLOW_DETERMINISTIC_FALLBACK = '0';
       try {
         const store = new CaptureStore();
@@ -271,7 +274,7 @@ describe('mutator.ts coverage', () => {
     });
 
     it('survives a model provider throw by using the fallback', async () => {
-      h.chatCompleteProfile.mockRejectedValue(new Error('boom'));
+      h.chatComplete.mockRejectedValue(new Error('boom'));
       const store = new CaptureStore();
       setActivePolicy('auto_promote');
       const res = await evolve(store, { domain: 'coding', instructions: 'x' });
@@ -279,7 +282,7 @@ describe('mutator.ts coverage', () => {
     });
 
     it('records failure-memory accounting when memory is provided', async () => {
-      h.chatCompleteProfile.mockResolvedValue(ok(JSON.stringify({
+      h.chatComplete.mockResolvedValue(ok(JSON.stringify({
         source: VALID_SOURCE, testVectors: [1], description: 'd',
       })));
       const store = new CaptureStore();
@@ -302,7 +305,7 @@ describe('mutator.ts coverage', () => {
     });
 
     it('handles synthesizeWithModel testVector edge cases', async () => {
-      h.chatCompleteProfile.mockResolvedValue(ok(JSON.stringify({
+      h.chatComplete.mockResolvedValue(ok(JSON.stringify({
         source: VALID_SOURCE,
         testVectors: ['[1,2,3]', 'not-json', 42],
         description: 'd',
@@ -312,7 +315,7 @@ describe('mutator.ts coverage', () => {
       const res = await evolve(store, { domain: 'math', instructions: 'x', targetToolName: 'mutate' });
       expect(res.success).toBe(true);
 
-      h.chatCompleteProfile.mockResolvedValue(ok(JSON.stringify({ source: VALID_SOURCE, description: 'd' })));
+      h.chatComplete.mockResolvedValue(ok(JSON.stringify({ source: VALID_SOURCE, description: 'd' })));
       const res2 = await evolve(store, { domain: 'math', instructions: 'x', targetToolName: 'mutate' });
       expect(res2.success).toBe(true);
       expect(store.saved[1].testVectors).toEqual(['sample_input']);

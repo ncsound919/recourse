@@ -4,7 +4,7 @@
 // The engine that actually produced a candidate is always recorded honestly.
 
 import crypto from 'crypto';
-import { chatCompleteProfile, extractJsonBlock } from '../lib/modelProvider';
+import { chatComplete, extractJsonBlock } from '../lib/modelProvider';
 import { lintSource } from '../lib/lintGate';
 import {
   avoidGuidance,
@@ -361,11 +361,11 @@ The function MUST be named '${toolName}' and exported via 'export function ${too
 It MUST NOT access DOM/window/process, write to disk, or call non-deterministic APIs (Math.random, Date.now) inside its body.
 Return ONLY valid JSON: {"description": "...", "source": "<the full javascript source>", "testVectors": ["...json strings..."]}`;
 
-  // Dream codegen routes to the API profile (Phoenix Grove / deepseek-v4-flash-0731).
-  // The 0.6B local model is too weak to produce sandbox-passing genes; routing
-  // the heavy synthesis work to the cloud model and reserving the local model
-  // for rephrase/classification yields a strictly higher crystalization rate.
-  const result = await chatCompleteProfile('api', [
+  // Dream codegen is a NON-AGENTIC generation path, so it uses the shared
+  // generation policy: local-first (e.g. colibri OLMoE) with an automatic
+  // fallback to the API profile when local is offline. Set
+  // RECOURSE_GENERATION_PROFILE=api to force the remote model here.
+  const result = await chatComplete([
     { role: 'system', content: systemInstruction },
     { role: 'user', content: `Architectural Instructions: ${instructions}\nDomain: ${domain}` },
   ], { temperature: 0.2, json: true });
