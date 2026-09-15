@@ -189,6 +189,32 @@ peer, not just a tool source.
   provenance surface under `/api/recourse/*` and folds recalls into skill
   matching.
 
+## Security testing bridge (hackingtool)
+
+Recourse indexes [Z4nzu/hackingtool](https://github.com/Z4nzu/hackingtool)
+(MIT, "all-in-one toolkit for **authorized** security testing") through
+`src/lib/hackingtoolBridge.ts` + `python/hackingtool_runner.py`, a stateless
+subprocess that reads one JSON command and returns one JSON result.
+
+Honesty + safety contract:
+
+- **Catalog awareness is read-only.** `GET /api/recourse/security/hackingtool/health|catalog|categories|recommend`
+  parse the checkout's real catalog YAML (`HACKINGTOOL_DIR`, default
+  `~/Downloads/hackingtool`). Nothing is installed, cloned or run; a missing
+  checkout or PyYAML reports `ok:false` honestly.
+- **Abuse is refused up front.** `classifySecurityIntent` rejects
+  flooding/DoS/jamming, malware/RAT/botnet, mass-targeting, credential
+  stuffing and mass phishing before any lookup, with an authorized alternative
+  where one exists. Recommendations exclude the out-of-scope catalog
+  categories (`ddos`, `remote_administration`, `phishing_attack`,
+  `payload_creator`) by default.
+- **The one executing path is fail-closed.** `POST /api/recourse/security/hackingtool/engagement`
+  requires `RECOURSE_API_SECRET`, `HACKINGTOOL_ENGAGE_ENABLED=1`,
+  `authorized:true`, a target matching `HACKINGTOOL_SCOPE_ALLOWLIST`, and an
+  allow-listed pipeline. It shells out to the `hackingtool` CLI in list form
+  (never a shell); the runner re-checks every guard. Disabled by default and
+  requires Linux/macOS for the CLI.
+
 ## Checks
 
 - `npm run lint` — typecheck
