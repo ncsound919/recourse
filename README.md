@@ -165,6 +165,30 @@ Recourse proxy routes live under `/api/recourse/kg/sidecar*`,
   `className` style is clean ternaries + data-driven tokens, so a 2,451-site
   mechanical rewrite was judged cosmetic churn with regression risk and not done.
 
+## Fleet integration (Axiom / OpenHub)
+
+Recourse is wired into the Axiom Agent and OpenHub as a two-way self-learning
+peer, not just a tool source.
+
+- **Fleet memory intake** — `POST /api/recourse/fleet/memory` lets external
+  agent loops (Axiom, OpenHub, Draymond) write real outcomes into Recourse's
+  durable vector memory. Guarded fail-closed (`RECOURSE_API_SECRET`); the pure
+  normalizer is `src/lib/fleetMemory.ts`. This is what makes the loop
+  bidirectional: Axiom posts every project-loop outcome here, so Recourse
+  self-learns across the fleet.
+- **Axiom bridge** — `src/lib/axiomBridge.ts` builds/verifies/self-hosts tools
+  via Axiom (`integrateAxiomTool`), reports bridge health (`axiomBridgeStatus`),
+  and hands Recourse's weak findings to Axiom to run a real repair project loop
+  (`dispatchAxiomRepair`, exposed as `POST /api/recourse/develop/axiom`).
+  Outbound calls present `AXIOM_API_TOKEN` or mint a JWT from the Keywire
+  `jwtSecret` (or the legacy `AXIOM_KEYS_FILE`); with neither they are honest
+  unauthenticated calls. Axiom only ever writes patches that clear its own
+  gates, and Recourse only applies fleet patches through its verified
+  patch-intake gate.
+- **OpenHub** proxies Recourse's status, synergy, registry, forge, learner and
+  provenance surface under `/api/recourse/*` and folds recalls into skill
+  matching.
+
 ## Checks
 
 - `npm run lint` — typecheck

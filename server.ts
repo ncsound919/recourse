@@ -203,6 +203,7 @@ import {
   executeToolInIsolate,
 } from './src/lib/isolatedSandbox.js';
 import { VectorMemory, openVectorMemory, MemoryKind } from './src/lib/vectorMemory.js';
+import { buildFleetMemoryEntry } from './src/lib/fleetMemory.js';
 
 // Intake / benchmark / readout subsystem
 import { SignalStore, DEFAULT_TOPIC_QUERIES, DEFAULT_RSS_FEEDS } from './src/intake/store.js';
@@ -1319,10 +1320,33 @@ function executeSelfRepair(
 }
 
 // API Routes
-import { axiomReachable, integrateAxiomTool } from './src/lib/axiomBridge.js';
+import { axiomReachable, axiomBridgeStatus, integrateAxiomTool, dispatchAxiomRepair } from './src/lib/axiomBridge.js';
 
 app.get('/api/recourse/axiom/status', async (_req, res) => {
-  res.json({ online: await axiomReachable() });
+  res.json(await axiomBridgeStatus());
+});
+
+/** Outbound: hand Recourse's weak findings to Axiom so it runs a real repair
+ *  project loop against this repo. Axiom's patches still land only through
+ *  Recourse's own verified patch-intake gate. */
+app.post('/api/recourse/develop/axiom', async (req, res) => {
+  try {
+    const body = req.body ?? {};
+    const dossier = computeHealthDossier(devDossierInput());
+    const findings = Array.isArray(body.findings) && body.findings.length
+      ? body.findings
+      : dossier.findings;
+    const result = await dispatchAxiomRepair({
+      findings,
+      targetDir: typeof body.targetDir === 'string' ? body.targetDir : undefined,
+      goal: typeof body.goal === 'string' ? body.goal : undefined,
+      maxIterations: Number(body.maxIterations) || undefined,
+    });
+    recordDev('axiom', result.ok, result.ok ? `axiom repair loop ${result.id ?? ''}` : `axiom failed: ${result.error}`, { driver: 'axiom' });
+    res.json({ success: result.ok, ...result });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 app.post('/api/recourse/axiom/build-tool', async (req, res) => {
@@ -1580,6 +1604,27 @@ app.get('/api/recourse/memory/recall', async (req, res) => {
     const hits = q ? await mem.recall(q, kind, topK) : [];
     res.json({ success: true, query: q, hits: hits.map((h) => ({ id: h.id, kind: h.kind, text: h.text.slice(0, 300), score: h.score })) });
   } catch (e: any) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// Fleet memory intake — external agent loops (Axiom, OpenHub, Draymond) write
+// their real outcomes into Recourse's durable vector memory so Recourse
+// self-learns across the fleet. Guarded fail-closed: this mutates durable state,
+// so it requires RECOURSE_API_SECRET. Text is the only thing indexed; a missing
+// or oversized payload is rejected, never silently truncated into a fake memory.
+app.post('/api/recourse/fleet/memory', async (req, res) => {
+  if (!requireMutationAuth(req, res)) return;
+  try {
+    const entry = buildFleetMemoryEntry(req.body ?? {});
+    if (!entry.ok) {
+      const status = entry.error?.includes('exceeds') ? 413 : 400;
+      return res.status(status).json({ success: false, error: entry.error });
+    }
+    const mem = await ensureVectorMemory();
+    await mem.remember(entry.kind!, entry.id!, entry.text!, entry.meta);
+    res.json({ success: true, indexed: 1, id: entry.id, kind: entry.kind, source: entry.meta?.source, status: await mem.status() });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e.message });
+  }
 });
 
 app.post('/api/recourse/policy', (req, res) => {

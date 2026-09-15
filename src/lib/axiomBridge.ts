@@ -1,9 +1,58 @@
+import fs from 'fs';
+import path from 'path';
+import crypto from 'crypto';
 import { executeTestSuite } from './executionSandbox.js';
 import { writeStatelessSelfHostedTool, verifySelfHostedEntry } from './selfHosting.js';
 import type { ToolDomain } from '../types.js';
 
 const AXIOM_URL = process.env.AXIOM_URL || 'http://127.0.0.1:3198';
 const TIMEOUT_MS = Number(process.env.AXIOM_TIMEOUT_MS || 180000);
+
+// ---------------------------------------------------------------------------
+// Auth — Axiom gates /api/* with an HS256 JWT (see Axiom src/server/auth.ts).
+// Recourse presents a pre-minted AXIOM_API_TOKEN when configured, otherwise
+// mints a short-lived token from the Keywire jwtSecret (the same secret Axiom
+// signs with). With neither, calls go out unauthenticated (Axiom answers 401;
+// that is reported honestly, never masked).
+// ---------------------------------------------------------------------------
+
+function axiomApiToken(): string {
+  const explicit = process.env.AXIOM_API_TOKEN;
+  if (explicit && explicit.trim()) return explicit.trim();
+
+  const keysFile = process.env.KEYWIRE_KEYS_FILE
+    || process.env.AXIOM_KEYS_FILE
+    || (process.env.UPLIFT_ROOT
+      ? path.join(process.env.UPLIFT_ROOT, 'Keywire', 'data', 'keywire-keys.json')
+      : '');
+  if (!keysFile || !fs.existsSync(keysFile)) return '';
+  try {
+    const parsed = JSON.parse(fs.readFileSync(keysFile, 'utf-8').replace(/^\uFEFF/, ''));
+    const secret = typeof parsed?.jwtSecret === 'string' ? parsed.jwtSecret : '';
+    if (!secret) return '';
+    const now = Math.floor(Date.now() / 1000);
+    const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+    const payload = Buffer.from(JSON.stringify({
+      sub: 'recourse-bridge',
+      iss: 'axiom-agent',
+      aud: 'axiom-api',
+      iat: now,
+      exp: now + 12 * 3600,
+    })).toString('base64url');
+    const sig = crypto.createHmac('sha256', secret).update(`${header}.${payload}`).digest('base64url');
+    return `${header}.${payload}.${sig}`;
+  } catch {
+    return '';
+  }
+}
+
+function axiomHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  const token = axiomApiToken();
+  return {
+    ...extra,
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+}
 
 export async function axiomReachable(): Promise<boolean> {
   const controller = new AbortController();
@@ -12,6 +61,20 @@ export async function axiomReachable(): Promise<boolean> {
     const res = await fetch(`${AXIOM_URL}/api/health`, { signal: controller.signal });
     return res.ok;
   } catch { return false; } finally { clearTimeout(timer); }
+}
+
+export interface AxiomBridgeStatus {
+  online: boolean;
+  url: string;
+  auth: 'token' | 'keywire' | 'none';
+}
+
+/** Reachability + auth posture for the Axiom bridge. Never throws. */
+export async function axiomBridgeStatus(): Promise<AxiomBridgeStatus> {
+  const auth: AxiomBridgeStatus['auth'] = process.env.AXIOM_API_TOKEN?.trim()
+    ? 'token'
+    : axiomApiToken() ? 'keywire' : 'none';
+  return { online: await axiomReachable(), url: AXIOM_URL, auth };
 }
 
 export async function integrateAxiomTool(
@@ -23,7 +86,7 @@ export async function integrateAxiomTool(
   // 1. Build via Axiom
   const buildRes = await fetch(`${AXIOM_URL}/api/axiom/build`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: axiomHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ name, domain, prompt, refSuite }),
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
@@ -51,4 +114,66 @@ export async function integrateAxiomTool(
   // 4. Final verify-entry check
   await verifySelfHostedEntry(writeRes.entry);
   return { ok: true, selfHosted: writeRes.entry };
+}
+
+// ---------------------------------------------------------------------------
+// Outbound repair — Recourse hands Axiom its weak findings and Axiom runs a
+// real project loop to repair the target repo. Axiom only ever writes patches
+// that clear its own QA/verify/test gates; the returned loop is polled by the
+// caller. Honest failure when Axiom is offline/unauthenticated.
+// ---------------------------------------------------------------------------
+
+export interface AxiomWeakFinding {
+  slug?: string;
+  name?: string;
+  weaknessScore?: number;
+  reasons?: string[];
+  proposedAction?: string;
+}
+
+export interface AxiomRepairResult {
+  ok: boolean;
+  id?: string;
+  maxIterations?: number;
+  status?: number;
+  error?: string;
+}
+
+export async function dispatchAxiomRepair(opts: {
+  findings: AxiomWeakFinding[];
+  targetDir?: string;
+  goal?: string;
+  maxIterations?: number;
+  timeoutMs?: number;
+}): Promise<AxiomRepairResult> {
+  const targetDir = opts.targetDir || process.env.RECOURSE_REPO || process.cwd();
+  const findings = (opts.findings ?? []).map((f) => ({
+    slug: f.slug,
+    name: f.name,
+    weaknessScore: f.weaknessScore,
+    reasons: f.reasons,
+    proposedAction: f.proposedAction,
+  }));
+  const goal = opts.goal
+    || `Repair the weaknesses Recourse reported and keep its regression suites green.`;
+  try {
+    const res = await fetch(`${AXIOM_URL}/api/recourse/bridge/repair`, {
+      method: 'POST',
+      headers: axiomHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ targetDir, findings, goal, maxIterations: opts.maxIterations ?? 6 }),
+      signal: AbortSignal.timeout(opts.timeoutMs ?? 30_000),
+    });
+    const data = await res.json().catch(() => ({})) as Record<string, unknown>;
+    if (!res.ok) {
+      return { ok: false, status: res.status, error: typeof data.error === 'string' ? data.error : `Axiom repair HTTP ${res.status}` };
+    }
+    return {
+      ok: true,
+      ...(typeof data.id === 'string' ? { id: data.id } : {}),
+      ...(typeof data.maxIterations === 'number' ? { maxIterations: data.maxIterations } : {}),
+      ...(typeof data.status === 'number' ? { status: data.status } : {}),
+    };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
 }

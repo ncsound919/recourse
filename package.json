@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src tests api server.ts mcp-server.ts",
     "self-improve": "tsx scripts/nightly-self-improvement.ts",
+    "ecos:propose": "tsx scripts/ecos-propose.ts",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "audit": "tsx scripts/autopilot-cron.ts --all",
