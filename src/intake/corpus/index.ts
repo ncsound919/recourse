@@ -107,6 +107,12 @@ export const DEFAULT_CORPUS_ROOTS: CorpusRoot[] = [
     project: 'hemp-os',
     root: 'C:\\Users\\User\\Downloads\\Uplift\\02_Pillars\\Overlay Science\\Biotech\\Hemp-OS-main',
   },
+  // BlackMind: biotech AI Studio demo — its deterministic bioinformatics cores
+  // (sequence analyzer, CRISPR designer) and scientific docs feed grounding.
+  {
+    project: 'blackmind',
+    root: 'C:\\Users\\User\\Downloads\\Uplift\\02_Pillars\\Overlay Science\\Biotech\\BlackMind-main',
+  },
   // BB-Tech: basketball → biotech translation core (real domain knowledge:
   // knowledge bank CSVs, translation engine, scoring/mapping JSON).
   {
@@ -147,6 +153,13 @@ export const DEFAULT_CORPUS_ROOTS: CorpusRoot[] = [
   {
     project: 'overlay-science-docs',
     root: 'C:\\Users\\User\\Downloads\\Uplift\\02_Pillars\\Overlay Science\\docs',
+  },
+  // Truck Buddy: real logistics methods + tests (load boards, compliance,
+  // dispatch prediction, mechanic budget/search). Source for the logistics
+  // synergy sector; only pure/tested functions are indexed as methods.
+  {
+    project: 'truck-buddy',
+    root: 'C:\\Users\\User\\Downloads\\Truck Buddy\\web',
   },
 ];
 

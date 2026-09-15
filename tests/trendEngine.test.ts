@@ -90,6 +90,16 @@ describe('trend engine: momentum + cross-domain', () => {
     expect(lc.significant).toBe(true);
     expect(Math.abs(lc.bestLag)).toBeGreaterThan(0);
   });
+
+  it('cross-correlation reports a Fisher-z p-value and requires enough points', () => {
+    const a = flatSeries([1, 2, 3, 4, 5, 6, 7, 8], 'a', 'A');
+    const b = flatSeries([1, 2, 4, 3, 5, 7, 6, 9], 'b', 'B');
+    const lc = laggedCorrelation(a, b, 2);
+    expect(lc.pValue ?? 1).toBeLessThan(0.05);
+    // Tiny series: n<=3 cannot be significant.
+    const tiny = laggedCorrelation(flatSeries([1, 2, 3], 'x', 'X'), flatSeries([3, 2, 1], 'y', 'Y'), 1);
+    expect(tiny.significant).toBe(false);
+  });
 });
 
 describe('trend engine: hypothesis generation (templates, deterministic)', () => {

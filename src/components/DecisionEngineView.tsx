@@ -38,6 +38,7 @@ export const DecisionEngineView: React.FC<DecisionEngineViewProps> = ({
   });
   const [loading, setLoading] = useState<boolean>(true);
   const [lastExecutionMsg, setLastExecutionMsg] = useState<string | null>(null);
+  const [synergyMeta, setSynergyMeta] = useState<{ source: 'map' | 'none'; manifestHash?: string } | null>(null);
 
   const fetchDecision = async () => {
     try {
@@ -47,6 +48,9 @@ export const DecisionEngineView: React.FC<DecisionEngineViewProps> = ({
         setDecision(res.decision);
         if (res.decision.weights) {
           setWeights(res.decision.weights);
+        }
+        if (res.synergy) {
+          setSynergyMeta(res.synergy);
         }
       }
     } catch (e) {
@@ -180,6 +184,23 @@ export const DecisionEngineView: React.FC<DecisionEngineViewProps> = ({
           <div className="mt-4 p-3 bg-emerald-950/60 border border-emerald-800/60 rounded-xl text-xs font-mono text-emerald-300 flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
             <span>{lastExecutionMsg}</span>
+          </div>
+        )}
+
+        {decision && synergyMeta && (
+          <div className="mt-4 text-[11px] font-mono text-slate-400">
+            Cross-domain synergy source:{' '}
+            <span className={synergyMeta.source === 'map' ? 'text-emerald-400' : 'text-amber-400'}>
+              {synergyMeta.source}
+            </span>
+            {synergyMeta.manifestHash ? (
+              <>
+                {' '}· manifest <span className="text-slate-300">{synergyMeta.manifestHash.slice(0, 12)}</span>
+              </>
+            ) : null}
+            {synergyMeta.source === 'none' ? (
+              <span className="text-amber-400"> — no synergy map read, factor is honestly 0</span>
+            ) : null}
           </div>
         )}
       </div>

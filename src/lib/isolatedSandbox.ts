@@ -23,7 +23,15 @@
 import { createRequire } from 'node:module';
 import { prepareExecutableCode } from './executionSandbox';
 
-const require = createRequire(import.meta.url);
+// createRequire needs a real URL/path. In the esbuild CJS bundle `import.meta`
+// is empty (undefined.url) — fall back to __filename (CJS) or cwd so the module
+// initializes instead of crashing boot with ERR_INVALID_ARG_VALUE.
+const _importMetaUrl: string | undefined =
+  typeof import.meta !== 'undefined' && import.meta.url ? import.meta.url : undefined;
+const require =
+  typeof __filename !== 'undefined'
+    ? createRequire(__filename)
+    : createRequire(_importMetaUrl ?? process.cwd());
 
 let _ivm: any = null;
 let _checked = false;

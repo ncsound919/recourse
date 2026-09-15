@@ -207,7 +207,14 @@ function errMsg(err: unknown): string {
  *  opaque argv and characters like `&`, `|`, backticks, `$()` can never be
  *  interpreted by a shell. There is intentionally NO shell in this module. */
 
-const THIS_MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+const _importMetaUrl: string | undefined =
+  typeof import.meta !== 'undefined' && import.meta.url ? import.meta.url : undefined;
+const THIS_MODULE_DIR =
+  typeof __filename !== 'undefined'
+    ? path.dirname(__filename)
+    : _importMetaUrl
+      ? path.dirname(fileURLToPath(_importMetaUrl))
+      : process.cwd();
 const REPO_ROOT = path.resolve(THIS_MODULE_DIR, '..', '..');
 
 /** The bundled npm CLI lives next to node.exe for official installs. */

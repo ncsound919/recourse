@@ -26,6 +26,7 @@ export { CorpusView } from './CorpusView';
 export { SkillsView } from './SkillsView';
 export { WebDownloadView } from './WebDownloadView';
 export { RecourseVisualizer3D } from './RecourseVisualizer3D';
+export { DataVizView } from './DataVizView';
 export { SettingsView } from './SettingsView';
 
 export { GamepadIndicator } from './GamepadIndicator';

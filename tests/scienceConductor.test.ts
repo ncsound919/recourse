@@ -57,7 +57,12 @@ describe('science conductor', () => {
   it('fallback findings are labeled local_deterministic with provenance', async () => {
     const cycle = await runScienceCycle();
     if (cycle.experimentMode === 'local_deterministic') {
-      for (const f of cycle.findings) {
+      // The local fallback (ABM-lite) is one of several finding sources; the
+      // evidence phase also emits real deterministicResearch findings with
+      // their own provenance. Assert on the fallback findings specifically.
+      const fallbackFindings = cycle.findings.filter((f) => /abmCancerSim/.test(f.provenance));
+      expect(fallbackFindings.length).toBeGreaterThan(0);
+      for (const f of fallbackFindings) {
         expect(f.mode).toBe('local_deterministic');
         expect(f.provenance).toMatch(/abmCancerSim/);
       }

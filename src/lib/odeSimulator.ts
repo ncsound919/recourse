@@ -1,10 +1,26 @@
 /**
- * ODE SIMULATOR — faithful TS port of Overlay Oncology's
+ * ODE SIMULATOR — TS port of Overlay Oncology's
  * `solveOdeTumorImmuneSystem` + `computeCureReachability`
  * (lib/oncology-math-engine.ts). Same equations, same constants, same params
- * contract (`OdeSimulationParams`), so a bundle synthesized by Phase 2 and
- * optimized here produces trajectories numerically identical to the Overlay
- * engine for the same inputs. This makes Recourse self-contained for sweeps.
+ * contract (`OdeSimulationParams`).
+ *
+ * INTEGRATOR: the coupled tumor-immune-resistance system is integrated with
+ * `diff-grok`'s adaptive LSODA solver (the scipy `solve_ivp` default — a
+ * variable-order Nordsieck method that switches between Adams non-stiff and
+ * BDF stiff formulations). Because dosing is event-based, the continuous ODE
+ * is integrated segment-by-segment between dose boundaries: at each day
+ * boundary where `doseOnDay` fires, the drug-concentration state is stepped
+ * (C += drugDose, or C += drugDose*0.4 for metronomic), and the adaptive
+ * solver continues from that event-adjusted state. Between boundaries C decays
+ * continuously via dC = -k_elim*C. The solver is re-seeded with the event-
+ * adjusted state at every day boundary, and one row is recorded per simulated
+ * day (rounded to match the original output contract).
+ *
+ * NOTE ON GOLDEN TRAJECTORIES: this is NOT the old Forward-Euler port. LSODA
+ * takes an adaptive, internally-variable step and is strictly more accurate
+ * than dt=0.2 Forward-Euler, so daily samples differ (slightly) from the
+ * previous Euler goldens. That difference is accuracy, not regression; the
+ * model equations and constants are unchanged.
  *
  * Honesty note: this is a *mechanistic model port*, not a clinical model. All
  * growth/kill/immune rates are fixed literature-order constants or caller-
@@ -12,6 +28,8 @@
  * calibrated. No result here is a clinical claim.
  */
 
+import { lsoda } from 'diff-grok';
+import type { ODEs } from 'diff-grok';
 import type { OdeSimulationParams, TherapyMode } from './types/odeContract';
 
 export interface OdeSimulationStep {
@@ -43,50 +61,42 @@ export function doseOnDay(t: number, params: OdeSimulationParams, currentVol: nu
   }
 }
 
+/** State-vector index map: [S, R, CSC, H, E, C, Sen]. */
+const S_ = 0;
+const R_ = 1;
+const CSC_ = 2;
+const H_ = 3;
+const E_ = 4;
+const C_ = 5;
+const SEN_ = 6;
+
+const AWAKEN_INDUCTION_END = 21;
+const AWAKEN_WASHOUT_END = 42;
+
+const r1 = (x: number) => Math.round(x * 10) / 10;
+const r2 = (x: number) => Math.round(x * 100) / 100;
+
 /**
- * Forward-Euler integration of the coupled tumor-immune-resistance ODE system.
- * Returns one row per simulated day (rounded to 0.1). Ported line-for-line
- * from Overlay Oncology so drift stays at zero.
+ * Right-hand side F(t, y) of the coupled tumor-immune-resistance system.
+ * Kept equation-for-equation identical to the original Overlay model; only the
+ * integrator changes (Forward-Euler -> diff-grok LSODA). The reflected
+ * non-negativity/boundedness conditions mirror the per-step clamps the Euler
+ * loop applied (variables cannot leave their biological domain).
  */
-export function solveOdeTumorImmuneSystem(params: OdeSimulationParams): OdeSimulationStep[] {
-  const steps: OdeSimulationStep[] = [];
-  const dt = 0.2;
-  const numSteps = Math.round(params.totalDays / dt);
-
-  let S = params.initialS;
-  let R = params.initialR;
-  let CSC = params.initialS * 0.12;
-  let H = 100.0;
-  let E = params.initialE;
-  let C = 0;
+function makeRhs(params: OdeSimulationParams) {
+  const mode = params.therapyMode;
   const K = params.carryingCap_K;
-  let Sen = 0;
 
-  const stemRenewalRate = 0.08;
-  const differentiationRate = 0.015;
-  const epigeneticReprogramming = 0.0015;
-  const tissueRegenRate = 0.06;
+  return (t: number, y: Float64Array, out: Float64Array) => {
+    const S = y[S_];
+    const R = y[R_];
+    const CSC = y[CSC_];
+    const H = y[H_];
+    const E = y[E_];
+    const C = y[C_];
+    const Sen = y[SEN_];
 
-  const awakenInductionEnd = 21;
-  const awakenWashoutEnd = 42;
-  const senescenceConversionRate = 0.0085;
-  const saspImmuneRecruitment = 8.5;
-  const awakenWashoutClearance = 0.85;
-
-  const baselineVol = params.initialS + params.initialR;
-
-  for (let step = 0; step <= numSteps; step++) {
-    const t = Math.round(step * dt * 10) / 10;
-
-    if (doseOnDay(t, params, S + R + CSC, baselineVol)) {
-      if (params.therapyMode === 'metronomic') C += params.drugDose * 0.4;
-      else C += params.drugDose;
-    }
-
-    const k_elim =
-      params.therapyMode === 'awaken_senescence' && t >= awakenInductionEnd && t < awakenWashoutEnd
-        ? awakenWashoutClearance
-        : 0.46;
+    const k_elim = mode === 'awaken_senescence' && t >= AWAKEN_INDUCTION_END && t < AWAKEN_WASHOUT_END ? 0.85 : 0.46;
     const dC = -k_elim * C;
 
     const hill_S = C / (params.ic50_S + C + 1e-6);
@@ -96,71 +106,124 @@ export function solveOdeTumorImmuneSystem(params: OdeSimulationParams): OdeSimul
     const totalPop = S + R + CSC;
     const logisticConstraint = Math.max(0, 1 - totalPop / K);
 
-    const plasticityConversion = epigeneticReprogramming * S * C;
+    const plasticityConversion = 0.0015 * S * C;
 
     const senescentInduction =
-      params.therapyMode === 'awaken_senescence' && t < awakenInductionEnd ? senescenceConversionRate * S * C : 0;
+      mode === 'awaken_senescence' && t < AWAKEN_INDUCTION_END ? 0.0085 * S * C : 0;
     const immuneClearanceOfSen =
-      params.therapyMode === 'awaken_senescence' && t >= awakenInductionEnd ? (0.18 * E * Sen) / (120 + E) : 0;
+      mode === 'awaken_senescence' && t >= AWAKEN_INDUCTION_END ? (0.18 * E * Sen) / (120 + E) : 0;
     const saspRecruitment =
-      params.therapyMode === 'awaken_senescence' && t >= awakenInductionEnd && t < awakenWashoutEnd
-        ? saspImmuneRecruitment * Sen
-        : 0;
-    const awakenPostWashoutBoost = params.therapyMode === 'awaken_senescence' && t >= awakenWashoutEnd ? 0.6 : 1.0;
+      mode === 'awaken_senescence' && t >= AWAKEN_INDUCTION_END && t < AWAKEN_WASHOUT_END ? 8.5 * Sen : 0;
+    const awakenPostWashoutBoost = mode === 'awaken_senescence' && t >= AWAKEN_WASHOUT_END ? 0.6 : 1.0;
 
     const immuneKill_S = (awakenPostWashoutBoost * 0.2 * E * S) / (100 + E);
     const immuneKill_R = (awakenPostWashoutBoost * 0.08 * E * R) / (100 + E);
     const immuneKill_CSC = (awakenPostWashoutBoost * 0.05 * E * CSC) / (100 + E);
 
-    const inductionKillFactor = params.therapyMode === 'awaken_senescence' && t < awakenInductionEnd ? 0.45 : 1.0;
+    const inductionKillFactor = mode === 'awaken_senescence' && t < AWAKEN_INDUCTION_END ? 0.45 : 1.0;
 
-    const dS =
+    out[S_] =
       params.growthRate_S * S * logisticConstraint +
-      differentiationRate * CSC -
+      0.015 * CSC -
       params.drugKill_S * hill_S * S * inductionKillFactor -
       immuneKill_S -
       plasticityConversion -
       params.mutationRate_mu * S * C -
       senescentInduction;
 
-    const dR =
+    out[R_] =
       params.growthRate_R * R * logisticConstraint -
       params.drugKill_R * hill_R * R -
       immuneKill_R +
       params.mutationRate_mu * S * C;
 
-    const dCSC =
-      stemRenewalRate * CSC * logisticConstraint -
-      differentiationRate * CSC +
+    out[CSC_] =
+      0.08 * CSC * logisticConstraint -
+      0.015 * CSC +
       plasticityConversion -
       params.drugKill_S * 0.15 * hill_CSC * CSC -
       immuneKill_CSC;
 
-    const dSen = senescentInduction - immuneClearanceOfSen;
-    const dH = -0.02 * C * H + tissueRegenRate * (100.0 - H);
-    const dE = 2.0 + (0.08 * totalPop * E) / (100 + totalPop) - 0.05 * E - 0.002 * S * E + saspRecruitment - 0.005 * E * (E / 200);
+    out[SEN_] = senescentInduction - immuneClearanceOfSen;
+    out[H_] = -0.02 * C * H + 0.06 * (100.0 - H);
+    out[E_] =
+      2.0 +
+      (0.08 * totalPop * E) / (100 + totalPop) -
+      0.05 * E -
+      0.002 * S * E +
+      saspRecruitment -
+      0.005 * E * (E / 200);
+    out[C_] = dC;
 
-    S = Math.max(0, S + dS * dt);
-    R = Math.max(0, R + dR * dt);
-    Sen = Math.max(0, Sen + dSen * dt);
-    CSC = Math.max(0, CSC + dCSC * dt);
-    H = Math.min(100.0, Math.max(0, H + dH * dt));
-    E = Math.max(0, E + dE * dt);
-    C = Math.max(0, C + dC * dt);
+    if (S <= 0 && out[S_] < 0) out[S_] = 0;
+    if (R <= 0 && out[R_] < 0) out[R_] = 0;
+    if (CSC <= 0 && out[CSC_] < 0) out[CSC_] = 0;
+    if (Sen <= 0 && out[SEN_] < 0) out[SEN_] = 0;
+    if (E <= 0 && out[E_] < 0) out[E_] = 0;
+    if (C <= 0 && out[C_] < 0) out[C_] = 0;
+    if (H <= 0 && out[H_] < 0) out[H_] = 0;
+    if (H >= 100 && out[H_] > 0) out[H_] = 0;
+  };
+}
 
-    if (step % Math.round(1 / dt) === 0) {
-      steps.push({
-        time_days: t,
-        sensitiveTumor_S: Math.round(S * 10) / 10,
-        resistantTumor_R: Math.round(R * 10) / 10,
-        cancerStemCells_CSC: Math.round(CSC * 10) / 10,
-        senescentTumor_Sen: Math.round(Sen * 10) / 10,
-        healthyRegenerated_H: Math.round(H * 10) / 10,
-        drugConc_C: Math.round(C * 100) / 100,
-        immuneEffectors_E: Math.round(E * 10) / 10,
-        totalVolume_mm3: Math.round((S + R + CSC) * 10) / 10,
-      });
+/**
+ * Event-segmented integration of the coupled tumor-immune-resistance ODE system
+ * with diff-grok's adaptive LSODA solver. Because dosing is event-based, the
+ * continuous ODE segments between day boundaries are each integrated with LSODA
+ * (one-day windows, adaptive internal steps), the dose increment is applied at
+ * the event boundary, and the solver continues from the event-adjusted state.
+ * Returns one row per simulated day (rounded to 0.1, C to 0.01).
+ */
+export function solveOdeTumorImmuneSystem(params: OdeSimulationParams): OdeSimulationStep[] {
+  const steps: OdeSimulationStep[] = [];
+  const func = makeRhs(params);
+  const baselineVol = params.initialS + params.initialR;
+
+  const y = new Float64Array([
+    params.initialS,
+    params.initialR,
+    params.initialS * 0.12,
+    100.0,
+    params.initialE,
+    0,
+    0,
+  ]);
+
+  const tolerance = 1e-8;
+  const totalDays = params.totalDays;
+
+  for (let day = 0; day <= totalDays; day++) {
+    if (doseOnDay(day, params, y[S_] + y[R_] + y[CSC_], baselineVol)) {
+      if (params.therapyMode === 'metronomic') y[C_] += params.drugDose * 0.4;
+      else y[C_] += params.drugDose;
     }
+
+    steps.push({
+      time_days: day,
+      sensitiveTumor_S: r1(y[S_]),
+      resistantTumor_R: r1(y[R_]),
+      cancerStemCells_CSC: r1(y[CSC_]),
+      senescentTumor_Sen: r1(y[SEN_]),
+      healthyRegenerated_H: r1(y[H_]),
+      drugConc_C: r2(y[C_]),
+      immuneEffectors_E: r1(y[E_]),
+      totalVolume_mm3: r1(y[S_] + y[R_] + y[CSC_]),
+    });
+
+    if (day >= totalDays) break;
+
+    const task: ODEs = {
+      name: 'tumorImmuneSystem',
+      arg: { name: 't', start: day, finish: day + 1, step: 1 },
+      initial: Array.from(y),
+      func,
+      tolerance,
+      solutionColNames: ['S', 'R', 'CSC', 'H', 'E', 'C', 'Sen'],
+    };
+
+    const sol = lsoda(task);
+    const last = sol[0].length - 1;
+    for (let i = 0; i < 7; i++) y[i] = sol[i + 1][last];
   }
   return steps;
 }

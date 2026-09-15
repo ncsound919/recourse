@@ -30,6 +30,11 @@ const ALL_DOMAINS: ToolDomain[] = [
 /**
  * Deterministically evaluates the entire system state and generates a scored candidate action list.
  * Computes utility: U(action) = sum(w_i * factor_i) with zero non-deterministic random variance.
+ *
+ * relationBasis: the cross-domain synergy factor is caller-supplied via
+ * `crossDomainSynergyByDomain` (build it with `domainScoresFromMap` from the real
+ * synergy map). It defaults to `{}`, which yields an honest `0` rather than a
+ * hardcoded constant.
  */
 export function evaluateGrowthDecision(
   registry: ToolEntry[],
@@ -37,7 +42,8 @@ export function evaluateGrowthDecision(
   weights: GrowthFactorWeights = DEFAULT_GROWTH_WEIGHTS,
   generation: number = 1,
   recentThoughts: DreamThought[] = [],
-  availableBlueprints: GitHubRepoBlueprint[] = []
+  availableBlueprints: GitHubRepoBlueprint[] = [],
+  crossDomainSynergyByDomain: Record<string, number> = {}
 ): GrowthDecisionReport {
   // 1. Calculate Domain Coverage and Deficits
   const domainCounts: Record<ToolDomain, number> = {
@@ -102,7 +108,7 @@ export function evaluateGrowthDecision(
     // Novelty is higher for frontier domains (quantum, neuro_symbolic, biotech)
     const frontierBoost = (domain === 'quantum_sim' || domain === 'neuro_symbolic' || domain === 'biotech') ? 0.85 : 0.6;
     const noveltyPotential = domainDeficit * frontierBoost;
-    const crossDomainSynergy = 0.4;
+    const crossDomainSynergy = crossDomainSynergyByDomain[domain] ?? 0;
 
     const rawFactorScores = {
       domainDeficit,
@@ -137,12 +143,13 @@ export function evaluateGrowthDecision(
   if (activeAnomalies.length > 0) {
     const topAnomaly = activeAnomalies[0];
     const vulnerabilityUrgency = Math.min(1.0, 0.6 + activeAnomalies.length * 0.15);
+    const crossDomainSynergy = crossDomainSynergyByDomain[topAnomaly.domain] ?? 0;
     const rawFactorScores = {
       domainDeficit: 0.1,
       vulnerabilityUrgency,
       passRateGap: 0.8,
       noveltyPotential: 0.2,
-      crossDomainSynergy: 0.3
+      crossDomainSynergy
     };
 
     const computedUtilityScore =
@@ -150,7 +157,7 @@ export function evaluateGrowthDecision(
       weights.vulnerabilityWeight * vulnerabilityUrgency +
       weights.passRateImprovement * 0.8 +
       weights.noveltyExploration * 0.2 +
-      weights.crossDomainSynergy * 0.3;
+      weights.crossDomainSynergy * crossDomainSynergy;
 
     candidateActions.push({
       id: `act_repair_${topAnomaly.toolName}_${generation}`,
@@ -172,12 +179,13 @@ export function evaluateGrowthDecision(
   if (unIngested.length > 0) {
     const topBp = unIngested[0];
     const domainDeficit = 1.0 - ((domainCounts[topBp.domain] || 0) / maxDomainCount);
+    const crossDomainSynergy = crossDomainSynergyByDomain[topBp.domain] ?? 0;
     const rawFactorScores = {
       domainDeficit,
       vulnerabilityUrgency: 0.1,
       passRateGap: 0.3,
       noveltyPotential: 0.9,
-      crossDomainSynergy: 0.5
+      crossDomainSynergy
     };
 
     const computedUtilityScore =
@@ -185,7 +193,7 @@ export function evaluateGrowthDecision(
       weights.vulnerabilityWeight * 0.1 +
       weights.passRateImprovement * 0.3 +
       weights.noveltyExploration * 0.9 +
-      weights.crossDomainSynergy * 0.5;
+      weights.crossDomainSynergy * crossDomainSynergy;
 
     candidateActions.push({
       id: `act_github_ingest_${topBp.id}_${generation}`,
@@ -205,12 +213,13 @@ export function evaluateGrowthDecision(
   // 5. Formulate Candidate Action D: Lucid Dream State Crystallization
   const crystallizableThought = recentThoughts.find(t => t.crystallizationReadiness >= 0.75);
   if (crystallizableThought) {
+    const crossDomainSynergy = crossDomainSynergyByDomain[crystallizableThought.domain] ?? 0;
     const rawFactorScores = {
       domainDeficit: 0.4,
       vulnerabilityUrgency: 0.1,
       passRateGap: 0.2,
       noveltyPotential: 0.95,
-      crossDomainSynergy: 0.85
+      crossDomainSynergy
     };
 
     const computedUtilityScore =
@@ -218,7 +227,7 @@ export function evaluateGrowthDecision(
       weights.vulnerabilityWeight * 0.1 +
       weights.passRateImprovement * 0.2 +
       weights.noveltyExploration * 0.95 +
-      weights.crossDomainSynergy * 0.85;
+      weights.crossDomainSynergy * crossDomainSynergy;
 
     candidateActions.push({
       id: `act_dream_crystallize_${crystallizableThought.id}`,
@@ -236,12 +245,13 @@ export function evaluateGrowthDecision(
 
   // 6. Formulate Candidate Action E: Cross-Domain Hybridization (Genetic Crossover)
   if (registry.length >= 2) {
+    const crossDomainSynergy = crossDomainSynergyByDomain['cyber_defense'] ?? 0;
     const rawFactorScores = {
       domainDeficit: 0.3,
       vulnerabilityUrgency: 0.05,
       passRateGap: 0.2,
       noveltyPotential: 0.8,
-      crossDomainSynergy: 0.95
+      crossDomainSynergy
     };
 
     const computedUtilityScore =
@@ -249,7 +259,7 @@ export function evaluateGrowthDecision(
       weights.vulnerabilityWeight * 0.05 +
       weights.passRateImprovement * 0.2 +
       weights.noveltyExploration * 0.8 +
-      weights.crossDomainSynergy * 0.95;
+      weights.crossDomainSynergy * crossDomainSynergy;
 
     candidateActions.push({
       id: `act_crossover_${generation}`,
@@ -260,7 +270,7 @@ export function evaluateGrowthDecision(
       rawFactorScores,
       computedUtilityScore: Number(computedUtilityScore.toFixed(4)),
       rank: 0,
-      deterministicRationale: `Maximum cross-domain synergy potential (0.95) with weights.crossDomainSynergy = ${weights.crossDomainSynergy}`,
+      deterministicRationale: `Cross-domain synergy potential (${crossDomainSynergy}) with weights.crossDomainSynergy = ${weights.crossDomainSynergy}`,
       suggestedParameters: {
         parentA: registry[0]?.name,
         parentB: registry[registry.length - 1]?.name,
@@ -287,7 +297,7 @@ export function evaluateGrowthDecision(
     targetDomain: 'coding',
     title: 'Baseline Architectural Expansion: Coding',
     description: 'Autonomous standard gene evolution step.',
-    rawFactorScores: { domainDeficit: 0.5, vulnerabilityUrgency: 0.1, passRateGap: 0.1, noveltyPotential: 0.5, crossDomainSynergy: 0.2 },
+    rawFactorScores: { domainDeficit: 0.5, vulnerabilityUrgency: 0.1, passRateGap: 0.1, noveltyPotential: 0.5, crossDomainSynergy: 0 },
     computedUtilityScore: 0.5,
     rank: 1,
     deterministicRationale: 'Fallback baseline progression'

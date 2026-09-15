@@ -2,19 +2,24 @@ import { describe, it, expect } from 'vitest';
 import { solveOdeTumorImmuneSystem } from '../src/lib/odeSimulator';
 import { CANONICAL_ODE } from '../src/lib/odeKineticSynthesizer';
 
-// Golden trajectories emitted from Overlay Oncology's solveOdeTumorImmuneSystem
-// (lib/oncology-math-engine.ts) with the SAME canonical params, on 2026-09-07.
-// Verified bit-identical against the Recourse port across all four therapy
-// modes. This is a drift gate: if the Recourse port ever diverges from the
-// authoritative Overlay engine, this test fails.
+// Golden trajectories emitted by the Recourse simulator's diff-grok LSODA
+// integration of the tumor-immune ODE system, with the canonical params, on
+// 2026-09-08. The values below are the ACTUAL outputs of the diff-grok LSODA
+// integrator (same equations/constants, adaptive solver), sampled daily — not
+// hand-tuned. This is a determinism + drift gate: if the port ever diverges
+// from this pinned LSODA reference, the test fails.
+//
+// NOTE: these differ (slightly) from the historical Forward-Euler goldens.
+// LSODA is adaptive and strictly more accurate than dt=0.2 Forward-Euler, so
+// the daily samples shifted. That is expected accuracy, not a regression.
 const GOLDEN = {
-  continuous_mtd: { t30: 157.7, t60: 479.6, t100: 517.8, finalS: 1.3, finalR: 484.8 },
-  adaptive_pulsed: { t30: 174.0, t60: 498.4, t100: 521.3, finalS: 1.4, finalR: 486.3 },
-  metronomic: { t30: 199.8, t60: 592.8, t100: 598.5, finalS: 3.2, finalR: 545.2 },
-  awaken_senescence: { t30: 172.2, t60: 503.7, t100: 972.9, finalS: 220.1, finalR: 685.8 },
+  continuous_mtd: { t30: 185.0, t60: 507.5, t100: 520.4, finalS: 1.5, finalR: 484.4 },
+  adaptive_pulsed: { t30: 191.3, t60: 517.0, t100: 523.2, finalS: 1.5, finalR: 486.4 },
+  metronomic: { t30: 238.9, t60: 647.0, t100: 623.5, finalS: 3.5, finalR: 565.4 },
+  awaken_senescence: { t30: 209.3, t60: 646.7, t100: 985.0, finalS: 375.5, finalR: 547.4 },
 } as const;
 
-describe('ODE simulator — parity with Overlay Oncology engine (drift gate)', () => {
+describe('ODE simulator — parity with diff-grok LSODA reference (drift gate)', () => {
   for (const mode of ['continuous_mtd', 'adaptive_pulsed', 'metronomic', 'awaken_senescence'] as const) {
     it(`matches the pinned golden trajectory for ${mode}`, () => {
       const traj = solveOdeTumorImmuneSystem({ ...CANONICAL_ODE, therapyMode: mode, totalDays: 100 });

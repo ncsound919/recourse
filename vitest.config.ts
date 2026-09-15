@@ -7,6 +7,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
+    exclude: ['**/node_modules/**', '**/dist/**', '**/recourse-fix-bundle/**'],
     // Real service probes in science/orchestrator tests need room under
     // full-suite parallel load (vitest default 5s was flaky).
     testTimeout: 30000,
@@ -14,8 +15,30 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
-      include: ['src/lib/**', 'src/lego/**', 'src/dream/**'],
-      exclude: ['src/**/*.d.ts', 'src/components/**', 'src/main.tsx', 'src/types.ts'],
+      include: ['src/lib/**', 'src/lego/**', 'src/dream/**', 'src/intake/**'],
+      exclude: [
+        'src/**/*.d.ts',
+        'src/components/**',
+        'src/main.tsx',
+        'src/types.ts',
+        // Pure type modules — no runtime to cover.
+        'src/dream/learner-types.ts',
+        'src/dream/mutator-types.ts',
+        'src/dream/types.ts',
+        'src/intake/types.ts',
+        'src/intake/corpus/types.ts',
+        'src/lego/types.ts',
+        'src/lib/types/**',
+        'src/lib/memory/types.ts',
+        // Pure type module — no runtime to cover.
+        'src/lib/synergy/types.ts',
+      ],
+      thresholds: {
+        lines: 80,
+        statements: 80,
+        functions: 80,
+        branches: 60,
+      },
     },
   },
   resolve: {

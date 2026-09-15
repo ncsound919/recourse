@@ -34,6 +34,7 @@ import {
   SkillsView,
   WebDownloadView,
   SettingsView,
+  DataVizView,
   GamepadVisualizer
 } from './components';
 import {
@@ -91,7 +92,8 @@ import {
    Library,
    Box,
    Settings,
-   Gamepad2
+   Gamepad2,
+   BarChart3
 } from 'lucide-react';
 
 // ================================================================
@@ -256,6 +258,7 @@ type TabKey =
   | 'skills'
   | 'web'
   | 'visualizer'
+  | 'dataviz'
   | 'gamepad'
   | 'settings';
 
@@ -416,6 +419,16 @@ const TABS: Array<{
     badge: () => (
       <span className="px-1.5 py-0.2 bg-indigo-950 text-indigo-300 text-[10px] rounded border border-indigo-800 font-bold">
         LIVE
+      </span>
+    ),
+  },
+  {
+    key: 'dataviz',
+    label: 'DATA VIZ SIDECAR',
+    icon: <BarChart3 className="w-4 h-4 text-cyan-400" />,
+    badge: () => (
+      <span className="px-1.5 py-0.2 bg-cyan-950 text-cyan-300 text-[10px] rounded border border-cyan-800 font-bold">
+        PY
       </span>
     ),
   },
@@ -1188,6 +1201,9 @@ export default function App() {
               >
                 <RecourseVisualizer3D status={status} />
               </Suspense>
+            )}
+            {activeTab === 'dataviz' && (
+              <DataVizView />
             )}
             {activeTab === 'settings' && (
               <SettingsView />

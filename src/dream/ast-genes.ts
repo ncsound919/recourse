@@ -89,7 +89,7 @@ const OP_CLASS: Record<string, BinOp[]> = {
 const ARITH_OPS: BinOp[] = ['+', '-', '*', '/', '%'];
 const ONE_ARG_FNS: BuiltinFn[] = ['Math.abs', 'Math.floor', 'Math.round', 'Math.sign', 'Math.sqrt', 'Math.log2', 'Math.ceil'];
 
-const VAR_RE = /^[a-z_$][\\w$]*$/i;
+const VAR_RE = /^[a-z_$][\w$]*$/i;
 const MAX_DEPTH = 14;
 const MAX_NODES = 400;
 
@@ -295,7 +295,7 @@ export function compileGeneIr(spec: GeneIrSpec): string {
     `  const __len = (a) => (Array.isArray(a) ? a.length : 0);`,
     `  return ${compileExpr(spec.body, new Set())};`,
     `}`,
-  ].join('\\n');
+  ].join('\n');
 }
 
 /* --------------------------- tree generation ----------------------- */

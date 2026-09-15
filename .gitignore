@@ -21,3 +21,22 @@ data/
 # composer outputs
 composer-out/
 composer-demo-*
+
+# runtime noise (logs, pid, db sidecar files)
+*.err
+*.out
+recourse.pid
+*-shm
+*-wal
+*.json.tmp
+*.json.bak
+coverage-baseline/
+coverage-run.txt
+
+# scratch backups / downloaded artifacts
+recourse-fix-bundle/
+prometheus/prometheus
+prometheus/prometheus.tar
+
+# local secret-import script (contains a hardcoded key — rotate + move to Keywire)
+scripts/kw-import-phoenix.js

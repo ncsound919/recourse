@@ -2,9 +2,11 @@
  * Model Provider — single-provider OpenAI-compatible chat-completions client.
  *
  * Phoenix Grove (https://api.pgsgrove.com/v1, model deepseek-v4-flash-0731)
- * is the sole generation target. The 'local' profile is preserved as an
- * option that reports offline when no LOCAL_MODEL_BASE_URL is set — there
- * is no in-process local model, the operator's CPU is too weak.
+ * is the remote generation target. The 'local' profile points at a local
+ * OpenAI-compatible endpoint (e.g. colibri serving OLMoE at
+ * http://127.0.0.1:8000/v1) and is used, local-first with API fallback, for
+ * non-agentic generation — see pickGenerationProfile. With no
+ * LOCAL_MODEL_BASE_URL set it reports offline honestly.
  *
  * Honesty contract: when the endpoint is unreachable this module reports
  * `online: false` with the underlying error. It NEVER fabricates a response,
@@ -127,14 +129,58 @@ export function activeProviderProfile(): ProviderProfileId {
 
 export type ChatRoute = 'local' | 'api' | 'auto';
 
-/** Always routes to 'api' — local generation is disabled. The 'auto' branch
- *  remains in the type so existing call sites compile but always resolves to api. */
+/** Preference for NON-AGENTIC GENERATION (dream, mutation, forge, chat,
+ *  reports, hypotheses). Agentic codegen (tool loop, project loop, compiler)
+ *  does NOT call chatComplete — it goes through the harness LLM / LiteLLM — so
+ *  this policy never changes agentic routing.
+ *
+ *  'auto' (default) prefers the local colibri model when one is configured,
+ *  and falls back to the API profile when local is offline or the prompt is too
+ *  large for a CPU-streamed model. Force with RECOURSE_GENERATION_PROFILE. */
+export type GenerationProfilePreference = 'auto' | 'local' | 'api';
+
+function generationPreference(): GenerationProfilePreference {
+  const v = (process.env.RECOURSE_GENERATION_PROFILE || 'auto').trim().toLowerCase();
+  return v === 'local' || v === 'api' ? v : 'auto';
+}
+
+/** Is a local endpoint configured? Empty base URL => local is unavailable. */
+export function localModelConfigured(): boolean {
+  return Boolean((process.env.LOCAL_MODEL_BASE_URL || '').trim());
+}
+
+/** Very large prompts on a disk-streamed CPU model can cost minutes of prefill,
+ *  so 'auto' sends those to the API profile. Tune with LOCAL_AUTO_MAX_CHARS. */
+function localAutoMaxChars(): number {
+  return Number(process.env.LOCAL_AUTO_MAX_CHARS || 12_000);
+}
+
+/** Resolve the profile for non-agentic generation. Never returns a profile
+ *  whose endpoint is unconfigured. */
+export function pickGenerationProfile(messages: ChatMessage[]): ProviderProfileId {
+  const pref = generationPreference();
+  if (pref === 'api') return 'api';
+  if (pref === 'local') return localModelConfigured() ? 'local' : 'api';
+  if (!localModelConfigured()) return 'api';
+  const chars = messages.reduce((n, m) => n + (m.content ? m.content.length : 0), 0);
+  if (chars > localAutoMaxChars()) return 'api';
+  // Always try local; chatComplete falls back to api if it turns out to be
+  // offline. (Do NOT gate on a cached offline probe here — that would pin
+  // generation to api forever after a single transient probe failure.)
+  return 'local';
+}
+
+/** Route to a specific profile. 'local'/'api' force it (honest: 'local' falls
+ *  back to api when no local endpoint is configured); 'auto' uses the
+ *  generation policy above. */
 export function pickProfileForRoute(
-  _route: ChatRoute,
-  _messages: ChatMessage[],
+  route: ChatRoute,
+  messages: ChatMessage[],
   _explicit: ProviderProfileId = activeProvider,
 ): ProviderProfileId {
-  return 'api';
+  if (route === 'local') return localModelConfigured() ? 'local' : 'api';
+  if (route === 'api') return 'api';
+  return pickGenerationProfile(messages);
 }
 
 export function providerProfiles(): Array<{ id: ProviderProfileId; label: string; baseUrl: string; model: string }> {
@@ -142,7 +188,7 @@ export function providerProfiles(): Array<{ id: ProviderProfileId; label: string
   const l = profileFor('local');
   return [
     { id: 'api', label: 'Phoenix Grove', baseUrl: a.baseUrl, model: a.model },
-    { id: 'local', label: 'Local (disabled)', baseUrl: l.baseUrl || 'http://127.0.0.1:8091/v1', model: l.model || 'no local model' },
+    { id: 'local', label: localModelConfigured() ? 'Local (configured)' : 'Local (not configured)', baseUrl: l.baseUrl || 'http://127.0.0.1:8000/v1', model: l.model || 'no local model' },
   ];
 }
 
@@ -294,7 +340,7 @@ export async function checkOnline(
   if (!baseUrl) {
     slot.online = false;
     slot.at = now;
-    slot.error = 'local model disabled';
+    slot.error = 'local model not configured';
     return false;
   }
   try {
@@ -331,15 +377,23 @@ export function providerStatuses(): Record<ProviderProfileId, ProviderStatus> {
   return { local: providerStatus('local'), api: providerStatus('api') };
 }
 
-/** Chat completion against the active provider profile. Backwards compatible.
- *  Returns a result object — it never throws for offline/HTTP conditions.
- *  Callers that need explicit profile targeting should use chatCompleteProfile
- *  or chatCompleteRoute instead. */
+/** Chat completion for a NON-AGENTIC generation call. Routes by the generation
+ *  policy (see pickGenerationProfile): local-first when a local model is
+ *  configured, with an automatic, honest fallback to the API profile when local
+ *  is offline. The result reports which profile actually answered via `model`.
+ *  Callers that need explicit targeting use chatCompleteProfile/chatCompleteRoute. */
 export async function chatComplete(
   messages: ChatMessage[],
   opts: ChatCompleteOptions = {},
 ): Promise<ChatCompleteResult> {
-  return chatCompleteFor(activeProvider, messages, opts);
+  const profile = pickGenerationProfile(messages);
+  const result = await chatCompleteFor(profile, messages, opts);
+  if (profile === 'local' && result.status !== 'online') {
+    // Local failed (offline or error) — fall back to the API profile for this
+    // generation. The returned result reports the profile that actually answered.
+    return chatCompleteFor('api', messages, opts);
+  }
+  return result;
 }
 
 /** Chat completion against a specific profile ('local' or 'api'), regardless of
