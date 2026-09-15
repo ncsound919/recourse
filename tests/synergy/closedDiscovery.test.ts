@@ -38,8 +38,10 @@ describe('closed discovery', () => {
     const a = discover(methods, problems);
     const b = discover([...methods].reverse(), [...problems].reverse());
     expect(a.manifest).toBe(b.manifest);
-    // Golden manifest: pins version + vocabulary + options + canonical ordering.
-    expect(a.manifest).toBe('aa3a019595812bd2074ca63fa6b57259ef6e3f53a2abd81d3900e4ed822956b3');
+    // Golden manifest: pins version + vocabulary + options + canonical ordering
+    // (and, since the alignment segment was added to the hash input, the
+    // candidate's alignment/farTransfer).
+    expect(a.manifest).toBe('5fa38be07547022813e1dc2ea10bdb37a658e3d5d0a37f286cc748fc719142c2');
   });
 
   it('excludes same-domain pairs', () => {
