@@ -10,18 +10,21 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { metrics } from '../lib/metrics';
-import { openPolicyEngine, type PolicyAction } from '../lib/policy';
-import { openApprovalStore } from '../lib/approvals';
+import { openPolicyEngine, type PolicyAction, type PolicyEngine } from '../lib/policy';
+import { openApprovalStore, type ApprovalStore } from '../lib/approvals';
 import { buildDockerComposePlan, runDeployPlan } from '../lib/deploy';
 
 export interface OpsRouterDeps {
   requireMutationAuth: (req: Request, res: Response) => boolean;
+  /** Shared engines so self-repair remediation and the ops routes agree. */
+  policy?: PolicyEngine;
+  approvals?: ApprovalStore;
 }
 
 export function createOpsRouter(deps: OpsRouterDeps): Router {
   const router = Router();
-  const policy = openPolicyEngine();
-  const approvals = openApprovalStore();
+  const policy = deps.policy ?? openPolicyEngine();
+  const approvals = deps.approvals ?? openApprovalStore();
 
   // --- Policy -------------------------------------------------------------
   router.get('/policy', (_req, res) => {

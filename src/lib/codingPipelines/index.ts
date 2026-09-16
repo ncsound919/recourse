@@ -29,8 +29,8 @@ export { deepseekPipeline } from './deepseekPipeline.js';
 export { axiomPipeline } from './axiomPipeline.js';
 export { settlementPipeline, settlementHarnessDir } from './settlementPipeline.js';
 
-export { opencodeBareDir, opencodeBareEntry, opencodeModel } from './opencodePipeline.js';
-export { deepseekBareDir, dshBin, deepseekProfile, writeWorkspaceOverlay } from './deepseekPipeline.js';
+export { opencodeBareDir, opencodeBareEntry, opencodeModel, opencodeProvider, opencodeRunEnv } from './opencodePipeline.js';
+export { deepseekBareDir, dshBin, deepseekProfile, deepseekLlmConfig, writeWorkspaceOverlay } from './deepseekPipeline.js';
 export { isGitCheckout, gitRevision, gitBranch, harnessProvenance } from './provenance.js';
 
 export { snapshotDir, diffSnapshots } from './snapshot.js';

@@ -46,6 +46,61 @@ export function opencodeModel(): string | undefined {
   );
 }
 
+interface OpenAiCompatibleProvider {
+  providerId: string;
+  modelId: string;
+  baseUrl: string;
+  apiKey: string;
+}
+
+/**
+ * Resolve an OpenAI-compatible provider from the environment. Defaults to the
+ * repo's own Phoenix Grove endpoint (API_MODEL_*) so the bare checkout can run
+ * without any local config; OPENCODE_* vars take precedence.
+ */
+export function opencodeProvider(): OpenAiCompatibleProvider | null {
+  const baseUrl = (process.env.OPENCODE_BASE_URL || process.env.API_MODEL_BASE_URL || '').trim();
+  const apiKey = (process.env.OPENCODE_API_KEY || process.env.API_MODEL_API_KEY || process.env.PHOENIX_API_KEY || '').trim();
+  if (!baseUrl || !apiKey) return null;
+
+  const explicit = opencodeModel();
+  let providerId = process.env.OPENCODE_PROVIDER_ID?.trim() || 'pgsgrove';
+  let modelId = (process.env.API_MODEL_NAME || '').trim() || 'deepseek-v4-flash-0731';
+  if (explicit?.includes('/')) {
+    providerId = explicit.split('/')[0];
+    modelId = explicit.split('/').slice(1).join('/');
+  } else if (explicit) {
+    modelId = explicit;
+  }
+  return { providerId, modelId, baseUrl: baseUrl.replace(/\/+$/, ''), apiKey };
+}
+
+/**
+ * Build the child environment for a bare run, injecting an
+ * OPENCODE_CONFIG_CONTENT provider block when no config is already supplied.
+ */
+export function opencodeRunEnv(extra?: Record<string, string>): Record<string, string> {
+  const env: Record<string, string> = { ...extra };
+  if (!process.env.OPENCODE_CONFIG_CONTENT && !process.env.OPENCODE_CONFIG) {
+    const p = opencodeProvider();
+    if (p) {
+      env.OPENCODE_CONFIG_CONTENT = JSON.stringify({
+        $schema: 'https://opencode.ai/config.json',
+        provider: {
+          [p.providerId]: {
+            npm: '@ai-sdk/openai-compatible',
+            name: 'Phoenix Grove',
+            options: { baseURL: p.baseUrl, apiKey: p.apiKey },
+            models: { [p.modelId]: { name: p.modelId } },
+          },
+        },
+        model: `${p.providerId}/${p.modelId}`,
+      });
+    }
+  }
+  return env;
+}
+
 export function extraArgs(): string[] {
   const raw = process.env.OPENCODE_EXTRA_ARGS?.trim();
   return raw ? raw.split(/\s+/).filter(Boolean) : [];
@@ -63,7 +118,7 @@ export async function runOpencodeLike(
   args.push(...extraArgs(), req.task);
   const res = await runProcess(command, args, {
     cwd: req.workdir,
-    env: req.env,
+    env: opencodeRunEnv(req.env),
     timeoutMs: req.timeoutMs,
   });
   return {
@@ -82,7 +137,9 @@ export async function runOpencodeLike(
 export async function runBareOpencode(req: PipelineRunRequest): Promise<PipelineRunResult> {
   const bareDir = opencodeBareDir();
   const pkgDir = path.join(bareDir, 'packages', 'opencode');
-  const model = opencodeModel();
+  const provider = opencodeProvider();
+  const explicit = opencodeModel();
+  const model = provider ? `${provider.providerId}/${provider.modelId}` : explicit?.includes('/') ? explicit : undefined;
   const args = [
     'run',
     '--cwd',
@@ -97,7 +154,7 @@ export async function runBareOpencode(req: PipelineRunRequest): Promise<Pipeline
   ];
   const res = await runProcess('bun', args, {
     cwd: bareDir,
-    env: req.env,
+    env: opencodeRunEnv(req.env),
     timeoutMs: req.timeoutMs,
   });
   return {

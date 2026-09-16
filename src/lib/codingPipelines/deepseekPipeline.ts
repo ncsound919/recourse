@@ -37,19 +37,41 @@ export function deepseekProfile(): string {
   return process.env.DEEPSEEK_PROFILE?.trim() || 'headless';
 }
 
+interface DeepseekLlmConfig {
+  baseUrl: string;
+  protocol: 'chat-completions' | 'messages';
+  model: string;
+  apiKey: string;
+}
+
+/**
+ * Resolve the DeepSeek route from the environment. Defaults to the repo's
+ * OpenAI-compatible Phoenix Grove endpoint when its API_MODEL_* vars are set,
+ * so the bare harness runs without editing its profile. DEEPSEEK_* overrides.
+ */
+export function deepseekLlmConfig(): DeepseekLlmConfig | null {
+  const baseUrl = (process.env.DEEPSEEK_BASE_URL || process.env.API_MODEL_BASE_URL || '').trim();
+  const apiKey = (process.env.DEEPSEEK_API_KEY || process.env.API_MODEL_API_KEY || process.env.PHOENIX_API_KEY || '').trim();
+  const model = (process.env.DEEPSEEK_MODEL || process.env.API_MODEL_NAME || '').trim();
+  if (!baseUrl || !apiKey || !model) return null;
+  const protocol = process.env.DEEPSEEK_PROTOCOL?.trim() === 'messages' ? 'messages' : 'chat-completions';
+  return { baseUrl: baseUrl.replace(/\/+$/, ''), protocol, model, apiKey };
+}
+
 /**
  * The harness composes its sandbox from `$DSH_HOME` profiles and pins the
  * filesystem workspace to the process cwd at boot; booting from an external
  * worktree fails with `FileSystem.access`. A `--patch` overlay pins the
  * workspace explicitly, so we boot from the checkout and point fs/sandbox at
- * the benchmark worktree. YAML strings are quoted so Windows drive letters and
- * spaces survive.
+ * the benchmark worktree. When a provider endpoint is configured it is pinned
+ * here too, so the same overlay carries workspace + model route. YAML strings
+ * are quoted so Windows drive letters and spaces survive.
  */
 export function writeWorkspaceOverlay(workdir: string): string {
   const file = path.join(os.tmpdir(), `dsh-workspace-${process.pid}-${Date.now()}.yml`);
   const wd = workdir.split(path.sep).join('/');
   const mode = process.env.DSH_PERMISSION_MODE?.trim() || 'workspace-write';
-  const content = [
+  const lines = [
     '- id: sandbox-policy',
     '  config:',
     `    mode: ${mode}`,
@@ -57,9 +79,22 @@ export function writeWorkspaceOverlay(workdir: string): string {
     '- id: fs-sandbox',
     '  config:',
     `    cwd: "${wd}"`,
-    '',
-  ].join('\n');
-  fs.writeFileSync(file, content, 'utf-8');
+  ];
+  const llm = deepseekLlmConfig();
+  if (llm) {
+    lines.push(
+      '- id: llm-deepseek',
+      '  config:',
+      `    protocol: ${llm.protocol}`,
+      `    baseURL: "${llm.baseUrl}"`,
+      '- id: agent-default-model',
+      '  config:',
+      '    provider: deepseek-official',
+      `    model: "${llm.model}"`,
+    );
+  }
+  lines.push('');
+  fs.writeFileSync(file, lines.join('\n'), 'utf-8');
   return file;
 }
 
@@ -111,10 +146,13 @@ export const deepseekPipeline: CodingPipeline = {
     }
     const overlay = writeWorkspaceOverlay(req.workdir);
     const args = [bin, '--profile', deepseekProfile(), '--patch', overlay, req.task];
+    const llm = deepseekLlmConfig();
+    const env: Record<string, string> = { ...req.env };
+    if (llm && !env.DEEPSEEK_API_KEY) env.DEEPSEEK_API_KEY = llm.apiKey;
     try {
       const res = await runProcess('node', args, {
         cwd: deepseekBareDir(),
-        env: req.env,
+        env,
         timeoutMs: req.timeoutMs,
       });
       return {

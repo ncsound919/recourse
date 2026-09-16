@@ -30,6 +30,9 @@ import {
   snapshotDir,
   verifyPipelineRecords,
   writeWorkspaceOverlay,
+  opencodeProvider,
+  opencodeRunEnv,
+  deepseekLlmConfig,
   type CodingPipeline,
 } from '../src/lib/codingPipelines/index.js';
 import { createPipelinesRouter } from '../src/routes/pipelines';
@@ -234,6 +237,75 @@ describe('bare harness provenance', () => {
     const rev = harnessProvenance(dir);
     expect(rev).toBeTruthy();
     expect(rev).toMatch(/@[0-9a-f]{4,}/);
+  });
+});
+
+describe('provider configuration', () => {
+  function clearProviderEnv() {
+    for (const k of [
+      'OPENCODE_BASE_URL', 'OPENCODE_API_KEY', 'OPENCODE_MODEL', 'OPENCODE_PROVIDER_ID', 'OPENCODE_CONFIG', 'OPENCODE_CONFIG_CONTENT',
+      'API_MODEL_BASE_URL', 'API_MODEL_API_KEY', 'API_MODEL_NAME', 'PHOENIX_API_KEY',
+      'DEEPSEEK_BASE_URL', 'DEEPSEEK_API_KEY', 'DEEPSEEK_MODEL', 'DEEPSEEK_PROTOCOL',
+    ]) {
+      vi.stubEnv(k, '');
+    }
+  }
+
+  it('reports no provider when base URL or key is absent', () => {
+    clearProviderEnv();
+    expect(opencodeProvider()).toBeNull();
+    expect(deepseekLlmConfig()).toBeNull();
+  });
+
+  it('derives an opencode OpenAI-compatible provider from API_MODEL_* env', () => {
+    clearProviderEnv();
+    vi.stubEnv('API_MODEL_BASE_URL', 'https://api.pgsgrove.com/v1/');
+    vi.stubEnv('API_MODEL_API_KEY', 'sk-test');
+    vi.stubEnv('API_MODEL_NAME', 'deepseek-v4-flash-0731');
+    const p = opencodeProvider();
+    expect(p).toMatchObject({ providerId: 'pgsgrove', modelId: 'deepseek-v4-flash-0731', baseUrl: 'https://api.pgsgrove.com/v1' });
+  });
+
+  it('injects OPENCODE_CONFIG_CONTENT only when none is already set', () => {
+    clearProviderEnv();
+    vi.stubEnv('API_MODEL_BASE_URL', 'https://api.pgsgrove.com/v1');
+    vi.stubEnv('API_MODEL_API_KEY', 'sk-test');
+    const env = opencodeRunEnv();
+    expect(env.OPENCODE_CONFIG_CONTENT).toBeTruthy();
+    const cfg = JSON.parse(env.OPENCODE_CONFIG_CONTENT!);
+    expect(cfg.model).toBe('pgsgrove/deepseek-v4-flash-0731');
+    expect(cfg.provider.pgsgrove.options.baseURL).toBe('https://api.pgsgrove.com/v1');
+
+    vi.stubEnv('OPENCODE_CONFIG_CONTENT', '{"existing":true}');
+    expect(opencodeRunEnv().OPENCODE_CONFIG_CONTENT).toBeUndefined();
+  });
+
+  it('resolves the deepseek route with chat-completions by default', () => {
+    clearProviderEnv();
+    vi.stubEnv('DEEPSEEK_BASE_URL', 'https://api.pgsgrove.com/v1');
+    vi.stubEnv('DEEPSEEK_API_KEY', 'sk-test');
+    vi.stubEnv('DEEPSEEK_MODEL', 'deepseek-v4-flash-0731');
+    const llm = deepseekLlmConfig();
+    expect(llm?.protocol).toBe('chat-completions');
+    expect(llm?.model).toBe('deepseek-v4-flash-0731');
+  });
+
+  it('stamps the deepseek route and default model into the overlay', () => {
+    clearProviderEnv();
+    vi.stubEnv('DEEPSEEK_BASE_URL', 'https://api.pgsgrove.com/v1');
+    vi.stubEnv('DEEPSEEK_API_KEY', 'sk-test');
+    vi.stubEnv('DEEPSEEK_MODEL', 'deepseek-v4-flash-0731');
+    const file = writeWorkspaceOverlay(freshRoot('ov-'));
+    try {
+      const yml = fs.readFileSync(file, 'utf-8');
+      expect(yml).toContain('- id: llm-deepseek');
+      expect(yml).toContain('protocol: chat-completions');
+      expect(yml).toContain('baseURL: "https://api.pgsgrove.com/v1"');
+      expect(yml).toContain('- id: agent-default-model');
+      expect(yml).toContain('model: "deepseek-v4-flash-0731"');
+    } finally {
+      fs.rmSync(file, { force: true });
+    }
   });
 });
 

@@ -323,6 +323,13 @@ import { createEcosystemRouter } from './src/routes/ecosystem.js';
 import { loadBusinessProfile, listBusinessSlugs } from './src/autopilot/businessProfile.js';
 import type { BusinessProfileT } from './src/autopilot/businessProfile.js';
 import { publishToGlobalLens } from './src/lib/globalLensBridge.js';
+import { openNightlyStore, runNightlyCycle } from './src/lib/nightlyLoop.js';
+import type { Snapshot as UpgradeSnapshot } from './src/lib/upgradeReport.js';
+import { openApprovalStore } from './src/lib/approvals.js';
+import { createSelfModGuard, makeHarnessGate } from './src/lib/selfModification.js';
+import { createSelfImprovementRouter } from './src/routes/selfImprovement.js';
+import { openPolicyEngine } from './src/lib/policy.js';
+import { attemptRemediation, resolveRemediationService, parseRemediationMap } from './src/lib/remediation.js';
 const STATE_FILE = path.join(process.cwd(), 'recourse_storage.json');
 
 // Budgeted action wallet (durable, hash-chained). Also installed as the sandbox
@@ -338,8 +345,10 @@ const productRouter = createProductRouter({
   requireMutationAuth,
 });
 
-// Wave 2 safety layers: policy engine, approval queue, deployment actuator.
-const opsRouter = createOpsRouter({ requireMutationAuth });
+// Wave 2 safety layers: the shared policy engine (the approval store is created
+// alongside the self-mod guard below, and both are reused here so the ops routes
+// and self-repair remediation agree on one set of engines).
+const policyEngine = openPolicyEngine();
 // Durable A2A task store so tasks/get survives a restart.
 const a2aTaskStore = openA2aTaskStore();
 
@@ -466,6 +475,86 @@ const growthRouter = createGrowthRouter({
   requireMutationAuth,
   getProfile: currentBusinessProfile,
 });
+
+// ---------------------------------------------------------------------------
+// Wave 5 — verified self-modification + the nightly autonomous cycle.
+// The approval queue gates modifications to Recourse's own harness source, and
+// the nightly coordinator runs dream -> forge -> benchmark once per UTC day and
+// writes a self-attested upgrade report. Prefer RECOURSE_SELF_MOD_APPLY=1 for
+// unattended harness changes; otherwise each harness target needs an approval.
+// ---------------------------------------------------------------------------
+const approvalStore = openApprovalStore();
+const selfModGuard = createSelfModGuard({
+  approvals: approvalStore,
+  autoApprove: () => process.env.RECOURSE_SELF_MOD_APPLY === '1',
+});
+const nightlyStore = openNightlyStore();
+
+// Wave 2 ops surface reuses the shared policy + approval engines above, so a
+// remediation approval queued by self-repair is visible to the ops routes.
+const opsRouter = createOpsRouter({ requireMutationAuth, policy: policyEngine, approvals: approvalStore });
+
+function nightlyMetrics(): UpgradeSnapshot {
+  const dossier = devDossierInput();
+  return {
+    registryTools: registry.length,
+    liveSelfHosted: dossier.liveSelfHostedTools,
+    verifierPassRate: dossier.verifierPassRate,
+    promoted: forgeLedger.filter((l) => l.status === 'materialized').length,
+    benchmarkSolved: latestBenchmark?.solved ?? 0,
+    benchmarkTotal: latestBenchmark?.total ?? 0,
+    healedTools: status.selfRepair?.totalHealedCount ?? 0,
+    openAnomalies: dossier.openAnomalies,
+  };
+}
+
+/** Drive one full nightly self-improvement pass (idempotent per UTC day). */
+async function runNightlyPass(force: boolean) {
+  return runNightlyCycle({
+    store: nightlyStore,
+    force,
+    metrics: async () => nightlyMetrics(),
+    steps: {
+      dream: async () => {
+        const tick = await dreamEngine.tick();
+        dreamState = tick.dreamState;
+        const mirrored = await mirrorCrystallizedDreamGenes();
+        saveStateToDisk();
+        return { ok: true, detail: `dream tick (${mirrored} gene(s) mirrored)`, data: { mirrored } };
+      },
+      forge: async () => {
+        const result = await runForgeCycle();
+        const skipped = 'skipped' in result && result.skipped;
+        return {
+          ok: true,
+          detail: skipped ? `forge skipped: ${(result as any).reason ?? 'n/a'}` : 'forge cycle completed',
+          data: result,
+        };
+      },
+      benchmark: async () => {
+        const run = runBenchmarkCycle();
+        return { ok: true, detail: `benchmark ${run.solved}/${run.total}`, data: { solved: run.solved, total: run.total } };
+      },
+    },
+  });
+}
+
+const selfImprovementRouter = createSelfImprovementRouter({
+  nightly: nightlyStore,
+  approvals: approvalStore,
+  requireMutationAuth,
+  runCycle: runNightlyPass,
+  patchStatus: () => {
+    const root = devRepoRoot();
+    const patches = listFleetPatches(root);
+    return {
+      applied: patches.filter((p) => !p.reverted).length,
+      reverted: patches.filter((p) => p.reverted).length,
+      ciGate: HARNESS_CI_GATE,
+    };
+  },
+});
+
 
 // Math solver state. Hoisted to module top so the function declaration at
 // line 5275 and the route at 5363 always see an initialized variable (avoids
@@ -776,6 +865,8 @@ export interface StuckRepairAction {
   proposalsApplied: number;
   proposalsRejected: number;
   proposalsSkipped: number;
+  /** Operational remediation outcome for service-kind issues (when attempted). */
+  remediation?: { status: string; service?: string; approvalId?: string; detail: string };
 }
 let stuckIssues: StuckIssue[] = [];
 let stuckRepairLedger: StuckRepairAction[] = [];
@@ -2619,6 +2710,7 @@ app.use('/api/recourse/commerce', commerceRouter);
 app.use('/api/recourse/federation', federationRouter);
 app.use('/api/recourse/publishing', publishingRouter);
 app.use('/api/recourse/growth', growthRouter);
+app.use('/api/recourse/self-improvement', selfImprovementRouter);
 // Wave 3 ecosystem primitives (skills / plugins / connectors).
 app.use('/api/recourse/ecosystem', ecosystemRouter);
 
@@ -9384,33 +9476,13 @@ function isHarnessSource(file: string): boolean {
   return /(^|[\\/])(server\.ts|src[\\/].*\.(ts|tsx|mts))$/.test(file) && /\.(ts|tsx|mts)$/i.test(file);
 }
 
-/** Real compile gate (tsc --noEmit) — the honest CI-green substitute for
- *  monolith/harness modules the sandbox cannot import. Runs only when the gate
- *  is enabled (RECOURSE_HARNESS_CI_GATE=1) so day-to-day dev is never slowed.
- *  When enabled and the tree does not compile, the patch is refused BEFORE it
- *  touches disk. Honest: an unavailable tsc reports as a block with a note
- *  rather than pretending it compiled. */
+/** Real CI-green gate for harness patches (Phase 5): the composite
+ *  typecheck + lint (+ test when RECOURSE_HARNESS_GATE_CHECKS asks) gate from
+ *  src/lib/selfModification.ts. Runs before any write and blocks a patch whose
+ *  change does not keep the tree green. Diagnostic-only: this module is no
+ *  longer the implementation, the gate lives in one place. */
 function makeHarnessBootGreenGate(): BootGreenGate {
-  const gate: BootGreenGate = async () => {
-    let out = '';
-    try {
-      const res = await new Promise<{ ok: boolean; error?: string }>((resolve) => {
-        const child = spawn('npx', ['tsc', '--noEmit', '--pretty', 'false'], { cwd: devRepoRoot(), shell: process.platform === 'win32' });
-        let stderr = '';
-        child.stdout.on('data', (d) => { out += String(d); });
-        child.stderr.on('data', (d) => { stderr += String(d); });
-        child.on('error', () => resolve({ ok: false, error: 'tsc could not be started' }));
-        child.on('close', (code) => {
-          if (code === 0) resolve({ ok: true });
-          else resolve({ ok: false, error: `tsc --noEmit failed (exit ${code})` });
-        });
-      });
-      return res;
-    } catch {
-      return { ok: false, error: 'compile gate unavailable' };
-    }
-  };
-  return gate;
+  return makeHarnessGate({ cwd: devRepoRoot() });
 }
 
 const HARNESS_CI_GATE = process.env.RECOURSE_HARNESS_CI_GATE === '1';
@@ -9844,6 +9916,44 @@ async function escalateStuckIssue(issue: StuckIssue, repoUrl: string | null, rep
     proposalsApplied: 0, proposalsRejected: 0, proposalsSkipped: 0,
   };
 
+  // (0) Service-kind issues are OPERATIONAL, not code: route them through the
+  // policy + approval gate into the deploy actuator (restart/redeploy) instead
+  // of asking a model for a patch. A denied/queued/attempted remediation is
+  // recorded and short-circuits the code path for this issue.
+  if (issue.kind === 'service') {
+    const service = resolveRemediationService(issue.id, parseRemediationMap(process.env.RECOURSE_REMEDIATE_SERVICES));
+    if (!service) {
+      action.remediation = { status: 'unmapped', detail: `no RECOURSE_REMEDIATE_SERVICES mapping for "${issue.id}"` };
+    } else if (!SELF_REPAIR_APPLY) {
+      action.remediation = { status: 'withheld', service, detail: 'RECOURSE_SELF_REPAIR_APPLY=0 — remediation not executed' };
+    } else {
+      const outcome = await attemptRemediation(
+        { issueId: issue.id, service, cwd: repo, kind: 'restart', reason: issue.detail },
+        { policy: policyEngine, approvals: approvalStore },
+      );
+      action.remediation = {
+        status: outcome.status,
+        service,
+        approvalId: outcome.approvalId,
+        detail: outcome.reason,
+      };
+      recordDev('stuck-remediate', outcome.status === 'applied', `${issue.id}: ${outcome.reason}`, {
+        driver: 'remediation',
+      });
+      appendProvenanceEvent('capability_adopted', {
+        driverId: 'remediation',
+        issueId: issue.id,
+        service,
+        status: outcome.status,
+        approvalId: outcome.approvalId,
+        feedback: outcome.feedback,
+      });
+    }
+    // Operational remediation replaces the code-patch path for service issues.
+    action.brainDetail = action.remediation.detail;
+    return action;
+  }
+
   // (1) Report the weak entity to the repair team.
   const drv = getFleetDriver('draymond-repair');
   if (drv?.baseUrl()) {
@@ -9882,6 +9992,7 @@ async function escalateStuckIssue(issue: StuckIssue, repoUrl: string | null, rep
           output: res.output,
           root: repo,
           bootGreen: HARNESS_CI_GATE ? makeHarnessBootGreenGate() : undefined,
+          guard: selfModGuard,
         });
         action.proposalsApplied = applied.appliedCount;
         action.proposalsRejected = applied.rejectedCount;
@@ -10037,6 +10148,7 @@ app.post('/api/recourse/develop/intake', async (req, res) => {
       output,
       root: devRepoRoot(),
       bootGreen: HARNESS_CI_GATE ? makeHarnessBootGreenGate() : undefined,
+      guard: selfModGuard,
     });
     const detail = result.applied
       ? `intake applied ${result.appliedCount} verified patch(es), rejected ${result.rejectedCount}, skipped ${result.skippedCount}`
@@ -10148,7 +10260,7 @@ app.post('/api/recourse/develop/patch', async (req, res) => {
     }
     const result = await verifyAndApplyPatch(
       { driverId, file, source, suite: typeof suite === 'string' ? suite : undefined, domain, note },
-      { root: devRepoRoot(), bootGreen: bootGreenForPatch(file) },
+      { root: devRepoRoot(), bootGreen: bootGreenForPatch(file), guard: selfModGuard },
     );
     const detail = result.applied
       ? `applied ${result.file} (${result.verified})${'revertToken' in result && result.revertToken ? ` [rollback ${result.revertToken}]` : ''}`

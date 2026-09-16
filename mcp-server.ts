@@ -23,7 +23,10 @@ async function apiGet(path: string): Promise<any> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 8000);
   try {
-    const res = await fetch(`${API}${path}`, { signal: ctrl.signal });
+    // Send the secret when configured so config-gated GET routes authenticate
+    // (open when RECOURSE_API_SECRET is unset, enforced when it is set).
+    const headers: Record<string, string> = SECRET ? { Authorization: `Bearer ${SECRET}` } : {};
+    const res = await fetch(`${API}${path}`, { signal: ctrl.signal, headers });
     if (!res.ok) throw new Error(`Recourse API ${path} -> HTTP ${res.status}`);
     return await res.json();
   } finally {
@@ -106,6 +109,33 @@ server.registerTool('recourse.upgrade_report', {
       healthChanged: d.healthChangedTools?.length, capabilityChanges: d.capabilityChanges,
       benchmarkSolvedDelta: d.benchmarkSolvedDelta, selfhostedDelta: d.selfhostedDelta,
       totals: d.totals,
+    }, null, 2));
+  } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
+});
+
+server.registerTool('recourse.nightly_report', {
+  title: 'Recourse nightly self-improvement report',
+  description: 'The latest self-attested nightly upgrade report (dream -> forge -> benchmark delta). Empty until the first nightly cycle runs.',
+}, async () => {
+  try {
+    const j = await apiGet('/api/recourse/self-improvement/report');
+    const md: string = j?.reportMarkdown ?? '';
+    const verdict = md.split('\n').find((l: string) => l.startsWith('**Verdict'));
+    return text(JSON.stringify({ key: j?.key, finishedAt: j?.finishedAt, steps: j?.steps, verdict }, null, 2));
+  } catch (e: any) { return text(`No nightly report yet (${e.message})`); }
+});
+
+server.registerTool('recourse.self_mod_status', {
+  title: 'Recourse self-modification status',
+  description: 'Harness self-modification status: last nightly run, pending approvals, applied/reverted patches, and the protected-path policy.',
+}, async () => {
+  try {
+    const j = await apiGet('/api/recourse/self-improvement/status');
+    return text(JSON.stringify({
+      nightly: j?.nightly,
+      pendingApprovals: j?.approvals?.pending,
+      patches: j?.patches,
+      protected: (j?.policy?.safety ?? []).map((r: any) => r.id),
     }, null, 2));
   } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
 });

@@ -579,7 +579,7 @@ export function isPathWithinRoot(file: string, root: string): boolean {
 
 export async function verifyAndApplyPatch(
   patch: ProposedPatch,
-  opts: { root?: string; lint?: boolean; bootGreen?: BootGreenGate } = {},
+  opts: { root?: string; lint?: boolean; bootGreen?: BootGreenGate; guard?: (file: string) => { allowed: boolean; reason?: string } } = {},
 ): Promise<PatchResult> {
   const root = resolveRepoRoot(opts.root);
   if (!getFleetDriver(patch.driverId)) {
@@ -587,6 +587,15 @@ export async function verifyAndApplyPatch(
   }
   if (!patch.file || !isPathWithinRoot(patch.file, root)) {
     return { applied: false, file: patch.file, error: `file "${patch.file}" is outside the repo root — refused` };
+  }
+  // Self-modification policy (classify/approve) runs before any verification or
+  // write: a protected target is refused, and an approval-gated target is
+  // withheld until an operator approves it.
+  if (opts.guard) {
+    const verdict = opts.guard(patch.file);
+    if (!verdict.allowed) {
+      return { applied: false, file: patch.file, error: `self-mod gate: ${verdict.reason || 'not allowed'}` };
+    }
   }
 
   // Code change: must be verified before it can touch disk. Config/data writes
@@ -924,6 +933,7 @@ export async function applyDriverProposal(opts: {
   root?: string;
   lint?: boolean;
   bootGreen?: BootGreenGate;
+  guard?: (file: string) => { allowed: boolean; reason?: string };
 }): Promise<DriverProposalResult> {
   if (!getFleetDriver(opts.driverId)) {
     return { applied: false, appliedCount: 0, rejectedCount: 0, skippedCount: 0, results: [] };
@@ -942,7 +952,7 @@ export async function applyDriverProposal(opts: {
   for (const c of candidates) {
     const res = await verifyAndApplyPatch(
       { driverId: opts.driverId, file: c.file, source: c.source, suite: c.suite, domain: c.domain, note: c.note },
-      { root: opts.root, lint: opts.lint, bootGreen: opts.bootGreen },
+      { root: opts.root, lint: opts.lint, bootGreen: opts.bootGreen, guard: opts.guard },
     );
     results.push(res);
   }
