@@ -62,5 +62,13 @@ module.exports = {
       'app',
       'C:\\Users\\User\\Downloads\\Uplift\\02_Pillars\\Overlay Writing\\research-integrity\\integrity-pm2'
     ),
+    svc(
+      'ghidra-sidecar',
+      'C:\\Users\\User\\Downloads\\recourse\\python\\ghidra_service',
+      8510,
+      'main',
+      'app',
+      'C:\\Users\\User\\Downloads\\recourse\\python\\ghidra_service\\ghidra-pm2'
+    ),
   ],
 };

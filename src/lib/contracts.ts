@@ -96,6 +96,44 @@ export const vizRenderReq = z.object({
   params: z.record(z.string(), z.unknown()).optional(),
 });
 
+// --- Ghidra reverse-engineering sidecar --------------------------------------
+export const ghidraAnalyzeReq = z.object({
+  data_base64: z.string().min(1).max(100_000_000),
+  filename: z.string().trim().max(255).optional(),
+  analysis_timeout_sec: z.coerce.number().int().min(30).max(3600).optional(),
+});
+
+export const ghidraEntropyReq = z.object({
+  data_base64: z.string().min(1).max(100_000_000),
+});
+
+// The learning route takes a real analyze result (analysis + findings) and
+// folds it into the recursive learner / self-repair loop. Payloads are
+// passthrough because they are the sidecar's own output shape.
+export const ghidraLearnReq = z.object({
+  binaryName: z.string().trim().min(1).max(200),
+  domain: z.string().trim().max(60).optional(),
+  findings: z
+    .object({
+      riskScore: z.coerce.number().min(0).max(100),
+      indicatorCount: z.coerce.number().int().min(0).optional(),
+      indicators: z
+        .array(z.object({ kind: z.string(), severity: z.string(), detail: z.string() }))
+        .optional(),
+      suspiciousImports: z.array(z.string()).optional(),
+    })
+    .passthrough(),
+  analysis: z
+    .object({
+      program: z.string().optional(),
+      format: z.string().optional(),
+      md5: z.string().optional(),
+      sha256: z.string().optional(),
+    })
+    .passthrough()
+    .optional(),
+});
+
 // --- Grant engine (oncology) -------------------------------------------------
 export const grantHypothesesReq = z.object({
   problemId: z.string().trim().min(1).max(120),
