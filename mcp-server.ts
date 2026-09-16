@@ -630,5 +630,49 @@ server.registerTool('recourse.revert', {
   return text(JSON.stringify({ ok: true, file: r.data?.file, token }, null, 2));
 });
 
+server.registerTool('recourse.skills', {
+  title: 'List published skills',
+  description: 'The signed, versioned skill registry (id, version, license, author, signature presence). Read-only.',
+}, async () => {
+  try {
+    const j = await apiGet('/api/recourse/ecosystem/skills');
+    return text(JSON.stringify({ count: j?.count, skills: j?.skills }, null, 2));
+  } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
+});
+
+server.registerTool('recourse.publish_skill', {
+  title: 'Publish a signed skill',
+  description: 'Publish a versioned skill to the registry (signed with the local skill secret when configured). Mutating: requires RECOURSE_API_SECRET.',
+  inputSchema: {
+    id: z.string(), name: z.string(), version: z.string().describe('semver, e.g. 1.0.0'),
+    description: z.string().optional(), domain: z.string().optional(), license: z.string().optional(),
+    author: z.string().optional(), source: z.string().optional(),
+  },
+}, async (args) => {
+  const r = await apiPost('/api/recourse/ecosystem/skills/publish', args);
+  if (!r.ok) return text(`publish_skill failed (HTTP ${r.status}): ${r.data?.error ?? 'see server log'}`);
+  return text(JSON.stringify({ ok: true, signed: r.data?.signed, skill: r.data?.skill }, null, 2));
+});
+
+server.registerTool('recourse.connectors', {
+  title: 'List connectors + health',
+  description: 'Registered external connectors and their live health probes. Read-only.',
+}, async () => {
+  try {
+    const j = await apiGet('/api/recourse/ecosystem/connectors');
+    return text(JSON.stringify({ count: j?.count, connectors: j?.connectors, health: j?.health }, null, 2));
+  } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
+});
+
+server.registerTool('recourse.validate_plugin', {
+  title: 'Validate a plugin manifest',
+  description: 'Validate a plugin manifest (schema + default-deny capabilities) and report its signature status. Read-only.',
+  inputSchema: { manifest: z.record(z.string(), z.any()).describe('The plugin manifest object') },
+}, async ({ manifest }) => {
+  const r = await apiPost('/api/recourse/ecosystem/plugins/validate', { manifest });
+  if (!r.ok) return text(`validate_plugin failed (HTTP ${r.status}): ${r.data?.error ?? 'see server log'}`);
+  return text(JSON.stringify(r.data, null, 2));
+});
+
 const transport = new StdioServerTransport();
 await server.connect(transport);

@@ -11,6 +11,8 @@
  * The handler is pure with respect to its injected operations, so it is fully
  * unit-testable without a live server.
  */
+import path from 'node:path';
+import { readJsonFile, writeJsonFile } from './durableJson';
 
 export interface A2aSkill {
   /** Stable id, also the canonical skill name (e.g. `recourse.status`). */
@@ -40,8 +42,8 @@ export interface A2aHandleOptions {
   /** Whether the caller presented valid mutation credentials. */
   authorized: boolean;
   operations: Record<string, A2aOperation>;
-  /** Task store; defaults to a module-level map so tasks/get works per process. */
-  tasks?: Map<string, A2aTask>;
+  /** Task store; defaults to a module-level map. Pass the durable store to survive restarts. */
+  tasks?: A2aTaskStore;
   now?: () => number;
   idFactory?: () => string;
 }
@@ -52,6 +54,57 @@ export interface A2aRpcResult {
 }
 
 const DEFAULT_TASK_STORE = new Map<string, A2aTask>();
+
+/** Minimal task-store contract. A `Map` satisfies it; so does the durable store. */
+export interface A2aTaskStore {
+  get(id: string): A2aTask | undefined;
+  set(id: string, task: A2aTask): void;
+}
+
+export function a2aTasksFile(): string {
+  return process.env.RECOURSE_A2A_TASKS_FILE || path.join(process.cwd(), 'data', 'a2a-tasks.json');
+}
+
+export interface DurableA2aTaskStore extends A2aTaskStore {
+  all(): A2aTask[];
+  size(): number;
+}
+
+/**
+ * Durable, bounded task store so `tasks/get` survives a restart instead of
+ * returning 404 for a task this process created before recycling. Newest wins;
+ * the oldest entries are trimmed past `limit`.
+ */
+export function openA2aTaskStore(file = a2aTasksFile(), limit = 500): DurableA2aTaskStore {
+  const doc = readJsonFile<{ version: number; tasks: A2aTask[] }>(file, { version: 1, tasks: [] });
+  const map = new Map<string, A2aTask>();
+  for (const t of Array.isArray(doc.tasks) ? doc.tasks : []) {
+    if (t && typeof t.id === 'string') map.set(t.id, t);
+  }
+  const persist = () => {
+    try {
+      writeJsonFile(file, { version: 1, tasks: [...map.values()].slice(-limit) });
+    } catch {
+      /* persistence must never break task handling */
+    }
+  };
+  return {
+    get: (id) => map.get(id),
+    set(id, task) {
+      // Re-insert to move to the end (most-recent), then trim.
+      map.delete(id);
+      map.set(id, task);
+      while (map.size > limit) {
+        const oldest = map.keys().next().value as string | undefined;
+        if (oldest === undefined) break;
+        map.delete(oldest);
+      }
+      persist();
+    },
+    all: () => [...map.values()],
+    size: () => map.size,
+  };
+}
 
 /** All A2A skills Recourse advertises (metadata mirrors the MCP tool surface). */
 export const A2A_SKILLS: A2aSkill[] = [
@@ -95,6 +148,17 @@ export const A2A_SKILLS: A2aSkill[] = [
     id: 'recourse.revert',
     name: 'Revert a fleet patch',
     description: 'Revert an applied patch by its revert token.',
+    tags: ['write'],
+    mutating: true,
+  },
+  { id: 'recourse.skills', name: 'List published skills', description: 'The signed, versioned skill registry.', tags: ['read'] },
+  { id: 'recourse.skill_verify', name: 'Verify a published skill', description: 'Signature/verification status for one skill id.', tags: ['read'] },
+  { id: 'recourse.connectors', name: 'List connectors', description: 'Registered external connectors and their health.', tags: ['read'] },
+  { id: 'recourse.validate_plugin', name: 'Validate a plugin manifest', description: 'Schema + capability + signature validation of a plugin manifest.', tags: ['read'] },
+  {
+    id: 'recourse.publish_skill',
+    name: 'Publish a skill',
+    description: 'Publish a signed, versioned skill to the registry.',
     tags: ['write'],
     mutating: true,
   },

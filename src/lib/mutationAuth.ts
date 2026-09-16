@@ -28,9 +28,11 @@ function secretsEqual(a: string, b: string): boolean {
 }
 
 /**
- * Boolean-only credential check (no response side effects). Returns true when
- * no secret is configured OR the presented secret matches. Used by protocol
- * surfaces (A2A) that decide their own error envelope.
+ * Boolean-only credential check (no response side effects). Fail-closed: returns
+ * true ONLY when a secret is configured AND the presented secret matches — an
+ * unconfigured secret yields false (not "open"). Used by protocol surfaces (A2A,
+ * MCP-HTTP) that decide their own error envelope and scope grants, so an
+ * unauthenticated caller never receives write scope.
  */
 export function hasValidMutationSecret(req: Request): boolean {
   const secret = process.env[MUTATION_SECRET_ENV];

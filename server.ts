@@ -299,8 +299,9 @@ import { openWallet } from './src/lib/wallet.js';
 import { setSandboxSpendSink } from './src/lib/selfHostSandbox.js';
 import { createProductRouter } from './src/routes/product.js';
 import { createOpsRouter, metricsText } from './src/routes/ops.js';
+import { metrics } from './src/lib/metrics.js';
 import { handleMcpHttp } from './src/lib/mcpHttp.js';
-import { agentCard, handleA2aRpc, A2A_SKILLS } from './src/lib/a2a.js';
+import { agentCard, handleA2aRpc, A2A_SKILLS, openA2aTaskStore } from './src/lib/a2a.js';
 import type { A2aOperation } from './src/lib/a2a.js';
 import { replayTrendLedger, replayGoalLedger, deterministicHash } from './src/lib/replay.js';
 import { buildOpenApiSpec, listOperations } from './src/lib/openapi.js';
@@ -339,6 +340,8 @@ const productRouter = createProductRouter({
 
 // Wave 2 safety layers: policy engine, approval queue, deployment actuator.
 const opsRouter = createOpsRouter({ requireMutationAuth });
+// Durable A2A task store so tasks/get survives a restart.
+const a2aTaskStore = openA2aTaskStore();
 
 // ---------------------------------------------------------------------------
 // Wave 1 commercial layer: durable usage metering, tenant/API-key identity, and
@@ -350,6 +353,13 @@ const usageMeter = openUsageMeter();
 const tenantStore = openTenantStore();
 const apiKeyStore = openApiKeyStore();
 const outcomeLedger = openOutcomeLedger();
+
+// Prometheus handles (created once; the registry keys by name).
+const modelCallsTotal = metrics.counter('recourse_model_calls_total', 'Model calls by model and profile');
+const modelTokensTotal = metrics.counter('recourse_model_tokens_total', 'Model tokens by model and direction');
+const modelCostCentsTotal = metrics.counter('recourse_model_cost_cents_total', 'Model spend in cents by model');
+const httpRequestsTotal = metrics.counter('recourse_http_requests_total', 'HTTP requests by method and status');
+const httpRequestSeconds = metrics.histogram('recourse_http_request_seconds', 'HTTP request latency');
 
 setModelUsageSink((u) => {
   const cents = tokenCostCents(priceForModel(u.model), u.promptTokens, u.completionTokens);
@@ -366,6 +376,11 @@ setModelUsageSink((u) => {
       description: `model ${u.model} (${u.profile})`,
     });
   } catch { /* metering must never break generation */ }
+  // Observability: every model call is counted (independent of metering success).
+  modelCallsTotal.inc({ model: u.model, profile: u.profile, estimated: String(u.estimated) });
+  modelTokensTotal.inc({ model: u.model, direction: 'input' }, u.promptTokens);
+  modelTokensTotal.inc({ model: u.model, direction: 'output' }, u.completionTokens);
+  if (cents > 0) modelCostCentsTotal.inc({ model: u.model }, cents);
   const whole = Math.round(cents);
   if (whole > 0) {
     try {
@@ -821,6 +836,17 @@ app.use(express.json({
     (req as typeof req & { rawBody?: string }).rawBody = buf.toString('utf-8');
   },
 }));
+
+// Observability: count + time every HTTP request (exposed at GET /metrics).
+app.use((req, res, next) => {
+  const started = process.hrtime.bigint();
+  res.on('finish', () => {
+    const seconds = Number(process.hrtime.bigint() - started) / 1e9;
+    httpRequestsTotal.inc({ method: req.method, status: String(res.statusCode) });
+    httpRequestSeconds.observe(seconds, { method: req.method });
+  });
+  next();
+});
 
 // ---------------------------------------------------------------------------
 // Security hardening: helmet headers + configurable rate limiting.
@@ -2029,6 +2055,26 @@ function buildA2aOperations(): Record<string, A2aOperation> {
       }, true)).data),
     make('recourse.revert', async (args) =>
       (await internalApiCall('POST', '/api/recourse/develop/revert', { token: args.token }, true)).data),
+    make('recourse.skills', async () => (await internalApiCall('GET', '/api/recourse/ecosystem/skills')).data),
+    make('recourse.skill_verify', async (args) => {
+      const id = encodeURIComponent(String(args.id ?? ''));
+      return (await internalApiCall('GET', `/api/recourse/ecosystem/skills/${id}/verify`)).data;
+    }),
+    make('recourse.connectors', async () => (await internalApiCall('GET', '/api/recourse/ecosystem/connectors')).data),
+    make('recourse.validate_plugin', async (args) =>
+      (await internalApiCall('POST', '/api/recourse/ecosystem/plugins/validate', { manifest: args.manifest ?? args })).data),
+    make('recourse.publish_skill', async (args) =>
+      (await internalApiCall('POST', '/api/recourse/ecosystem/skills/publish', {
+        id: args.id,
+        name: args.name,
+        version: args.version,
+        description: args.description,
+        domain: args.domain,
+        toolName: args.toolName,
+        source: args.source,
+        license: args.license,
+        author: args.author,
+      }, true)).data),
   ]);
 }
 
@@ -2083,6 +2129,7 @@ app.post('/api/a2a', async (req, res) => {
     const result = await handleA2aRpc(req.body, {
       authorized: hasValidMutationSecret(req),
       operations: buildA2aOperations(),
+      tasks: a2aTaskStore,
     });
     res.status(result.httpStatus).json(result.body);
   } catch (e: any) {
