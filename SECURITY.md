@@ -33,6 +33,29 @@ are deliberately conservative:
   unsigned/unverifiable inputs are reported, never trusted.
 - **HTTP hardening.** helmet + configurable rate limiting (`server.ts`).
 
+## CI security gates
+
+- `.github/workflows/security.yml` — `npm audit --omit=dev` fails the build on a
+  **critical** production advisory; high advisories are reported (non-blocking).
+- `.github/workflows/codeql.yml` — CodeQL SAST for JavaScript/TypeScript
+  (first-party code only; see `.github/codeql/codeql-config.yml`); findings land
+  in the repository's Security tab.
+- `.github/workflows/dependency-review.yml` — reviews the dependencies a PR
+  adds/changes and fails on **high** or worse (evaluates the diff, so legacy
+  advisories do not go red).
+- `.github/dependabot.yml` — weekly grouped updates for npm, GitHub Actions, and
+  Docker.
+
+### Branch protection (recommended, operator step)
+
+Branch protection is a repository setting, not a file. To make the gates
+enforceable, enable protection on `master` and require these status checks:
+
+`verify (20)`, `verify (22)`, `docker-smoke`, `audit`, `Analyze (javascript-typescript)`, `dependency-review`
+
+Also require: review from `CODEOWNERS`, dismiss stale approvals, and disallow
+force-pushes. Until this is configured, the workflows run but do not block merges.
+
 ## Known operational assumptions
 
 - The server binds locally by default (port 3050) and is intended to sit behind

@@ -1,0 +1,35 @@
+name: Security
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  schedule:
+    # Weekly, Monday 06:00 UTC — catches advisories that appear after merge.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install
+        run: npm ci
+      # Blocking gate: production dependencies must have no CRITICAL advisory.
+      # (There are currently high advisories in some transitive native deps; the
+      # hard gate is set at critical so it is meaningful, not permanently red.)
+      - name: Audit production deps (fail on critical)
+        run: npm audit --omit=dev --audit-level=critical
+      # Informational: surface high advisories without blocking (see the report).
+      - name: Audit production deps (report high)
+        continue-on-error: true
+        run: npm audit --omit=dev --audit-level=high || true

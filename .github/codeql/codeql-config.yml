@@ -1,0 +1,20 @@
+# CodeQL configuration — scope analysis to first-party code.
+# Vendored/experimental trees and build output are excluded so findings stay
+# actionable and the analysis stays fast.
+name: Recourse CodeQL config
+
+paths-ignore:
+  - node_modules
+  - dist
+  - coverage
+  - coverage-baseline
+  - '.selfhosted'
+  - 'recourse-fix-bundle'
+  - 'bisim and abm'
+  - 'deteministic researcher'
+  - 'BF Resolver'
+  - 'seed system'
+  - 'media-package'
+  - 'prometheus'
+  - 'python/**/__pycache__'
+  - '*.min.js'
