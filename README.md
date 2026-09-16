@@ -162,6 +162,24 @@ Known remaining theater (not yet replaced):
   return HTTP 401 otherwise — never a fabricated success. The handler is pure
   over injected operations and unit-tested (`tests/a2a.test.ts`).
 
+## Observability & autonomous planning
+
+- **Metrics**: a dependency-free registry with Prometheus exposition at
+  `GET /metrics` (model calls/tokens/cost, HTTP count/latency). See
+  `src/lib/metrics.ts`.
+- **Traces**: a dependency-free tracer with W3C trace context, parent/child
+  spans, async-context propagation, and an **OTLP/HTTP JSON exporter** used when
+  `OTEL_EXPORTER_OTLP_ENDPOINT` is set (otherwise export is honestly reported
+  `disabled`). A root span wraps every request and a child span wraps every model
+  call. Inspect recent spans at `GET /api/recourse/ops/traces`; export them at
+  `POST /api/recourse/ops/traces/export`.
+- **Planner**: business-autopilot Tier A code gaps are filled by a real code
+  planner (`src/autopilot/codePlanner.ts`) that asks the configured model for a
+  self-contained file **plus an acceptance test**. The pre-merge gate runs that
+  acceptance test in the real sandbox; a gap whose test fails is rejected. When
+  the model is offline the generator keeps its honest placeholder — it never
+  fabricates source.
+
 ## Python sidecars (optional)
 
 Three small, **stateless** Python HTTP services Recourse calls like any other

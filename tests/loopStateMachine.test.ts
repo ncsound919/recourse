@@ -11,6 +11,7 @@ import type { AuditAdapter } from '../src/autopilot/auditRunner';
 import { runAudit } from '../src/autopilot/auditRunner';
 import { projectScorecard, saveScorecard } from '../src/autopilot/scorecard';
 import { resumeAfterVeto, runLoop } from '../src/autopilot/loopStateMachine';
+import { DEFAULT_EXECUTORS } from '../src/autopilot/preMergeGate';
 import { PRState, type GitHubClient, type PRStateT } from '../src/autopilot/loopTypes';
 
 const tmpRepos: string[] = [];
@@ -141,6 +142,61 @@ describe('runLoop dry-run happy path', () => {
     expect(ctx.currentProposal!.gapId).toBe(ctx.queue!.gaps[0].id);
     expect(ctx.currentProposal!.tier).toBe('A');
     expect(ctx.prState).toBeNull();
+  });
+});
+
+describe('runLoop with a real code planner', () => {
+  it('emits verified code whose acceptance test the gate runs in the real sandbox', async () => {
+    const repo = makeTmpRepo();
+    const profile = makeProfile({ repoPath: repo, autoMerge: true });
+    profile.gaps = ['Refactor input handling to sanitize the upload endpoint (code quality)'];
+
+    const planner = async () => ({
+      file: 'src/sanitize.js',
+      content: 'export function sanitize(s) { return String(s).replace(/[<>]/g, ""); }',
+      acceptanceTest: 'assert sanitize("<x>") === "x";',
+      functionName: 'sanitize',
+    });
+    const pass = vi.fn(async () => ({ passed: true, output: 'ok' }));
+
+    const out = await runLoop({
+      profile,
+      dryRun: true,
+      adapters: { grader: graderFixture },
+      planner,
+      // Real sandbox executor: the planner's acceptance test must actually pass.
+      gateExecutors: { sandbox: DEFAULT_EXECUTORS.sandbox, lint: pass, typecheck: pass, tests: pass },
+    });
+
+    expect(out.state).toMatchObject({ status: 'pr_open' });
+    expect(out.context.currentProposal?.verification?.file).toBe('src/sanitize.js');
+    const file = out.context.currentProposal?.files.find((f) => f.path === 'src/sanitize.js');
+    expect(file?.content).toContain('export function sanitize');
+  });
+
+  it('rejects planner output whose acceptance test fails in the sandbox', async () => {
+    const repo = makeTmpRepo();
+    const profile = makeProfile({ repoPath: repo, autoMerge: true });
+    profile.gaps = ['Refactor input handling to sanitize the upload endpoint (code quality)'];
+
+    const planner = async () => ({
+      file: 'src/sanitize.js',
+      content: 'export function sanitize(s) { return String(s); }', // does NOT strip <>
+      acceptanceTest: 'assert sanitize("<x>") === "x";',
+    });
+    const pass = vi.fn(async () => ({ passed: true, output: 'ok' }));
+
+    const out = await runLoop({
+      profile,
+      dryRun: true,
+      adapters: { grader: graderFixture },
+      planner,
+      gateExecutors: { sandbox: DEFAULT_EXECUTORS.sandbox, lint: pass, typecheck: pass, tests: pass },
+    });
+
+    // No gap passed the gate => idle, no proposal selected.
+    expect(out.state).toMatchObject({ status: 'idle' });
+    expect(out.context.currentProposal).toBeNull();
   });
 });
 

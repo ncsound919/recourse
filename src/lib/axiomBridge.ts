@@ -196,6 +196,7 @@ export async function launchAxiomLoop(opts: {
   goal: string;
   targetDir: string;
   maxIterations?: number;
+  maxRepeatFindings?: number;
   mode?: 'existing' | 'greenfield';
   timeoutMs?: number;
 }): Promise<AxiomLoopLaunchResult> {
@@ -207,6 +208,7 @@ export async function launchAxiomLoop(opts: {
         goal: opts.goal,
         targetDir: opts.targetDir,
         maxIterations: opts.maxIterations ?? 6,
+        ...(Number.isFinite(opts.maxRepeatFindings) ? { maxRepeatFindings: opts.maxRepeatFindings } : {}),
         mode: opts.mode ?? 'existing',
       }),
       signal: AbortSignal.timeout(opts.timeoutMs ?? 30_000),

@@ -43,12 +43,14 @@ export const axiomPipeline: CodingPipeline = {
     const started = Date.now();
     const status = await axiomBridgeStatus().catch(() => ({ online: false, url: '', auth: 'none' as const }));
     const maxIterations = Number(process.env.PIPELINE_AXIOM_ITERATIONS || 4);
+    const maxRepeatFindings = Number(process.env.PIPELINE_AXIOM_MAX_REPEATS || 5);
 
     const launched = await launchAxiomLoop({
       goal: req.task,
       targetDir: req.workdir,
       mode: 'existing',
       maxIterations,
+      maxRepeatFindings,
       timeoutMs: 30_000,
     });
     if (!launched.ok || !launched.id) {

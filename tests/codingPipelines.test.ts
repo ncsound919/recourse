@@ -33,6 +33,10 @@ import {
   opencodeProvider,
   opencodeRunEnv,
   deepseekLlmConfig,
+  prepareWorktree,
+  settlementAgentExecutable,
+  settlementOpencodeEnv,
+  settlementTsxCli,
   type CodingPipeline,
 } from '../src/lib/codingPipelines/index.js';
 import { createPipelinesRouter } from '../src/routes/pipelines';
@@ -309,10 +313,43 @@ describe('provider configuration', () => {
   });
 });
 
+describe('settlement bridge helpers', () => {
+  it('resolves the repo tsx CLI', () => {
+    expect(settlementTsxCli()).toMatch(/tsx[\\/]dist[\\/]cli\.mjs$/);
+  });
+
+  it('builds an agent executable that points the harness at the adapter', () => {
+    vi.stubEnv('SETTLEMENT_HARNESS_DIR', 'C:/h');
+    const exec = settlementAgentExecutable('C:/wt');
+    expect(exec).toContain('opencode-adapter.js');
+    expect(exec).toContain('--repo C:/wt');
+    expect(exec.startsWith('node ')).toBe(true);
+  });
+
+  it('sets OPENCODE_BIN, model, and harness dir for the adapter child', () => {
+    const bare = freshRoot('ocbare-');
+    vi.stubEnv('OPENCODE_BARE_DIR', bare); // no packages/opencode -> CLI fallback
+    vi.stubEnv('SETTLEMENT_HARNESS_DIR', 'C:/h');
+    vi.stubEnv('OPENCODE_BIN', 'opencode');
+    const env = settlementOpencodeEnv();
+    expect(env.OPENCODE_BIN).toBe('opencode');
+    expect(env.SETTLEMENT_HARNESS_DIR).toBe('C:/h');
+  });
+});
+
 describe('unified runner', () => {
   beforeEach(() => {
     resetPipelineRegistry();
     registerPipeline(STUB);
+  });
+
+  it('initializes a git repo in the copied worktree (settlement needs HEAD)', () => {
+    const workdir = prepareWorktree(miniRepo());
+    try {
+      expect(fs.existsSync(path.join(workdir, '.git'))).toBe(true);
+    } finally {
+      fs.rmSync(workdir, { recursive: true, force: true });
+    }
   });
 
   it('dispatches to the selected pipeline on a copied worktree and scores the diff', async () => {

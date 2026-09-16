@@ -151,6 +151,8 @@ export const A2A_SKILLS: A2aSkill[] = [
     tags: ['write'],
     mutating: true,
   },
+  { id: 'recourse.traces', name: 'Recent traces', description: 'Recent distributed-trace spans (W3C trace context).', tags: ['read'] },
+  { id: 'recourse.tracing_status', name: 'Tracing status', description: 'Whether an OTLP exporter is configured, and the buffered span count.', tags: ['read'] },
   { id: 'recourse.skills', name: 'List published skills', description: 'The signed, versioned skill registry.', tags: ['read'] },
   { id: 'recourse.skill_verify', name: 'Verify a published skill', description: 'Signature/verification status for one skill id.', tags: ['read'] },
   { id: 'recourse.connectors', name: 'List connectors', description: 'Registered external connectors and their health.', tags: ['read'] },

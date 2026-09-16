@@ -704,5 +704,27 @@ server.registerTool('recourse.validate_plugin', {
   return text(JSON.stringify(r.data, null, 2));
 });
 
+server.registerTool('recourse.traces', {
+  title: 'Recent distributed traces',
+  description: 'Recently finished spans with W3C trace context (name, ids, status, duration). Read-only.',
+  inputSchema: { limit: z.number().int().min(1).max(500).optional().describe('Max spans (default 100)') },
+}, async ({ limit }) => {
+  try {
+    const qs = limit ? `?limit=${limit}` : '';
+    const j = await apiGet(`/api/recourse/ops/traces${qs}`);
+    return text(JSON.stringify({ count: j?.count, spans: j?.spans }, null, 2));
+  } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
+});
+
+server.registerTool('recourse.tracing_status', {
+  title: 'Tracing / OTLP status',
+  description: 'Whether an OTLP exporter is configured, the service name, and the buffered span count. Read-only.',
+}, async () => {
+  try {
+    const j = await apiGet('/api/recourse/ops/tracing/status');
+    return text(JSON.stringify(j, null, 2));
+  } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
+});
+
 const transport = new StdioServerTransport();
 await server.connect(transport);

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { axiomBridgeStatus, dispatchAxiomRepair } from '../src/lib/axiomBridge.js';
+import { axiomBridgeStatus, dispatchAxiomRepair, launchAxiomLoop, waitForAxiomLoop } from '../src/lib/axiomBridge.js';
 
 const BRIDGE = 'http://127.0.0.1:3198/api/recourse/bridge/repair';
 
@@ -69,5 +69,55 @@ describe('dispatchAxiomRepair', () => {
     const r = await dispatchAxiomRepair({ findings: [] });
     expect(r.ok).toBe(false);
     expect(r.error).toContain('ECONNREFUSED');
+  });
+});
+
+describe('launchAxiomLoop', () => {
+  it('POSTs goal + targetDir and returns the loop id', async () => {
+    vi.stubEnv('AXIOM_API_TOKEN', 'tok');
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(url).toBe('http://127.0.0.1:3198/api/project/run');
+      const body = JSON.parse(String(init?.body));
+      expect(body.goal).toBe('do x');
+      expect(body.targetDir).toBe('C:/ws/repo');
+      expect(body.mode).toBe('existing');
+      return okJson({ ok: true, id: 'proj_1', maxIterations: 4 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const r = await launchAxiomLoop({ goal: 'do x', targetDir: 'C:/ws/repo', maxIterations: 4 });
+    expect(r).toEqual({ ok: true, id: 'proj_1', maxIterations: 4 });
+  });
+
+  it('surfaces a 403 workspace refusal', async () => {
+    vi.stubEnv('AXIOM_API_TOKEN', 'tok');
+    vi.stubGlobal('fetch', vi.fn(async () => okJson({ error: 'path outside workspace root' }, 403)));
+    const r = await launchAxiomLoop({ goal: 'g', targetDir: 'C:/nope' });
+    expect(r.ok).toBe(false);
+    expect(r.status).toBe(403);
+    expect(r.error).toContain('outside workspace');
+  });
+});
+
+describe('waitForAxiomLoop', () => {
+  it('polls until the status leaves running', async () => {
+    vi.stubEnv('AXIOM_API_TOKEN', 'tok');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn()
+        .mockResolvedValueOnce(okJson({ status: 'running', iteration: 1 }))
+        .mockResolvedValueOnce(okJson({ status: 'done', iteration: 2 })),
+    );
+    const r = await waitForAxiomLoop('proj_1', { pollMs: 1, timeoutMs: 5000 });
+    expect(r.ok).toBe(true);
+    expect(r.status).toBe('done');
+    expect(r.iterations).toBe(2);
+  });
+
+  it('times out honestly when the loop never finishes', async () => {
+    vi.stubEnv('AXIOM_API_TOKEN', 'tok');
+    vi.stubGlobal('fetch', vi.fn(async () => okJson({ status: 'running' })));
+    const r = await waitForAxiomLoop('proj_x', { pollMs: 1, timeoutMs: 20 });
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain('timed out');
   });
 });

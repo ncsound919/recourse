@@ -66,7 +66,7 @@ import { musicTherapyFindings } from './src/lib/musicTherapyFindings.js';
 import { renderTuningContrast, TUNING_CAVEATS, benchmarkComparison, tuningContrastModel, TUNING_GRID, TUNING_RECORDS, tuningContrastDetailed, musicVsControlBenchmark, BENCHMARK_NOTE, renderTuningSummary } from './src/lib/musicTherapyTuning.js';
 import { startMathConductor, stopMathConductor, runMathCycle, mathConductorStatus, recentMathCycles, recentMathFindings } from './src/lib/mathConductor.js';
 import { recentInsights } from './src/lib/trendLedger.js';
-import { registerScheduledJob, getSchedulerStatus, setJobEnabled, triggerJob, listScheduledJobs } from './src/lib/jobScheduler.js';
+import { registerScheduledJob, setJobEnabled, listScheduledJobs } from './src/lib/jobScheduler.js';
 import { keywireHealth } from './src/lib/keywireBridge.js';
 import { computeIssueProgress, readIssueRecords, renderIssueDocs, renderIssueIndex } from './src/lib/issueTracker.js';
 import { generateFleetReport, renderDailyReport, recentReports } from './src/lib/researchReports.js';
@@ -322,6 +322,7 @@ import { openSkillRegistry } from './src/lib/skillRegistry.js';
 import { federationSkillProviders } from './src/lib/ecosystem/skillFederation.js';
 import { createEcosystemRouter } from './src/routes/ecosystem.js';
 import { createSecurityRouter } from './src/routes/security.js';
+import { createSchedulerRouter } from './src/routes/scheduler.js';
 import { loadBusinessProfile, listBusinessSlugs } from './src/autopilot/businessProfile.js';
 import type { BusinessProfileT } from './src/autopilot/businessProfile.js';
 import { publishToGlobalLens } from './src/lib/globalLensBridge.js';
@@ -2118,6 +2119,8 @@ function buildA2aOperations(): Record<string, A2aOperation> {
       }, true)).data),
     make('recourse.revert', async (args) =>
       (await internalApiCall('POST', '/api/recourse/develop/revert', { token: args.token }, true)).data),
+    make('recourse.traces', async () => (await internalApiCall('GET', '/api/recourse/ops/traces')).data),
+    make('recourse.tracing_status', async () => (await internalApiCall('GET', '/api/recourse/ops/tracing/status')).data),
     make('recourse.skills', async () => (await internalApiCall('GET', '/api/recourse/ecosystem/skills')).data),
     make('recourse.skill_verify', async (args) => {
       const id = encodeURIComponent(String(args.id ?? ''));
@@ -2951,30 +2954,17 @@ app.get('/api/recourse/fleet-dashboard', async (_req, res) => {
 // dream, self-hosted re-verify). Toggle per job, trigger a manual run, and
 // read per-job status (lastRun/lastOk/error, run/fail counts).
 // ---------------------------------------------------------------------------
-app.get('/api/recourse/scheduler', (_req, res) => {
-  res.json({ success: true, ...getSchedulerStatus() });
-});
-
-app.post('/api/recourse/scheduler/toggle', (req, res) => {
-  const { id, enabled } = (req.body ?? {}) as { id?: string; enabled?: boolean };
-  if (!id || typeof enabled !== 'boolean') {
-    return res.status(400).json({ success: false, error: 'id (string) and enabled (boolean) required' });
-  }
-  const r = setJobEnabled(id, enabled);
-  if (r.ok === false) return res.status(404).json({ success: false, error: r.error });
-  // Mirror the legacy autopilot flags so the dashboard stays consistent.
-  mirrorAutopilotFlag(id, enabled);
-  appendProvenanceEvent('loop_started', { driverId: `scheduler:${id}`, enabled });
-  res.json({ success: true, ...r });
-});
-
-app.post('/api/recourse/scheduler/trigger', async (req, res) => {
-  const { id } = (req.body ?? {}) as { id?: string };
-  if (!id) return res.status(400).json({ success: false, error: 'id (string) required' });
-  const r = await triggerJob(id);
-  if (r.ok === false) return res.status(409).json({ success: false, error: r.error });
-  res.json({ success: true, ...r });
-});
+// Job-scheduler API mounted from src/routes/scheduler.ts. The toggle hook keeps
+// the legacy autopilot flags in sync and records provenance.
+app.use(
+  '/api/recourse/scheduler',
+  createSchedulerRouter({
+    onJobToggled: (id, enabled) => {
+      mirrorAutopilotFlag(id, enabled);
+      appendProvenanceEvent('loop_started', { driverId: `scheduler:${id}`, enabled });
+    },
+  }),
+);
 
 /** Keep legacy flags in sync when a job is toggled via the scheduler. */
 function mirrorAutopilotFlag(id: string, enabled: boolean): void {
