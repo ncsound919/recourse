@@ -135,8 +135,11 @@ describe('learner.ts coverage', () => {
 
     it('loadState returns row or null, throws on error', async () => {
       const store = new SupabaseLearnerStore('https://x', 'k');
-      mockFetch({ ok: true, status: 200, json: async () => [{ state: genesisState() }] });
-      expect(await store.loadState()).toEqual(genesisState());
+      // Compare against the exact row we served — calling genesisState() twice
+      // makes the assertion depend on both new Date() calls landing in the same ms.
+      const row = genesisState();
+      mockFetch({ ok: true, status: 200, json: async () => [{ state: row }] });
+      expect(await store.loadState()).toEqual(row);
       mockFetch({ ok: true, status: 200, json: async () => [] });
       expect(await store.loadState()).toBeNull();
       mockFetch({ ok: false, status: 500, json: async () => [] });

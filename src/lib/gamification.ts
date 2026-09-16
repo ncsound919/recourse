@@ -22,8 +22,7 @@ import fs from 'fs';
 import path from 'path';
 import { recentCycles, recentFindings } from './scienceConductor.js';
 import { recentMathCycles, recentMathFindings } from './mathConductor.js';
-import { getMathAttempts, getGoalProgress } from './goalLedger.js';
-import { HARD_MATH_PROBLEMS } from './hardMathProblems.js';
+import { getMathAttempts } from './goalLedger.js';
 
 // --- XP rates (tuned so realistic steady-state = mid-level) -----------------
 
