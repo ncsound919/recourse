@@ -1,5 +1,7 @@
 export * from './types'
 export * from './drivers'
+export * from './sqliteDrivers'
+export * from './skillPipeline'
 export * from './episodicStore'
 export * from './semanticStore'
 export * from './failureMemory'

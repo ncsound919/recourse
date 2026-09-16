@@ -92,7 +92,13 @@ function isAuthorizedVeto(c: { user?: string; body?: unknown }, allowed: string[
 export async function checkAndMerge(
   state: PRStateT,
   github: GitHubClient,
-  opts: { now?: Date; vetoHours?: number; authorizedVetoUsers?: string[] } = {},
+  opts: {
+    now?: Date;
+    vetoHours?: number;
+    authorizedVetoUsers?: string[];
+    /** Wallet merge gate: when present and disallowed, the merge is refused. */
+    mergeGate?: { allowed: boolean; reason: string };
+  } = {},
 ): Promise<PRStateT> {
   if (state.vetoReceived || state.merged || state.closed) return state;
 
@@ -118,6 +124,12 @@ export async function checkAndMerge(
     if (vetoedBy(finalComments)) {
       await github.closePR(state.owner, state.repo, state.prNumber);
       return { ...state, vetoReceived: true, closed: true };
+    }
+    // Budget gate: an autonomous merge that costs money must be funded. This is
+    // the enforcement point — the veto window may have elapsed, but no merge
+    // happens while the merge budget is unfunded.
+    if (opts.mergeGate && !opts.mergeGate.allowed) {
+      return { ...state, mergeError: `merge budget gate blocked: ${opts.mergeGate.reason}` };
     }
     try {
       await github.mergePR(state.owner, state.repo, state.prNumber);

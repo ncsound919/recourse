@@ -30,6 +30,9 @@ const external = [
   'react-dom',
   'vite',
   'node-cron',
+  // Pure-JS + WASM; must resolve its own .wasm assets at runtime, so it is
+  // loaded dynamically and kept external rather than bundled.
+  'quickjs-emscripten',
 ];
 
 await build({

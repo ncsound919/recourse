@@ -18,11 +18,15 @@ declare module 'jstat' {
     pdf(k: number, N: number, m: number, n: number): number;
     cdf(x: number, N: number, m: number, n: number): number;
   }
+  interface CentralFDist {
+    cdf(x: number, df1: number, df2: number): number;
+  }
   const jStat: {
     normal: NormalDist;
     studentt: StudenttDist;
     chisquare: ChisquareDist;
     hypgeom: HypgeomDist;
+    centralF: CentralFDist;
   };
   export default jStat;
 }

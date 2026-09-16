@@ -1,57 +1,109 @@
 import { describe, it, expect } from 'vitest';
 import {
-  pearson, fisherZ, normalCdf, pearsonSignificance, benjaminiHochberg,
-  lag1Autocorr, needsDifferencing, difference, surpriseBits, klDivergence, surrogatePValue,
-} from '../../src/lib/synergy/stats.js';
+  grangerCausality,
+  transferEntropy,
+  stationarize,
+  lag1Autocorr,
+} from '../../src/lib/synergy/stats';
 
-describe('statistics', () => {
-  it('pearson + fisher-z significance requires n>3', () => {
-    const xs = Array.from({ length: 30 }, (_, i) => i);
-    const ys = xs.map((x) => 2 * x + 1);
-    const sig = pearsonSignificance(pearson(xs, ys).r, 30);
-    expect(sig.p).toBeLessThan(0.001);
-    expect(sig.significant).toBe(true);
-    expect(pearsonSignificance(0.9, 3).significant).toBe(false); // n<=3 rejected
+/** Deterministic pseudo-random noise (no Math.random). */
+function noise(n: number, seed = 1): number[] {
+  let s = seed >>> 0;
+  const out: number[] = [];
+  for (let i = 0; i < n; i++) {
+    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+    out.push(s / 4294967296);
+  }
+  return out;
+}
+
+describe('grangerCausality', () => {
+  it('detects a one-lag leading indicator', () => {
+    // x drives y with a lag: y[t] = x[t-1] + small deterministic noise.
+    const n = 120;
+    const e = noise(n, 7).map((v) => (v - 0.5) * 0.1);
+    const x: number[] = [];
+    const y: number[] = [];
+    for (let t = 0; t < n; t++) {
+      x.push(Math.sin(t / 5) + e[t]);
+      y.push((t > 0 ? x[t - 1] : 0) + e[t] * 0.2);
+    }
+    const r = grangerCausality(x, y, 3);
+    expect(r.ok).toBe(true);
+    expect(r.bestLag).toBe(1);
+    expect(r.significant).toBe(true);
   });
 
-  it('normalCdf is a valid CDF', () => {
-    expect(normalCdf(0)).toBeCloseTo(0.5, 3);
-    expect(normalCdf(-3)).toBeLessThan(0.01);
-    expect(normalCdf(3)).toBeGreaterThan(0.99);
+  it('does not flag independent series as causal', () => {
+    const n = 120;
+    const e1 = noise(n, 11);
+    const e2 = noise(n, 29);
+    const r = grangerCausality(e1, e2, 3);
+    expect(r.ok).toBe(true);
+    expect(r.significant).toBe(false);
   });
 
-  it('benjaminiHochberg rejects the clear signals and reports q-values', () => {
-    const { rejected, qvalues } = benjaminiHochberg([0.001, 0.008, 0.039, 0.041, 0.9], 0.05);
-    expect(rejected[0]).toBe(true);
-    expect(rejected[4]).toBe(false);
-    expect(qvalues.every((q) => q >= 0 && q <= 1)).toBe(true);
+  it('reports ok:false for a short series', () => {
+    const r = grangerCausality([1, 2, 3, 4], [1, 2, 3, 4], 3);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/samples/);
+  });
+});
+
+describe('transferEntropy', () => {
+  it('is deterministic for identical input', () => {
+    const n = 200;
+    const x = noise(n, 3);
+    const y = x.map((v, i) => (i > 0 ? x[i - 1] : 0));
+    const a = transferEntropy(x, y, { bins: 4, history: 1 });
+    const b = transferEntropy(x, y, { bins: 4, history: 1 });
+    expect(a).toEqual(b);
+    expect(a.ok).toBe(true);
   });
 
-  it('lag-1 autocorrelation flags a random walk and not white noise', () => {
-    let s = 12345 >>> 0;
-    const rnd = () => { s = (s + 0x6d2b79f5) | 0; let t = Math.imul(s ^ (s >>> 15), 1 | s); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
-    const walk: number[] = []; let v = 0;
-    for (let i = 0; i < 200; i++) { v += rnd() - 0.5; walk.push(v); }
-    expect(needsDifferencing(walk)).toBe(true);
-    const white = Array.from({ length: 200 }, () => rnd() - 0.5);
-    expect(needsDifferencing(white)).toBe(false);
-    expect(difference(walk).length).toBe(walk.length - 1);
+  it('reports ok:false below the sample minimum', () => {
+    const r = transferEntropy([1, 2, 3, 4, 5], [2, 1, 3, 5, 4], { minSamples: 64 });
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/samples/);
   });
 
-  it('surprise and KL are well-defined', () => {
-    expect(surpriseBits(0.5)).toBe(1);
-    expect(surpriseBits(0)).toBe(Infinity);
-    expect(klDivergence([0.5, 0.5], [0.5, 0.5])).toBe(0);
-    expect(klDivergence([0.9, 0.1], [0.5, 0.5])).toBeGreaterThan(0);
+  it('scores a coupled pair higher than a shuffled surrogate', () => {
+    const n = 400;
+    const x = noise(n, 5);
+    // y is a deterministic function of x's recent value -> strong coupling.
+    const y = x.map((v, i) => (i >= 2 ? (x[i - 1] > 0.5 ? x[i - 2] : 1 - x[i - 2]) : v));
+    const coupled = transferEntropy(x, y, { bins: 4, history: 2, minSamples: 64 });
+    // A surrogate: rotate x so the temporal coupling is destroyed.
+    const shifted = x.map((_, i) => x[(i + 137) % n]);
+    const surrogate = transferEntropy(shifted, y, { bins: 4, history: 2, minSamples: 64 });
+    expect(coupled.ok).toBe(true);
+    expect(surrogate.ok).toBe(true);
+    expect(coupled.bits).toBeGreaterThan(0);
+    expect(coupled.bits).toBeGreaterThan(surrogate.bits);
+  });
+});
+
+describe('stationarize', () => {
+  it('differences a random walk into stationarity', () => {
+    // Accumulated noise = random walk with strong lag-1 autocorrelation.
+    const steps = noise(200, 13).map((v) => v - 0.5);
+    const walk: number[] = [];
+    let acc = 0;
+    for (const s of steps) {
+      acc += s;
+      walk.push(acc);
+    }
+    expect(Math.abs(lag1Autocorr(walk))).toBeGreaterThan(0.8);
+    const r = stationarize(walk);
+    expect(r.transforms.length).toBeGreaterThan(0);
+    expect(r.series.length).toBeLessThan(walk.length);
+    expect(Math.abs(lag1Autocorr(r.series))).toBeLessThan(0.8);
   });
 
-  it('surrogatePValue is deterministic and rejects an obvious association', () => {
-    const xs = Array.from({ length: 40 }, (_, i) => i);
-    const ys = xs.map((x) => x + 1);
-    const stat = (a: number[], b: number[]) => pearson(a, b).r;
-    const p1 = surrogatePValue(xs, ys, stat, { seed: 7, iterations: 200 });
-    const p2 = surrogatePValue(xs, ys, stat, { seed: 7, iterations: 200 });
-    expect(p1).toBe(p2);
-    expect(p1).toBeLessThan(0.05);
+  it('leaves white noise unchanged', () => {
+    const white = noise(200, 17).map((v) => v - 0.5);
+    const r = stationarize(white);
+    expect(r.transforms).toEqual([]);
+    expect(r.series).toEqual(white);
   });
 });

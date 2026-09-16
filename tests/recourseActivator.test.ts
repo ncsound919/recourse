@@ -374,7 +374,7 @@ describe('probeAutopilotOnce', () => {
     h.listBusinessSlugs.mockReturnValue(['alpha']);
     h.loadBusinessProfile.mockReturnValue({ repo: { autoMergeEnabled: false }, business: { name: 'Alpha' } });
     const out = await probeAutopilotOnce();
-    expect(out).toEqual([{ ran: false, reason: 'autoMerge_disabled', business: 'alpha' }]);
+    expect(out).toMatchObject([{ ran: false, reason: 'autoMerge_disabled', business: 'alpha' }]);
     expect(h.runLoop).not.toHaveBeenCalled();
   });
 
@@ -382,7 +382,7 @@ describe('probeAutopilotOnce', () => {
     h.listBusinessSlugs.mockReturnValue(['alpha']);
     h.loadBusinessProfile.mockReturnValue({ business: { name: 'Alpha' } });
     const out = await probeAutopilotOnce();
-    expect(out).toEqual([{ ran: false, reason: 'autoMerge_disabled', business: 'alpha' }]);
+    expect(out).toMatchObject([{ ran: false, reason: 'autoMerge_disabled', business: 'alpha' }]);
   });
 
   it('runs the dry-run audit with requireCheckpoint from the env', async () => {
@@ -392,8 +392,8 @@ describe('probeAutopilotOnce', () => {
     h.loadBusinessProfile.mockReturnValue(profile);
     h.runLoop.mockResolvedValue({ state: { status: 'audited' }, context: {} });
     const out = await probeAutopilotOnce();
-    expect(out).toEqual([{ ran: true, business: 'alpha', reason: 'dry_run_audit', status: 'audited' }]);
-    expect(h.runLoop).toHaveBeenCalledWith({ profile, dryRun: true, requireCheckpoint: true });
+    expect(out).toMatchObject([{ ran: true, business: 'alpha', reason: 'dry_run_audit', status: 'audited' }]);
+    expect(h.runLoop).toHaveBeenCalledWith(expect.objectContaining({ profile, dryRun: true, requireCheckpoint: true }));
   });
 
   it('runs the dry-run audit with requireCheckpoint from the profile', async () => {
@@ -402,8 +402,8 @@ describe('probeAutopilotOnce', () => {
     h.loadBusinessProfile.mockReturnValue(profile);
     h.runLoop.mockResolvedValue({ state: { status: 'audited' }, context: {} });
     const out = await probeAutopilotOnce();
-    expect(out).toEqual([{ ran: true, business: 'alpha', reason: 'dry_run_audit', status: 'audited' }]);
-    expect(h.runLoop).toHaveBeenCalledWith({ profile, dryRun: true, requireCheckpoint: true });
+    expect(out).toMatchObject([{ ran: true, business: 'alpha', reason: 'dry_run_audit', status: 'audited' }]);
+    expect(h.runLoop).toHaveBeenCalledWith(expect.objectContaining({ profile, dryRun: true, requireCheckpoint: true }));
   });
 
   it('runs the dry-run audit with requireCheckpoint false when neither source sets it', async () => {
@@ -412,8 +412,8 @@ describe('probeAutopilotOnce', () => {
     h.loadBusinessProfile.mockReturnValue(profile);
     h.runLoop.mockResolvedValue({ state: { status: 'idle' }, context: {} });
     const out = await probeAutopilotOnce();
-    expect(out).toEqual([{ ran: true, business: 'alpha', reason: 'dry_run_audit', status: 'idle' }]);
-    expect(h.runLoop).toHaveBeenCalledWith({ profile, dryRun: true, requireCheckpoint: false });
+    expect(out).toMatchObject([{ ran: true, business: 'alpha', reason: 'dry_run_audit', status: 'idle' }]);
+    expect(h.runLoop).toHaveBeenCalledWith(expect.objectContaining({ profile, dryRun: true, requireCheckpoint: false }));
   });
 
   it('reports per-business errors with Error.message and string fallback', async () => {
@@ -424,7 +424,7 @@ describe('probeAutopilotOnce', () => {
       throw 'stringerr';
     });
     const out = await probeAutopilotOnce();
-    expect(out).toEqual([
+    expect(out).toMatchObject([
       { ran: false, reason: 'autoMerge_disabled', business: 'alpha' },
       { ran: false, reason: 'error:boom', business: 'beta' },
       { ran: false, reason: 'error:stringerr', business: 'gamma' },

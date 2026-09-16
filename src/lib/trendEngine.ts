@@ -17,7 +17,7 @@
  * and every scan returns a manifest hash so reruns are diffable.
  */
 
-import { pearsonSignificance, benjaminiHochberg } from './synergy/stats.js';
+import { pearsonSignificance, benjaminiHochberg, stationarize } from './synergy/stats.js';
 
 // --- Types -------------------------------------------------------------------
 
@@ -407,9 +407,23 @@ export function laggedCorrelation(a: TrendSeries, b: TrendSeries, maxLag = 5): L
 
 // --- Scan ----------------------------------------------------------------------
 
+/**
+ * Difference a series until stationary for cross-domain correlation. Only used
+ * when the caller opts in (`stationarize: true`) so default output is unchanged.
+ */
+function stationarizeSeries(s: TrendSeries): TrendSeries {
+  const r = stationarize(s.points.map((p) => p.value));
+  if (r.transforms.length === 0) return s;
+  const offset = s.points.length - r.series.length;
+  return {
+    ...s,
+    points: r.series.map((value, i) => ({ ...s.points[i + offset], value })),
+  };
+}
+
 export function runTrendScan(
   seriesList: TrendSeries[],
-  opts?: { gamma?: number; sigma?: number; maxLag?: number; topK?: number },
+  opts?: { gamma?: number; sigma?: number; maxLag?: number; topK?: number; stationarize?: boolean },
 ): TrendScanResult {
   const gamma = opts?.gamma ?? 2.0;
   const sigma = opts?.sigma ?? 2;
@@ -425,10 +439,12 @@ export function runTrendScan(
     momentum.push(momentumOf(s));
   }
 
-  // Cross-domain: all ordered pairs.
+  // Cross-domain: all ordered pairs. Optionally difference first so lagged
+  // correlation is not dominated by shared trend (opt-in; defaults unchanged).
+  const crossSource = opts?.stationarize ? seriesList.map(stationarizeSeries) : seriesList;
   let crossDomain: LaggedCorrelation[] = [];
-  for (const a of seriesList) {
-    for (const b of seriesList) {
+  for (const a of crossSource) {
+    for (const b of crossSource) {
       if (a.id === b.id) continue;
       crossDomain.push(laggedCorrelation(a, b, maxLag));
     }

@@ -1,9 +1,12 @@
 // src/lib/synergy/stats.ts
 /**
- * Deterministic statistical evidence for the synergy engine. No deps, no wall
- * clock. Constants are calibration. Fisher-z significance, BH-FDR, lag-1
- * stationarity heuristic, self-information, KL divergence, seeded surrogate null.
+ * Deterministic statistical evidence for the synergy engine. No wall clock.
+ * Constants are calibration. Fisher-z significance, BH-FDR, lag-1 stationarity
+ * heuristic + differencing, self-information, KL divergence, seeded surrogate
+ * null, linear Granger causality (F-test) and histogram transfer entropy.
+ * `jstat` provides the F-distribution CDF (already a project dependency).
  */
+import jStat from 'jstat';
 export function mean(xs: number[]): number {
   return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0;
 }
@@ -81,6 +84,206 @@ export function needsDifferencing(v: number[], threshold = 0.8): boolean {
 
 export function difference(v: number[]): number[] {
   return v.slice(1).map((x, i) => x - v[i]);
+}
+
+/**
+ * Difference a series until its lag-1 autocorrelation falls below `threshold`,
+ * returning the transform chain. Random walks become stationary; white noise is
+ * returned unchanged (empty chain). Iterations are capped so a pathological
+ * series cannot loop forever.
+ */
+export function stationarize(
+  v: number[],
+  opts: { threshold?: number; maxIterations?: number } = {},
+): { series: number[]; transforms: string[] } {
+  const threshold = opts.threshold ?? 0.8;
+  const maxIterations = Math.max(0, opts.maxIterations ?? 3);
+  let series = [...v];
+  const transforms: string[] = [];
+  for (let i = 0; i < maxIterations; i++) {
+    if (series.length < 3 || !needsDifferencing(series, threshold)) break;
+    series = difference(series);
+    transforms.push('difference');
+  }
+  return { series, transforms };
+}
+
+// ---------------------------------------------------------------------------
+// Directional lead-lag: Granger causality (linear) + transfer entropy (nonlinear)
+// ---------------------------------------------------------------------------
+
+export interface GrangerResult {
+  ok: boolean;
+  bestLag: number;
+  fStat: number;
+  p: number;
+  significant: boolean;
+  n: number;
+  reason?: string;
+}
+
+/** Solve the normal equations (X'X)b = X'y via Gaussian elimination. */
+function olsResiduals(y: number[], X: number[][]): number {
+  const k = X[0].length;
+  const xtx: number[][] = Array.from({ length: k }, () => Array.from({ length: k }, () => 0));
+  const xty: number[] = Array.from({ length: k }, () => 0);
+  for (let i = 0; i < y.length; i++) {
+    for (let a = 0; a < k; a++) {
+      xty[a] += X[i][a] * y[i];
+      for (let b = 0; b < k; b++) xtx[a][b] += X[i][a] * X[i][b];
+    }
+  }
+  // Augment and reduce.
+  const M = xtx.map((row, i) => [...row, xty[i]]);
+  for (let col = 0; col < k; col++) {
+    let piv = col;
+    for (let r = col + 1; r < k; r++) if (Math.abs(M[r][col]) > Math.abs(M[piv][col])) piv = r;
+    if (Math.abs(M[piv][col]) < 1e-12) return Infinity;
+    [M[col], M[piv]] = [M[piv], M[col]];
+    const d = M[col][col];
+    for (let c = col; c <= k; c++) M[col][c] /= d;
+    for (let r = 0; r < k; r++) {
+      if (r === col) continue;
+      const f = M[r][col];
+      if (f === 0) continue;
+      for (let c = col; c <= k; c++) M[r][c] -= f * M[col][c];
+    }
+  }
+  const beta = M.map((row) => row[k]);
+  let rss = 0;
+  for (let i = 0; i < y.length; i++) {
+    let pred = 0;
+    for (let a = 0; a < k; a++) pred += beta[a] * X[i][a];
+    const e = y[i] - pred;
+    rss += e * e;
+  }
+  return rss;
+}
+
+/**
+ * Linear Granger causality: does X help predict Y beyond Y's own lags?
+ * OLS + F-test over lags 1..maxLag; returns the strongest lag. Linear only —
+ * a nonlinear dependence may be invisible here (use transferEntropy for that).
+ * Honest: `ok:false` when there are too few samples for a stable fit.
+ */
+export function grangerCausality(xs: number[], ys: number[], maxLag = 3): GrangerResult {
+  const n = Math.min(xs.length, ys.length);
+  let best: GrangerResult | null = null;
+  for (let lag = 1; lag <= Math.max(1, maxLag); lag++) {
+    const start = lag;
+    const N = n - start;
+    if (N < 3 * lag + 2 || N <= 2 * lag + 1) continue;
+    const Xr: number[][] = [];
+    const Xu: number[][] = [];
+    const Y: number[] = [];
+    for (let t = start; t < n; t++) {
+      const yr = [1];
+      for (let l = 1; l <= lag; l++) yr.push(ys[t - l]);
+      const xu = [...yr];
+      for (let l = 1; l <= lag; l++) xu.push(xs[t - l]);
+      Xr.push(yr);
+      Xu.push(xu);
+      Y.push(ys[t]);
+    }
+    const rssR = olsResiduals(Y, Xr);
+    const rssU = olsResiduals(Y, Xu);
+    const df2 = N - (2 * lag + 1);
+    if (!Number.isFinite(rssR) || !Number.isFinite(rssU) || df2 <= 0 || rssU <= 0) continue;
+    const fStat = ((rssR - rssU) / lag) / (rssU / df2);
+    const p = Math.max(0, 1 - jStat.centralF.cdf(Math.max(0, fStat), lag, df2));
+    const round = (x: number) => Math.round(x * 1e6) / 1e6;
+    const candidate: GrangerResult = {
+      ok: true,
+      bestLag: lag,
+      fStat: round(fStat),
+      p: round(p),
+      significant: p < 0.05,
+      n: N,
+    };
+    if (!best || candidate.p < best.p) best = candidate;
+  }
+  if (!best) {
+    return { ok: false, bestLag: maxLag, fStat: 0, p: 1, significant: false, n, reason: 'too few samples for a stable fit' };
+  }
+  return best;
+}
+
+export interface TransferEntropyResult {
+  ok: boolean;
+  bits: number;
+  n: number;
+  bins: number;
+  history: number;
+  reason?: string;
+}
+
+/** Bin a series into `bins` equal-width buckets over [min,max] (deterministic). */
+function binned(v: number[], bins: number): number[] {
+  const lo = Math.min(...v);
+  const hi = Math.max(...v);
+  const span = hi - lo || 1;
+  return v.map((x) => Math.min(bins - 1, Math.max(0, Math.floor(((x - lo) / span) * bins))));
+}
+
+/**
+ * Histogram transfer entropy TE(X -> Y) with `history`-deep embedding. Reports
+ * `ok:false` below `minSamples` — TE is sample-hungry and bin-sensitive, so a
+ * low-sample estimate is withheld rather than returned as noise.
+ */
+export function transferEntropy(
+  xs: number[],
+  ys: number[],
+  opts: { bins?: number; history?: number; minSamples?: number } = {},
+): TransferEntropyResult {
+  const bins = Math.max(2, opts.bins ?? 4);
+  const history = Math.max(1, opts.history ?? 1);
+  const minSamples = Math.max(16, opts.minSamples ?? 64);
+  const n = Math.min(xs.length, ys.length);
+  const bx = binned(xs.slice(0, n), bins);
+  const by = binned(ys.slice(0, n), bins);
+  const usable = n - history;
+  if (usable < minSamples) {
+    return { ok: false, bits: 0, n: usable, bins, history, reason: `need >= ${minSamples} usable samples` };
+  }
+  const joint = new Map<string, number>(); // (y', yhist, xhist)
+  const yHistXHist = new Map<string, number>();
+  const yNextYHist = new Map<string, number>();
+  const yHist = new Map<string, number>();
+  let total = 0;
+  const key = (arr: Array<number | string>) => arr.join(',');
+  for (let t = history; t < n; t++) {
+    const yNext = by[t];
+    const yh: number[] = [];
+    const xh: number[] = [];
+    for (let l = 1; l <= history; l++) {
+      yh.push(by[t - l]);
+      xh.push(bx[t - l]);
+    }
+    const k3 = key([yNext, ...yh, ...xh]);
+    const k2a = key([...yh, ...xh]);
+    const k2b = key([yNext, ...yh]);
+    const k1 = key(yh);
+    joint.set(k3, (joint.get(k3) ?? 0) + 1);
+    yHistXHist.set(k2a, (yHistXHist.get(k2a) ?? 0) + 1);
+    yNextYHist.set(k2b, (yNextYHist.get(k2b) ?? 0) + 1);
+    yHist.set(k1, (yHist.get(k1) ?? 0) + 1);
+    total++;
+  }
+  let bits = 0;
+  for (const [k3, c3] of joint) {
+    const parts = k3.split(',');
+    const yNext = parts[0];
+    const yh = parts.slice(1, 1 + history);
+    const xh = parts.slice(1 + history);
+    const k2a = key([...yh, ...xh]);
+    const k2b = key([Number(yNext), ...yh]);
+    const k1 = key(yh);
+    const p3 = c3 / total;
+    const pCond = c3 / (yHistXHist.get(k2a) ?? c3);
+    const pCondY = (yNextYHist.get(k2b) ?? 0) / (yHist.get(k1) ?? 1);
+    if (pCond > 0 && pCondY > 0) bits += p3 * Math.log2(pCond / pCondY);
+  }
+  return { ok: true, bits: Math.round(bits * 1e6) / 1e6, n: usable, bins, history };
 }
 
 export function surpriseBits(p: number): number {

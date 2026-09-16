@@ -298,6 +298,56 @@ server.registerTool('recourse.benchmark', {
   } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
 });
 
+server.registerTool('recourse.benchmark_leaderboard', {
+  title: 'Self-attested benchmark leaderboard',
+  description: 'The hash-chained record of every external benchmark run, ranked by solved count, with per-run deltas and registry attestations. Read-only.',
+}, async () => {
+  try {
+    const j = await apiGet('/api/recourse/benchmark/leaderboard');
+    return text(JSON.stringify({ count: j?.count, entries: j?.entries }, null, 2));
+  } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
+});
+
+server.registerTool('recourse.benchmark_ledger', {
+  title: 'Benchmark ledger (chain validity)',
+  description: 'Recent self-attested benchmark records and whether the hash chain is intact. Read-only.',
+}, async () => {
+  try {
+    const j = await apiGet('/api/recourse/benchmark/ledger');
+    return text(JSON.stringify({ chain: j?.chain, records: j?.records }, null, 2));
+  } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
+});
+
+server.registerTool('recourse.wallet', {
+  title: 'Budgeted action wallet status',
+  description: 'Per-token spend budgets, remaining balances, and whether the hash-chained ledger is intact. Read-only.',
+}, async () => {
+  try {
+    const j = await apiGet('/api/recourse/wallet');
+    return text(JSON.stringify({ chainValid: j?.chainValid, brokenAt: j?.brokenAt, balances: j?.balances }, null, 2));
+  } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
+});
+
+server.registerTool('recourse.telemetry', {
+  title: 'Environment telemetry',
+  description: 'Machine load/memory and git state, plus the work-window decision used to schedule heavy jobs. Read-only.',
+}, async () => {
+  try {
+    const j = await apiGet('/api/recourse/telemetry');
+    return text(JSON.stringify(j?.snapshot ?? j, null, 2));
+  } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
+});
+
+server.registerTool('recourse.audio_status', {
+  title: 'Transcription sidecar status',
+  description: 'Whether the audio/video transcription sidecar is reachable and its ASR backend is available. Read-only.',
+}, async () => {
+  try {
+    const j = await apiGet('/api/recourse/audio/status');
+    return text(JSON.stringify(j?.health ?? j, null, 2));
+  } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
+});
+
 server.registerTool('recourse.compose_soundlab', {
   title: 'Emit a piece for SoundLab playback',
   description: 'Compose a style-driven piece and emit the SoundLab bridge contract. Feed the returned JSON to a running SoundLab via window.__recourse.load(piece), then __recourse.play(). Mutating: requires RECOURSE_API_SECRET.',
@@ -455,6 +505,129 @@ server.registerTool('recourse.axiom_build', {
   const r = await apiPost('/api/recourse/axiom/build-tool', { name, domain, prompt, refSuite });
   if (!r.ok) return text(`Axiom build failed (HTTP ${r.status}): ${r.data?.error ?? 'unknown error'}`);
   return text(JSON.stringify(r.data, null, 2));
+});
+
+// ---------------------------------------------------------------------------
+// Full-loop control tools (Phase 4 #14 continued). Read tools proxy live state;
+// write tools hit the guarded REST routes and require RECOURSE_API_SECRET.
+// ---------------------------------------------------------------------------
+
+server.registerTool('recourse.sandbox_status', {
+  title: 'Capability sandbox status',
+  description: 'Whether the WASM capability sandbox runtime (QuickJS) is live, the warm guest-context count, and the effective default execution path.',
+}, async () => {
+  try {
+    const j = await apiGet('/api/recourse/selfhosted/sandbox');
+    return text(JSON.stringify(j, null, 2));
+  } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
+});
+
+server.registerTool('recourse.memory_tiered', {
+  title: 'Tiered memory status',
+  description: 'Durable episodic + semantic memory backend (SQLite/memory), DB path, episode count, fact count.',
+}, async () => {
+  try {
+    const j = await apiGet('/api/recourse/memory/tiered');
+    return text(JSON.stringify(j, null, 2));
+  } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
+});
+
+server.registerTool('recourse.recall_memory', {
+  title: 'Recall from Recourse memory',
+  description: 'Semantic recall over Recourse vector memory for a query. Read-only.',
+  inputSchema: {
+    q: z.string().describe('Query text'),
+    kind: z.string().optional().describe('Optional memory kind filter'),
+    topK: z.number().int().min(1).max(20).optional().describe('Number of hits (default 5)'),
+  },
+}, async ({ q, kind, topK }) => {
+  try {
+    const qs = new URLSearchParams({ q: String(q ?? '') });
+    if (kind) qs.set('kind', kind);
+    if (topK) qs.set('topK', String(topK));
+    const j = await apiGet(`/api/recourse/memory/recall?${qs.toString()}`);
+    return text(JSON.stringify(j, null, 2));
+  } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
+});
+
+server.registerTool('recourse.inspect_learner', {
+  title: 'Inspect the recursive learner',
+  description: 'Learner status: episodes, gene beliefs, directives, and last report.',
+}, async () => {
+  try {
+    const j = await apiGet('/api/recourse/learn/status');
+    return text(JSON.stringify(j, null, 2));
+  } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
+});
+
+server.registerTool('recourse.problems', {
+  title: 'List hard/unsolved problems',
+  description: 'The curated hard-math problem bank with acceptance tests and tier.',
+}, async () => {
+  try {
+    const j = await apiGet('/api/recourse/math/problems');
+    return text(JSON.stringify({ count: j?.count, total: j?.total, problems: j?.problems }, null, 2));
+  } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
+});
+
+server.registerTool('recourse.run_forge', {
+  title: 'Run the capability forge',
+  description: 'Run the honest self-improvement forge loop (agenda -> model implementation -> sandbox verify -> promote). Promotions only land on a real green suite. Mutating: requires RECOURSE_API_SECRET.',
+  inputSchema: { count: z.number().int().min(1).max(3).optional().describe('Forge cycles to run (default 1)') },
+}, async ({ count }) => {
+  const r = await apiPost('/api/recourse/forge/run', { count: count ?? 1 });
+  if (!r.ok) return text(`run_forge failed (HTTP ${r.status}): ${r.data?.error ?? 'see server log'}`);
+  return text(JSON.stringify({ ok: r.data?.success, results: r.data?.results, forge: r.data?.forge }, null, 2));
+});
+
+server.registerTool('recourse.execute_selfhosted', {
+  title: 'Execute a self-hosted tool (through the sandbox)',
+  description: 'Call a self-hosted tool method. Execution goes through the WASM capability sandbox by default (default-deny grants); the response reports which mode actually ran. Mutating: requires RECOURSE_API_SECRET.',
+  inputSchema: {
+    name: z.string().describe('Self-hosted tool name'),
+    method: z.string().describe('Method from the tool\'s declared whitelist'),
+    args: z.array(z.any()).optional().describe('Method arguments'),
+    mode: z.enum(['auto', 'sandbox', 'direct']).optional().describe('Execution path (default auto)'),
+  },
+}, async ({ name, method, args, mode }) => {
+  if (!name || !method) return text('name and method are required.');
+  const r = await apiPost(`/api/recourse/selfhosted/${encodeURIComponent(name)}/execute`, { method, args: args ?? [], mode });
+  if (!r.ok) return text(`execute_selfhosted failed (HTTP ${r.status}): ${r.data?.error ?? 'see server log'}`);
+  return text(JSON.stringify({ ok: true, tool: r.data?.tool, method: r.data?.method, mode: r.data?.mode, grantUse: r.data?.grantUse, result: r.data?.result, executionTimeMs: r.data?.executionTimeMs }, null, 2));
+});
+
+server.registerTool('recourse.consolidate_memory', {
+  title: 'Consolidate tiered memory',
+  description: 'Fold episode clusters into durable semantic facts (idempotent). Mutating: requires RECOURSE_API_SECRET.',
+  inputSchema: { minClusterSize: z.number().int().min(1).max(50).optional().describe('Minimum loss episodes per cluster (default 2)') },
+}, async ({ minClusterSize }) => {
+  const r = await apiPost('/api/recourse/memory/consolidate', { minClusterSize });
+  if (!r.ok) return text(`consolidate_memory failed (HTTP ${r.status}): ${r.data?.error ?? 'see server log'}`);
+  return text(JSON.stringify({ ok: true, created: r.data?.created, episodes: r.data?.episodes, facts: r.data?.facts, factsCreated: r.data?.facts_created ?? undefined, driver: r.data?.kind }, null, 2));
+});
+
+server.registerTool('recourse.promote_skills', {
+  title: 'Promote generalist genes to exportable skills',
+  description: 'Run the skill auto-promotion pass: generalist genes -> backing tool re-verified in the sandbox -> lint gate -> SKILL.md export. Rejected/skipped outcomes are reported honestly. Mutating: requires RECOURSE_API_SECRET.',
+  inputSchema: {
+    minDistinctProblemWins: z.number().int().min(1).max(20).optional().describe('Distinct-problem wins required (default 2)'),
+    maxPerRun: z.number().int().min(1).max(10).optional().describe('Max candidates per pass (default 3)'),
+  },
+}, async ({ minDistinctProblemWins, maxPerRun }) => {
+  const r = await apiPost('/api/recourse/memory/promote-skills', { minDistinctProblemWins, maxPerRun });
+  if (!r.ok) return text(`promote_skills failed (HTTP ${r.status}): ${r.data?.error ?? 'see server log'}`);
+  return text(JSON.stringify({ ok: true, candidates: r.data?.candidates, outRoot: r.data?.outRoot, outcomes: r.data?.outcomes }, null, 2));
+});
+
+server.registerTool('recourse.revert', {
+  title: 'Revert an applied fleet patch',
+  description: 'Revert an applied patch by its revert token (as recorded in provenance). Mutating: requires RECOURSE_API_SECRET.',
+  inputSchema: { token: z.string().describe('Revert token of the applied patch') },
+}, async ({ token }) => {
+  if (!token) return text('token is required.');
+  const r = await apiPost('/api/recourse/develop/revert', { token });
+  if (!r.ok) return text(`revert failed (HTTP ${r.status}): ${r.data?.error ?? 'see server log'}`);
+  return text(JSON.stringify({ ok: true, file: r.data?.file, token }, null, 2));
 });
 
 const transport = new StdioServerTransport();

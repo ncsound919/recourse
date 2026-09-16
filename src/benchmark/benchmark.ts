@@ -10,6 +10,7 @@
  * Because the registry only grows, solved-count over time is a genuine, monotone
  * measure of external capability — not a self-report.
  */
+import crypto from 'node:crypto';
 import type { BenchmarkProblem, BenchmarkRun } from '../intake/types';
 import type { ToolDomain, ToolEntry } from '../types';
 import { executeTestSuite } from '../lib/executionSandbox';
@@ -236,6 +237,22 @@ export function runBenchmark(registry: ToolEntry[]): BenchmarkRun {
     total: BENCHMARK_PROBLEMS.length,
     solvedIds,
   };
+}
+
+/**
+ * Attest exactly which live sources were scored. The hash covers each tool name
+ * and its current source, so a ledger record proves what the run measured.
+ */
+export function registryAttestation(registry: ToolEntry[]): string {
+  const parts = registry
+    .map((t) => {
+      const cur = currentToolSource(t);
+      return cur
+        ? `${t.name}:${crypto.createHash('sha256').update(cur.source).digest('hex').slice(0, 16)}`
+        : `${t.name}:none`;
+    })
+    .sort();
+  return crypto.createHash('sha256').update(parts.join('|')).digest('hex');
 }
 
 export function benchmarkSummary(run: BenchmarkRun | null): { solved: number; total: number; pct: number } {

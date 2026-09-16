@@ -6,6 +6,7 @@
 import type { MethodSignature, Rel, StudShape } from './types.js';
 import { canonicalizeTerm, isKnownPrimitive } from './vocabulary.js';
 import { sha256Hex } from './manifest.js';
+import { relationsForMethod } from './relationExtract.js';
 
 export interface RawMethod {
   id: string;
@@ -63,6 +64,11 @@ export function extractMethod(raw: RawMethod): ExtractResult {
     if (reason) return { ok: false, rejected: reason };
   }
   const primitives = (raw.primitives ?? []).map(canonicalizeTerm).filter(isKnownPrimitive);
+  // Real relational predicates: caller-provided, plus explicit `@rel` annotations
+  // in the source. Only when at least one real predicate exists do we stop using
+  // the coarse primitive placeholder (which SME must not align on).
+  const extracted = relationsForMethod({ sourceCode: raw.sourceCode, relations: raw.relations, domain: raw.domain });
+  const hasRealRelations = extracted.relations.length > 0;
   return {
     ok: true,
     method: {
@@ -75,8 +81,8 @@ export function extractMethod(raw: RawMethod): ExtractResult {
       outputContract: raw.outputContract,
       complexity: raw.complexity,
       deterministic: true,
-      relations: raw.relations ?? relationsFromPrimitives(primitives, raw.domain),
-      relationBasis: raw.relations && raw.relations.length > 0 ? 'declared' : 'placeholder',
+      relations: hasRealRelations ? extracted.relations : relationsFromPrimitives(primitives, raw.domain),
+      relationBasis: hasRealRelations ? 'declared' : 'placeholder',
       suiteHash: raw.suite ? sha256Hex(raw.suite) : undefined,
     },
   };

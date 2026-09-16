@@ -21,7 +21,9 @@ import { pathToFileURL } from 'url';
 import { transformSync } from 'esbuild';
 import type { ToolDomain } from '../types';
 import type { SelfHostDescriptor, SelfHostMethod } from './templatePlugin';
-import { executeTestSuite } from './executionSandbox';
+import { executeTestSuite, prepareExecutableCode } from './executionSandbox';
+import { validateGrants } from './wasmSandbox/grants';
+import type { CapabilityGrants } from './wasmSandbox/types';
 
 export type ArtifactKind = 'function' | 'cli' | 'api' | 'mcp' | 'a2a' | 'loop';
 
@@ -35,6 +37,15 @@ export interface SelfHostedManifestEntry {
   methods: SelfHostMethod[];
   /** Runtime transport of this self-hosted module (absent => 'function'). */
   artifactKind?: ArtifactKind;
+  /** Which guest shape the entrypoint is: a class (template) or a bare function. */
+  entrypointKind?: 'class' | 'function';
+  /** Constructor param ids (from `params`), in order, for stateful class tools. */
+  ctorParamIds?: string[];
+  /**
+   * Capability grants attached at promotion time. Default deny — an absent
+   * entry means `{}` (no fs/net/secrets/spend), i.e. pure computation only.
+   */
+  grants?: CapabilityGrants;
   hash: string;
   /** Relative to the self-host root, e.g. `tools/<name>.mjs`. */
   file: string;
@@ -44,6 +55,8 @@ export interface SelfHostedManifestEntry {
   createdAt: number;
   lastVerifiedAt: number | null;
   lastVerified: { passed: boolean; detail: string } | null;
+  /** Independent WASM-sandbox re-run of the stored suite (null until run). */
+  lastSandboxVerified?: { passed: boolean; detail: string; at: number } | null;
 }
 
 export interface SelfHostedManifest {
@@ -62,6 +75,8 @@ export interface SelfHostedModuleInput {
   summary: string;
   selfHost: SelfHostDescriptor;
   artifactKind?: ArtifactKind;
+  /** Optional capability grants (default deny when omitted). */
+  grants?: CapabilityGrants;
 }
 
 export type SelfHostWriteResult =
@@ -73,6 +88,8 @@ export type SelfHostVerifyVerdict = {
   detail: string;
   moduleLoadError?: string;
   suiteError?: string;
+  /** Independent WASM-sandbox re-run of the same stored suite, when available. */
+  sandboxSuite?: { ran: boolean; passed: boolean; detail: string };
 };
 
 const MANIFEST_FILE = 'manifest.json';
@@ -210,6 +227,18 @@ function moduleHash(jsCode: string): string {
   return crypto.createHash('sha256').update(jsCode).digest('hex');
 }
 
+/** Validate optional capability grants, defaulting to the deny-all set `{}`. */
+function normalizeEntryGrants(
+  raw: CapabilityGrants | undefined
+): { ok: true; grants: CapabilityGrants } | { ok: false; error: string } {
+  if (raw === undefined) return { ok: true, grants: {} };
+  const validation = validateGrants(raw);
+  if ('errors' in validation) {
+    return { ok: false, error: `invalid capability grants: ${validation.errors.join('; ')}` };
+  }
+  return { ok: true, grants: validation.grants };
+}
+
 /**
  * Generates the module source (TS) for a self-hosted tool: the synthesized
  * component source plus a generic JSON-callable adapter. The adapter is the
@@ -309,6 +338,8 @@ export function writeSelfHostedTool(input: SelfHostedModuleInput, root: string =
     if (!input.selfHost || !Array.isArray(input.selfHost.methods) || input.selfHost.methods.length === 0) {
       return { success: false, error: `Template "${input.templateId}" has no selfHost method descriptor` };
     }
+    const grantsResult = normalizeEntryGrants(input.grants);
+    if ('error' in grantsResult) return { success: false, error: grantsResult.error };
     const moduleTs = generateSelfHostedModuleSource({
       sourceCode: input.sourceCode,
       entrypointName: input.entrypointName,
@@ -354,6 +385,11 @@ if (process.argv[1] && __isCliMain__.pathToFileURL(process.argv[1]).href === imp
       stateful: input.selfHost.stateful,
       methods: input.selfHost.methods,
       artifactKind,
+      entrypointKind: 'class',
+      // Store [] (not undefined) so a missing key unambiguously means a legacy
+      // entry whose constructor params were never recorded.
+      ctorParamIds: input.selfHost.ctorParamIds ?? [],
+      grants: grantsResult.grants,
       hash,
       file: `${TOOLS_DIR}/${fileName}`,
       sourceCode: input.sourceCode,
@@ -395,6 +431,7 @@ export function removeSelfHostedTool(
     /* file already gone — manifest is the source of truth */
   }
   MODULE_CACHE.delete(`${entry.file}@${entry.hash}`);
+  forgetSelfHostedExecutionMode(safeName);
   return { success: true, removedFile: entry.file };
 }
 
@@ -444,17 +481,40 @@ export async function verifySelfHostedEntry(
   }
 
   const suiteRun = executeTestSuite(entry.sourceCode, entry.testSuiteCode || 'assert true;');
+
+  // Independent second opinion: run the same suite inside the WASM sandbox.
+  // Additive only — the in-process/isolated verifier above remains the gate,
+  // but a green sandbox run (or a loud sandbox failure) is recorded honestly.
+  let sandboxSuite: SelfHostVerifyVerdict['sandboxSuite'];
+  try {
+    const sandbox = await import('./selfHostSandbox');
+    const run = await sandbox.verifySuiteInSandbox(entry.sourceCode, entry.testSuiteCode || 'assert true;');
+    if (run && run.ranInSandbox) {
+      sandboxSuite = {
+        ran: true,
+        passed: run.passed,
+        detail: run.passed
+          ? `${run.testDetails.length - 1} stored assertions green in WASM sandbox`
+          : `WASM sandbox suite failed: ${run.stderr.join('; ') || 'assertions failed'}`
+      };
+    }
+  } catch {
+    /* sandbox is optional; absence is not a verification failure */
+  }
+
   if (!suiteRun.passed) {
     return {
       passed: false,
       detail: `Stored suite FAILED against stored source (${suiteRun.testDetails.filter((d) => d.startsWith('[FAIL')).length} failures)`,
-      suiteError: suiteRun.stderr.join('\n')
+      suiteError: suiteRun.stderr.join('\n'),
+      sandboxSuite
     };
   }
 
   return {
     passed: true,
-    detail: `Module import OK + ${suiteRun.testDetails.length - 1} stored assertions green`
+    detail: `Module import OK + ${suiteRun.testDetails.length - 1} stored assertions green`,
+    sandboxSuite
   };
 }
 
@@ -465,38 +525,145 @@ export async function verifyAllSelfHosted(root: string = defaultSelfHostRoot()):
     const verdict = await verifySelfHostedEntry(entry, root);
     entry.lastVerifiedAt = Date.now();
     entry.lastVerified = { passed: verdict.passed, detail: verdict.detail };
+    entry.lastSandboxVerified = verdict.sandboxSuite?.ran
+      ? { passed: verdict.sandboxSuite.passed, detail: verdict.sandboxSuite.detail, at: Date.now() }
+      : null;
   }
   persistManifest(manifest, root);
   return manifest.entries;
 }
 
+export type SelfHostExecutionMode = 'sandbox' | 'direct';
+
 export type SelfHostExecuteResult =
-  | { success: true; result: any; executionTimeMs: number }
-  | { success: false; error: string; executionTimeMs: number };
+  | { success: true; result: any; executionTimeMs: number; mode: SelfHostExecutionMode; grantUse?: import('./wasmSandbox/types').GrantUseRecord[] }
+  | { success: false; error: string; executionTimeMs: number; mode: SelfHostExecutionMode };
+
+export interface SelfHostExecuteOptions {
+  /**
+   * 'auto' (default) prefers the WASM sandbox and falls back to the direct
+   * import ONLY when the sandbox is unavailable or cannot represent the tool.
+   * A grant denial or a tool error never silently escalates to direct import.
+   * 'sandbox' / 'direct' pin the path explicitly.
+   */
+  mode?: 'auto' | SelfHostExecutionMode;
+  /** On-disk root the sandbox fs grant is confined to. */
+  fsRoot?: string;
+  /** Notified for every capability check the guest triggered. */
+  onGrantUse?: (record: import('./wasmSandbox/types').GrantUseRecord) => void;
+}
+
+/** Remembers the resolved path per tool+hash so stateful tools never split. */
+const RESOLVED_EXECUTION_MODE = new Map<string, SelfHostExecutionMode>();
+
+/** Direct dynamic import + call (full server privileges). */
+async function executeSelfHostedDirect(
+  entry: SelfHostedManifestEntry,
+  op: { method: string; args?: any[] },
+  root: string
+): Promise<SelfHostExecuteResult> {
+  const started = performance.now();
+  try {
+    const module = await importSelfHostedModule(entry, root);
+    const result = module.execute(op);
+    return { success: true, result, executionTimeMs: Math.round((performance.now() - started) * 100) / 100, mode: 'direct' };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err?.message || String(err),
+      executionTimeMs: Math.round((performance.now() - started) * 100) / 100,
+      mode: 'direct',
+    };
+  }
+}
 
 /**
  * Calls a live self-hosted tool. The tool must exist in the manifest; the
  * method must be on the plugin-declared whitelist; the result must be
  * JSON-serializable. Real module, real call, honest errors.
+ *
+ * By default execution goes through the WASM capability sandbox (default-deny
+ * grants). The direct import path is a labelled fallback, never a silent one.
  */
 export async function executeSelfHostedTool(
   name: string,
   op: { method: string; args?: any[] },
-  root: string = defaultSelfHostRoot()
+  root: string = defaultSelfHostRoot(),
+  options: SelfHostExecuteOptions = {}
 ): Promise<SelfHostExecuteResult> {
-  const started = performance.now();
+  const entry = getSelfHostedEntry(toSafeModuleName(name), root);
+  if (!entry) {
+    return { success: false, error: `No self-hosted tool named "${toSafeModuleName(name)}"`, executionTimeMs: 0, mode: 'direct' };
+  }
+  const requested = options.mode ?? 'auto';
+  if (requested === 'direct') return executeSelfHostedDirect(entry, op, root);
+
+  let sandbox: typeof import('./selfHostSandbox');
   try {
-    const entry = getSelfHostedEntry(toSafeModuleName(name), root);
-    if (!entry) {
-      return { success: false, error: `No self-hosted tool named "${toSafeModuleName(name)}"`, executionTimeMs: 0 };
+    sandbox = await import('./selfHostSandbox');
+  } catch {
+    if (requested === 'sandbox') {
+      return { success: false, error: 'sandbox runtime module unavailable', executionTimeMs: 0, mode: 'sandbox' };
     }
-    const module = await importSelfHostedModule(entry, root);
-    const result = module.execute(op);
-    const executionTimeMs = Math.round((performance.now() - started) * 100) / 100;
-    return { success: true, result, executionTimeMs };
-  } catch (err: any) {
-    const executionTimeMs = Math.round((performance.now() - started) * 100) / 100;
-    return { success: false, error: err?.message || String(err), executionTimeMs };
+    return executeSelfHostedDirect(entry, op, root);
+  }
+
+  const cacheKey = `${entry.name}@${entry.hash}`;
+
+  const runSandbox = async (): Promise<SelfHostExecuteResult> => {
+    const r = await sandbox.executeSelfHostedSandboxed(entry, op, { fsRoot: options.fsRoot });
+    if (options.onGrantUse) for (const record of r.grantUse) options.onGrantUse(record);
+    if (r.success) {
+      return { success: true, result: r.result, executionTimeMs: r.executionTimeMs, mode: 'sandbox', grantUse: r.grantUse };
+    }
+    return { success: false, error: r.error || 'sandbox execution failed', executionTimeMs: r.executionTimeMs, mode: 'sandbox' };
+  };
+
+  if (requested === 'sandbox') {
+    const result = await runSandbox();
+    if (result.success) RESOLVED_EXECUTION_MODE.set(cacheKey, 'sandbox');
+    return result;
+  }
+
+  // auto
+  if (RESOLVED_EXECUTION_MODE.get(cacheKey) === 'direct') {
+    return executeSelfHostedDirect(entry, op, root);
+  }
+
+  let compiledKind: 'unavailable' | 'setup' | 'tool_error' | 'denied' | 'ok' = 'ok';
+  try {
+    // Probe the guest compilation up front so a legacy/incompatible entry
+    // falls back to direct without pretending the sandbox ran.
+    sandbox.buildGuestProgramFromEntry(entry);
+  } catch {
+    compiledKind = 'setup';
+  }
+  if (compiledKind === 'setup' || !(await sandbox.isSandboxRuntimeAvailable())) {
+    RESOLVED_EXECUTION_MODE.set(cacheKey, 'direct');
+    return executeSelfHostedDirect(entry, op, root);
+  }
+
+  const result = await runSandbox();
+  if ('error' in result) {
+    // A grant denial or a tool error is authoritative — do not escalate.
+    const isSetupOrUnavailable =
+      /guest setup error/.test(result.error) ||
+      /not installed|not expose getQuickJS|Cannot find module|sandbox runtime module unavailable/.test(result.error);
+    if (isSetupOrUnavailable) {
+      RESOLVED_EXECUTION_MODE.set(cacheKey, 'direct');
+      return executeSelfHostedDirect(entry, op, root);
+    }
+    return result;
+  }
+  RESOLVED_EXECUTION_MODE.set(cacheKey, 'sandbox');
+  return result;
+}
+
+/** Forget the cached sandbox/direct decision for a tool (e.g. after removal). */
+export function forgetSelfHostedExecutionMode(name: string): void {
+  const safe = toSafeModuleName(name);
+  for (const key of Array.from(RESOLVED_EXECUTION_MODE.keys())) {
+    if (key.startsWith(`${safe}@`)) RESOLVED_EXECUTION_MODE.delete(key);
   }
 }
 
@@ -518,6 +685,8 @@ export interface StatelessSelfHostInput {
   sourceCode: string;
   testSuiteCode: string;
   summary: string;
+  /** Optional capability grants (default deny when omitted). */
+  grants?: CapabilityGrants;
 }
 
 function generateStatelessSelfHostedModuleSource(input: StatelessSelfHostInput): string {
@@ -553,6 +722,88 @@ export function execute(op) {
   return `${RUNTIME_IMPORT}\n${sourceCode}\n${adapter}`;
 }
 
+// ---------------------------------------------------------------------------
+// WASM guest program (QuickJS) compilation
+// ---------------------------------------------------------------------------
+// The on-disk `.mjs` module uses ESM imports and Node-only syntax. The sandbox
+// needs the opposite: a single self-contained script with no imports that
+// defines `globalThis.__recourse_dispatch`. This builds exactly that, inlining
+// the shared JSON-safety runtime and stripping module syntax via esbuild.
+
+export interface GuestProgramInput {
+  /** 'class' for template components, 'function' for forge-accreted tools. */
+  mode: 'class' | 'function';
+  sourceCode: string;
+  entrypointName: string;
+  methods: SelfHostMethod[];
+  stateful: boolean;
+  /** Constructor arguments (stateful class tools), in declaration order. */
+  ctorArgs?: any[];
+}
+
+export interface GuestProgram {
+  program: string;
+  hash: string;
+}
+
+/** Build a self-contained QuickJS guest program from a tool's stored source. */
+export function buildGuestProgram(input: GuestProgramInput): GuestProgram {
+  const { sourceCode, entrypointName, stateful } = input;
+  if (!/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(entrypointName)) {
+    throw new Error(`Entrypoint name "${entrypointName}" is not a valid identifier`);
+  }
+  for (const m of input.methods) {
+    if (!/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(m.method)) {
+      throw new Error(`Self-host method "${m.method}" is not a valid identifier`);
+    }
+  }
+
+  const helpers = prepareExecutableCode(SHARED_RUNTIME_SOURCE);
+  const source = prepareExecutableCode(sourceCode);
+  const descriptor = JSON.stringify(
+    input.methods.map((m) => ({ method: m.method, argCoercions: m.argCoercions || [] }))
+  );
+
+  const ctorArgs = (input.ctorArgs || []).map((v) => JSON.stringify(v === undefined ? null : v));
+  const stateLine = input.mode === 'class' && stateful ? `const __STATE__ = new __ENTRY__(${ctorArgs.join(', ')});` : '';
+  const targetLine = stateful ? 'const __TARGET__ = __STATE__;' : 'const __TARGET__ = __ENTRY__;';
+  const callExpr =
+    input.mode === 'function'
+      ? '__TARGET__(...__COERCED__)'
+      : '__TARGET__[__OP__.method].apply(__TARGET__, __COERCED__)';
+
+  const program = `"use strict";
+${helpers}
+${source}
+var __ENTRY__ = ${entrypointName};
+var __DESCRIPTOR__ = ${descriptor};
+${stateLine}
+${targetLine}
+globalThis.__recourse_dispatch = function (__OP__) {
+  if (!__OP__ || typeof __OP__ !== 'object' || Array.isArray(__OP__)) {
+    throw new Error('execute expects an object: { method, args }');
+  }
+  var __DESC__ = null;
+  for (var __i__ = 0; __i__ < __DESCRIPTOR__.length; __i__++) {
+    if (__DESCRIPTOR__[__i__].method === __OP__.method) { __DESC__ = __DESCRIPTOR__[__i__]; break; }
+  }
+  if (!__DESC__) {
+    throw new Error('Unknown method "' + String(__OP__.method) + '". Allowed: ' +
+      __DESCRIPTOR__.map(function (m) { return m.method; }).join(', '));
+  }
+  var __ARGS__ = Array.isArray(__OP__.args) ? __OP__.args : [];
+  var __COERCED__ = __ARGS__.map(function (a, idx) {
+    var c = __DESC__.argCoercions || [];
+    return c[idx] ? __coerceArg__(a, c[idx]) : a;
+  });
+  var __RESULT__ = ${callExpr};
+  return __toJSONSafe__(__RESULT__, new Set());
+};
+`;
+
+  return { program, hash: moduleHash(program) };
+}
+
 /**
  * Write a bare exported function as a live self-hosted module. Caller owns
  * verification (sandbox suite against the reference suite + lint gate); this
@@ -564,6 +815,8 @@ export function writeStatelessSelfHostedTool(
 ): SelfHostWriteResult {
   const name = toSafeModuleName(input.name);
   try {
+    const grantsResult = normalizeEntryGrants(input.grants);
+    if ('error' in grantsResult) return { success: false, error: grantsResult.error };
     const moduleTs = generateStatelessSelfHostedModuleSource(input);
     const jsCode = transpileSelfHostedModule(moduleTs);
     const hash = moduleHash(jsCode);
@@ -582,6 +835,8 @@ export function writeStatelessSelfHostedTool(
       params: {},
       stateful: false,
       methods: [{ method: input.entrypointName, label: input.entrypointName, argCoercions: [] }],
+      entrypointKind: 'function',
+      grants: grantsResult.grants,
       hash,
       file: `${TOOLS_DIR}/${fileName}`,
       sourceCode: input.sourceCode,

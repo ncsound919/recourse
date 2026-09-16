@@ -43,6 +43,7 @@
     "node-cron": "^4.6.0",
     "oxlint": "^1.81.0",
     "prime-lib": "^0.5.0",
+    "quickjs-emscripten": "^0.32.0",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "three": "^0.175.0",

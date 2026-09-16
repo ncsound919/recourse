@@ -228,54 +228,16 @@ export function executeToolFunction(
 }
 
 /**
- * Runs a full test suite with real assertion evaluations.
- *
- * The entire suite body runs once in a single isolated scope that also
- * contains the code under test. Setup statements (variable declarations,
- * instantiations) execute for real and are visible to subsequent assertions.
- * Only strict boolean `true` counts as a pass; any throw (including
- * ReferenceError for undeclared symbols) is a failure. There are NO injected
- * fixture constants — the code under test must define every symbol its tests
- * reference.
+ * Compiles a source + test suite into (a) the cleaned source and (b) the
+ * rewritten assertion statements. Shared by the in-process/isolated runner and
+ * the WASM sandbox suite runner so both interpret a suite identically.
  */
-export function executeTestSuite(
+export function buildSuiteStatements(
   sourceCode: string,
   testSuiteCode: string
-): {
-  passed: boolean;
-  score: number;
-  stdout: string[];
-  stderr: string[];
-  testDetails: string[];
-  executionTimeMs: number;
-} {
-  // PRIMARY: real privilege isolation (isolated-vm) for the whole suite —
-  // source + assertions run with no host globals. Falls back to the in-process
-  // `new Function` path ONLY when the native addon is not loadable.
-  if (isIsolateAvailable()) {
-    const iso = executeTestSuiteInIsolate(sourceCode, testSuiteCode, { memoryLimitMb: 64, timeoutMs: 4000 });
-    if (iso.available) {
-      return {
-        passed: iso.passed,
-        score: iso.score,
-        stdout: iso.stdout,
-        stderr: iso.stderr,
-        testDetails: iso.testDetails,
-        executionTimeMs: iso.executionTimeMs,
-      };
-    }
-  }
-
-  const stdout: string[] = [];
-  const stderr: string[] = [];
-  const testDetails: string[] = [];
-  let passedCount = 0;
-  let failedCount = 0;
-  const startTime = performance.now();
-
-  const customConsole = makeCapturedConsole(stdout, stderr);
-
+): { cleanedSource: string; statements: string[] } {
   const cleanedSource = prepareExecutableCode(sourceCode);
+
   // Split a test body into statements. Both `;` and (for small models that
   // comma-join calls) a `,assert` boundary at top nesting level split, so no
   // assertion is ever silently swallowed. Loops/`for(;;)` are safe because
@@ -310,8 +272,6 @@ export function executeTestSuite(
     push();
     return out;
   }
-
-  const rawLines = splitTestStatements(testSuiteCode || '');
 
   /** Split call arguments at top-level commas (ignores nesting + strings). */
   function splitTopLevelArgs(s: string): string[] {
@@ -372,15 +332,65 @@ export function executeTestSuite(
     return null;
   }
 
-  const body: string[] = [];
+  const rawLines = splitTestStatements(testSuiteCode || '');
+  const statements: string[] = [];
   for (const line of rawLines) {
     const rewritten = rewriteAssertLine(line);
-    if (rewritten !== null) {
-      body.push(rewritten);
-    } else {
-      body.push(line);
+    statements.push(rewritten !== null ? rewritten : line);
+  }
+
+  return { cleanedSource, statements };
+}
+
+/**
+ * Runs a full test suite with real assertion evaluations.
+ *
+ * The entire suite body runs once in a single isolated scope that also
+ * contains the code under test. Setup statements (variable declarations,
+ * instantiations) execute for real and are visible to subsequent assertions.
+ * Only strict boolean `true` counts as a pass; any throw (including
+ * ReferenceError for undeclared symbols) is a failure. There are NO injected
+ * fixture constants — the code under test must define every symbol its tests
+ * reference.
+ */
+export function executeTestSuite(
+  sourceCode: string,
+  testSuiteCode: string
+): {
+  passed: boolean;
+  score: number;
+  stdout: string[];
+  stderr: string[];
+  testDetails: string[];
+  executionTimeMs: number;
+} {
+  // PRIMARY: real privilege isolation (isolated-vm) for the whole suite —
+  // source + assertions run with no host globals. Falls back to the in-process
+  // `new Function` path ONLY when the native addon is not loadable.
+  if (isIsolateAvailable()) {
+    const iso = executeTestSuiteInIsolate(sourceCode, testSuiteCode, { memoryLimitMb: 64, timeoutMs: 4000 });
+    if (iso.available) {
+      return {
+        passed: iso.passed,
+        score: iso.score,
+        stdout: iso.stdout,
+        stderr: iso.stderr,
+        testDetails: iso.testDetails,
+        executionTimeMs: iso.executionTimeMs,
+      };
     }
   }
+
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+  const testDetails: string[] = [];
+  let passedCount = 0;
+  let failedCount = 0;
+  const startTime = performance.now();
+
+  const customConsole = makeCapturedConsole(stdout, stderr);
+
+  const { cleanedSource, statements: body } = buildSuiteStatements(sourceCode, testSuiteCode);
 
   const recordFailure = (detail: string, stderrMsg?: string) => {
     failedCount++;

@@ -78,6 +78,7 @@ export type ProvenanceEventType =
   | 'selfuse_mismatch'
   | 'selfuse_error'
   | 'benchmark_run'
+  | 'benchmark_attested'
   | 'global_lens_publish';
 
 export interface ProvenanceEvent {

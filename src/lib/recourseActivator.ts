@@ -29,21 +29,107 @@
  *     domain + a real acceptance test from the corpus).
  */
 
+import path from 'node:path';
 import type { DreamState, SubAgentType, ToolDomain } from '../types.js';
 import { fingerprintForMutation, avoidGuidance } from '../dream/failureBias.js';
 import { EpisodicStore, SemanticStore, InMemoryEpisodeDriver, InMemorySemanticDriver } from './memory/index.js';
-import type { Episode } from './memory/types.js';
+import { createSqliteMemoryDrivers } from './memory/sqliteDrivers.js';
+import { promotionCandidates } from './memory/skillPromotion.js';
+import { promoteSkillCandidates, writeSkillArtifact } from './memory/skillPipeline.js';
+import type { SkillArtifact, SkillPromotionOutcome } from './memory/skillPipeline.js';
+import type { Episode, EpisodeStoreDriver, SemanticStoreDriver } from './memory/types.js';
+import { listSelfHostedEntries } from './selfHosting.js';
+import { executeTestSuite } from './executionSandbox.js';
+import { verifySuiteInSandbox } from './selfHostSandbox.js';
+import { lintSource } from './lintGate.js';
+import { readWallet, computeBalances, canAutoMerge } from './wallet.js';
 import { runLoop as runAutopilotLoop } from '../autopilot/loopStateMachine.js';
 import { listBusinessSlugs, loadBusinessProfile } from '../autopilot/businessProfile.js';
 
 /* -------------------------------------------------------------------------- */
-/* Shared in-memory stores (server lifetime). Backed by driver; one instance.  */
+/* Tiered memory stores — durable SQLite by default (survives restart), with a */
+/* graceful, honest fallback to in-memory when the DB cannot be opened.        */
 /* -------------------------------------------------------------------------- */
 
-const episodeDriver = new InMemoryEpisodeDriver();
-const semanticDriver = new InMemorySemanticDriver();
-export const episodicStore = new EpisodicStore({ driver: episodeDriver });
-export const semanticStore = new SemanticStore(semanticDriver);
+export interface MemoryDriverBundle {
+  kind: 'sqlite' | 'memory';
+  dbPath?: string;
+  episodeDriver: EpisodeStoreDriver;
+  semanticDriver: SemanticStoreDriver;
+  close(): void;
+}
+
+function createMemoryDrivers(): MemoryDriverBundle {
+  // Tests and explicit opt-out stay hermetic (no disk writes / file locks).
+  const forceMemory = process.env.MEMORY_IN_MEMORY === '1' || Boolean(process.env.VITEST);
+  if (!forceMemory) {
+    try {
+      const durable = createSqliteMemoryDrivers();
+      return {
+        kind: 'sqlite',
+        dbPath: durable.dbPath,
+        episodeDriver: durable.episodeDriver,
+        semanticDriver: durable.semanticDriver,
+        close: durable.close,
+      };
+    } catch (err) {
+      console.warn(
+        '[memory] durable SQLite store unavailable; falling back to in-memory:',
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
+  return {
+    kind: 'memory',
+    episodeDriver: new InMemoryEpisodeDriver(),
+    semanticDriver: new InMemorySemanticDriver(),
+    close() {
+      /* nothing to release */
+    },
+  };
+}
+
+const memoryDrivers = createMemoryDrivers();
+
+// Resume ids from whatever already persisted so restarts never reuse ids.
+export const episodicStore = new EpisodicStore({
+  driver: memoryDrivers.episodeDriver,
+  startSequence: memoryDrivers.episodeDriver.list().length,
+});
+export const semanticStore = new SemanticStore(
+  memoryDrivers.semanticDriver,
+  memoryDrivers.semanticDriver.list().length,
+);
+
+/** Honest status of the tiered-memory backend + row counts. */
+export function memoryStoreStatus(): {
+  kind: 'sqlite' | 'memory';
+  dbPath: string | null;
+  episodes: number;
+  facts: number;
+} {
+  return {
+    kind: memoryDrivers.kind,
+    dbPath: memoryDrivers.dbPath ?? null,
+    episodes: episodicStore.all().length,
+    facts: semanticStore.facts().length,
+  };
+}
+
+/** Close the durable store (shutdown/tests). */
+export function closeMemoryStores(): void {
+  memoryDrivers.close();
+}
+
+/**
+ * Consolidate episode clusters into durable semantic facts. Idempotent: a
+ * cluster already represented is skipped, so this is safe to run on a cadence.
+ */
+export function consolidateSemanticMemory(opts: { minClusterSize?: number } = {}) {
+  return semanticStore.consolidate(episodicStore.all(), {
+    minClusterSize: opts.minClusterSize ?? 2,
+  });
+}
 
 /* -------------------------------------------------------------------------- */
 /* BenchmarkProblem type — defined in intake/types but needed here too.        */
@@ -204,6 +290,8 @@ export interface AutopilotProbeResult {
   reason: string;
   business?: string;
   status?: string;
+  /** Wallet-based merge gate: auto-merge requires a funded budget token. */
+  mergeGate?: { allowed: boolean; reason: string };
 }
 
 /** Walk every registered business profile, run a dry-run audit only if:
@@ -218,12 +306,18 @@ export async function probeAutopilotOnce(): Promise<AutopilotProbeResult[]> {
   const slugs = listBusinessSlugs();
   if (slugs.length === 0) return [{ ran: false, reason: 'no_profiles' }];
 
+  // Auto-merge is budget-gated: an autonomous merge that costs money must be
+  // funded. The gate is reported on every probe so a blocked merge is visible.
+  const mergeGate = canAutoMerge(computeBalances(readWallet()), {
+    requiredCents: Math.max(0, Number(process.env.RECOURSE_MERGE_RESERVE_CENTS) || 0),
+  });
+
   const out: AutopilotProbeResult[] = [];
   for (const slug of slugs) {
     try {
       const profile = loadBusinessProfile(slug);
       if (!profile.repo || !profile.repo.autoMergeEnabled) {
-        out.push({ ran: false, reason: 'autoMerge_disabled', business: slug });
+        out.push({ ran: false, reason: 'autoMerge_disabled', business: slug, mergeGate });
         continue;
       }
       const requireCheckpoint =
@@ -239,6 +333,7 @@ export async function probeAutopilotOnce(): Promise<AutopilotProbeResult[]> {
         business: slug,
         reason: 'dry_run_audit',
         status: result.state.status,
+        mergeGate,
       });
     } catch (err: any) {
       out.push({
@@ -387,4 +482,98 @@ export function recordEpisode(input: {
     geneIds: input.geneIds,
     summary: input.summary,
   });
+}
+
+/* -------------------------------------------------------------------------- */
+/* Skill auto-promotion pass — detect generalist genes, then run the real       */
+/* verify -> lint -> export pipeline over the verified tool that backs them.    */
+/* -------------------------------------------------------------------------- */
+
+export function skillPromotionOutDir(): string {
+  return process.env.RECOURSE_SKILLS_DIR
+    ? path.resolve(process.env.RECOURSE_SKILLS_DIR)
+    : path.join(process.cwd(), 'data', 'skills');
+}
+
+export interface SkillPromotionPassResult {
+  candidates: number;
+  outcomes: SkillPromotionOutcome[];
+  outRoot: string;
+}
+
+export interface SkillPromotionPassOptions {
+  minDistinctProblemWins?: number;
+  maxPerRun?: number;
+  alreadyPromoted?: Set<string>;
+  outRoot?: string;
+}
+
+/**
+ * Promote detected generalist genes to exportable skills. Real gates only:
+ * the backing self-hosted entry must already be boot-verified, its stored suite
+ * is re-run in the sandbox, oxlint must be clean, and the SKILL.md folder is
+ * only written after all three pass.
+ */
+export async function runSkillPromotionPass(
+  opts: SkillPromotionPassOptions = {},
+): Promise<SkillPromotionPassResult> {
+  const minWins = opts.minDistinctProblemWins ?? 2;
+  const outRoot = opts.outRoot ?? skillPromotionOutDir();
+  const candidates = promotionCandidates(episodicStore.all(), { minDistinctProblemWins: minWins });
+  const entries = listSelfHostedEntries();
+  const episodes = episodicStore.all();
+
+  const resolveArtifact = (candidate: { geneId: string }): SkillArtifact | undefined => {
+    const toolNames = new Set(
+      episodes
+        .filter((e) => e.outcome === 'win' && e.geneIds.includes(candidate.geneId) && e.toolName)
+        .map((e) => e.toolName as string),
+    );
+    for (const toolName of toolNames) {
+      const entry = entries.find((e) => e.name === toolName);
+      if (entry && entry.lastVerified?.passed) {
+        return {
+          toolName: entry.name,
+          entrypointName: entry.entrypointName,
+          domain: entry.domain,
+          sourceCode: entry.sourceCode,
+          testSuiteCode: entry.testSuiteCode,
+          methods: entry.methods,
+          summary: entry.summary,
+          provenance: `Promoted from gene \`${candidate.geneId}\` (won across distinct problems); source verified + linted by Recourse.`,
+        };
+      }
+    }
+    return undefined;
+  };
+
+  const outcomes = await promoteSkillCandidates(
+    candidates,
+    {
+      resolveArtifact,
+      async verify(artifact: SkillArtifact) {
+        const sandboxRun = await verifySuiteInSandbox(artifact.sourceCode, artifact.testSuiteCode || 'assert true;');
+        if (sandboxRun && sandboxRun.ranInSandbox) {
+          const failures = sandboxRun.testDetails.filter((d) => d.startsWith('[FAIL'));
+          return { passed: sandboxRun.passed, detail: sandboxRun.passed ? 'sandbox suite green' : failures.join('; ') };
+        }
+        const nodeRun = executeTestSuite(artifact.sourceCode, artifact.testSuiteCode || 'assert true;');
+        return {
+          passed: nodeRun.passed,
+          detail: nodeRun.passed ? 'in-process suite green' : nodeRun.stderr.join('; '),
+        };
+      },
+      lint(artifact: SkillArtifact) {
+        const report = lintSource(artifact.sourceCode, 'ts');
+        if (!report.available) return { ok: false, detail: 'oxlint unavailable — lint gate did not run' };
+        return { ok: report.clean, detail: report.clean ? 'clean' : report.details.slice(0, 3).join('; ') };
+      },
+      write(artifact: SkillArtifact) {
+        return writeSkillArtifact(artifact, outRoot);
+      },
+    },
+    { maxPerRun: opts.maxPerRun ?? 3, alreadyPromoted: opts.alreadyPromoted },
+  );
+
+  return { candidates: candidates.length, outcomes, outRoot };
 }

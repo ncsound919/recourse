@@ -165,6 +165,27 @@ describe('checkAndMerge', () => {
     expect(result.vetoReceived).toBe(false);
   });
 
+  it('refuses to merge when the wallet merge gate is unfunded', async () => {
+    const github = makeGithub();
+    const result = await checkAndMerge(makeState(), github, {
+      now: new Date('2026-09-05T00:00:00.000Z'),
+      mergeGate: { allowed: false, reason: 'no "merge" budget configured' },
+    });
+    expect(github.mergePR).not.toHaveBeenCalled();
+    expect(result.merged).toBe(false);
+    expect(result.mergeError).toContain('merge budget gate blocked');
+  });
+
+  it('merges when the wallet merge gate allows it', async () => {
+    const github = makeGithub();
+    const result = await checkAndMerge(makeState(), github, {
+      now: new Date('2026-09-05T00:00:00.000Z'),
+      mergeGate: { allowed: true, reason: 'funded' },
+    });
+    expect(github.mergePR).toHaveBeenCalledTimes(1);
+    expect(result.merged).toBe(true);
+  });
+
   it('records mergeError and leaves the PR unmerged when mergePR throws', async () => {
     const github = makeGithub({
       mergePR: vi.fn(async () => {

@@ -17,15 +17,20 @@ export class SemanticStore {
   private sequence = 0
   private readonly driver: SemanticStoreDriver
 
-  constructor(driver: SemanticStoreDriver) {
+  constructor(driver: SemanticStoreDriver, startSequence = 0) {
     this.driver = driver
+    this.sequence = Math.max(0, startSequence)
   }
 
   facts(): SemanticFact[] {
     return this.driver.list()
   }
 
-  /** Emit and persist facts from loss clusters; returns the new facts only. */
+  /**
+   * Emit and persist facts from loss clusters; returns the new facts only.
+   * Idempotent: a fingerprint already represented by a persisted fact is
+   * skipped, so repeated consolidation (or a restart) never duplicates facts.
+   */
   consolidate(episodes: Episode[], opts: ConsolidationOptions): SemanticFact[] {
     const summarizer = opts.summarizer ?? defaultSummarizer
     const byFingerprint = new Map<string, Episode[]>()
@@ -35,13 +40,22 @@ export class SemanticStore {
       byFingerprint.set(e.problemFingerprint, group)
     }
 
+    const alreadyConsolidated = new Set(
+      this.driver
+        .list()
+        .map((f) => f.problemFingerprint)
+        .filter((fp): fp is string => typeof fp === 'string'),
+    )
+
     const created: SemanticFact[] = []
     for (const [fingerprint, group] of [...byFingerprint.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+      if (alreadyConsolidated.has(fingerprint)) continue
       const losses = group.filter((e) => e.outcome === 'loss')
       if (losses.length < opts.minClusterSize) continue
       this.sequence += 1
       const fact: SemanticFact = {
         id: `fact-${this.sequence}`,
+        problemFingerprint: fingerprint,
         statement: summarizer(group),
         confidence: losses.length / group.length,
         evidenceEpisodeIds: losses.map((e) => e.id),
@@ -49,7 +63,6 @@ export class SemanticStore {
       }
       this.driver.append(fact)
       created.push(fact)
-      void fingerprint
     }
     return created
   }

@@ -25,6 +25,12 @@ export interface SemanticFact {
   confidence: number
   evidenceEpisodeIds: string[]
   createdAt: number
+  /**
+   * Fingerprint of the episode cluster this fact came from. Persisted so
+   * consolidation is idempotent across process restarts (a cluster already
+   * represented is never emitted twice).
+   */
+  problemFingerprint?: string
 }
 
 export interface EpisodeStoreDriver {

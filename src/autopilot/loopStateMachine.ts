@@ -273,6 +273,8 @@ export type ResumeOptions = {
   authorizedVetoUsers?: string[];
   /** Checkpoint store for resolving checkpoint state. */
   checkpointStore?: import('./checkpoint').CheckpointStore;
+  /** Wallet merge gate forwarded to the veto scheduler; blocks the merge when disallowed. */
+  mergeGate?: { allowed: boolean; reason: string };
 };
 
 export async function resumeAfterVeto(options: ResumeOptions): Promise<LoopOutcome> {
@@ -321,6 +323,7 @@ export async function resumeAfterVeto(options: ResumeOptions): Promise<LoopOutco
     updated = await checkAndMerge(prState, github, {
       now: options.now,
       authorizedVetoUsers: options.authorizedVetoUsers,
+      mergeGate: options.mergeGate,
     });
   } catch (err) {
     return {

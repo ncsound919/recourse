@@ -12,6 +12,9 @@ import {
 } from './types';
 import { validateStudConnection } from './contracts';
 
+// Deterministic, process-local sequence for DAG ids (no wall-clock/random).
+let dagSequence = 0;
+
 // ============================================================================
 // Composition Graph Builder
 // ============================================================================
@@ -149,8 +152,9 @@ export class DAGBuilder {
       }
     }
 
+    dagSequence += 1;
     const assembly: AssembledDAG = {
-      id: `dag_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      id: `dag_${dagSequence}`,
       name: this.name,
       generation: this.generation,
       bricks: Array.from(this.bricks.values()),

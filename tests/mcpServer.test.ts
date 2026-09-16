@@ -32,6 +32,17 @@ describe('Recourse MCP server (stdio)', () => {
     expect(names).toContain('recourse.export_skill');
     expect(names).toContain('recourse.import_skill');
     expect(names).toContain('recourse.inspect_gene');
+    // Full-loop control surface.
+    expect(names).toContain('recourse.sandbox_status');
+    expect(names).toContain('recourse.memory_tiered');
+    expect(names).toContain('recourse.recall_memory');
+    expect(names).toContain('recourse.inspect_learner');
+    expect(names).toContain('recourse.problems');
+    expect(names).toContain('recourse.run_forge');
+    expect(names).toContain('recourse.execute_selfhosted');
+    expect(names).toContain('recourse.consolidate_memory');
+    expect(names).toContain('recourse.promote_skills');
+    expect(names).toContain('recourse.revert');
 
     // A tools/call round-trips regardless of whether the live Recourse API is
     // up: the handler returns an MCP text result either way (state or an

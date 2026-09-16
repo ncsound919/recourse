@@ -46,6 +46,7 @@ import { loadOpenPrStates, parseOwnerRepo } from '../src/autopilot/vetoScheduler
 import { fetchGitHubToken } from '../src/autopilot/keywireClient';
 import { createGitHubClient } from '../src/autopilot/gitHubClient';
 import type { GitHubClient } from '../src/autopilot/loopTypes';
+import { readWallet, computeBalances, canAutoMerge } from '../src/lib/wallet';
 
 const DEFAULT_AUDIT_DIR = 'data/business-profiles';
 
@@ -183,6 +184,10 @@ export async function runScheduledAudit(
             console.error(`[autopilot] ${slug}: cannot advance PR — no github url / keywire token`);
             continue;
           }
+          // Budget-gate the merge: no funded `merge` budget => no auto-merge.
+          const mergeGate = canAutoMerge(computeBalances(readWallet()), {
+            requiredCents: Math.max(0, Number(process.env.RECOURSE_MERGE_RESERVE_CENTS) || 0),
+          });
           let stillInFlight = false;
           for (const pr of open) {
             try {
@@ -192,6 +197,7 @@ export async function runScheduledAudit(
                 github,
                 auditDir,
                 now: new Date(),
+                mergeGate,
               })) as LoopOutcomeLike;
               console.log(formatOutcome(slug, res));
               if (res.state.status === 'error') exitCode = 1;

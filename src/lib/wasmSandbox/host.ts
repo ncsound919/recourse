@@ -34,6 +34,12 @@ export interface HostBridge {
   spend(cents: number, description: string): MaybePromise<void>
 }
 
+/** Identity of the tool an execution belongs to. Runtimes may use this to
+ * cache a persistent guest context per tool (stateful tools keep state). */
+export interface SandboxExecutionContext {
+  toolName: string
+}
+
 export interface SandboxRuntime {
   name: string
   evalCode(
@@ -41,7 +47,10 @@ export interface SandboxRuntime {
     input: unknown,
     bridge: HostBridge,
     limits: SandboxLimits,
+    ctx?: SandboxExecutionContext,
   ): Promise<{ ok: boolean; value: unknown; error?: string }>
+  /** Release any cached guest contexts (e.g. after a tool is removed). */
+  reset?(): void
 }
 
 export interface SandboxHostOptions {
@@ -71,6 +80,11 @@ export class SandboxHost {
     this.runtime = opts.runtime
     this.clock = opts.clock ?? (() => Date.now())
     this.onGrantUse = opts.onGrantUse
+  }
+
+  /** Drop every cached guest context held by the runtime. */
+  reset(): void {
+    this.runtime.reset?.()
   }
 
   async execute(request: ToolExecutionRequest): Promise<ToolExecutionResult> {
@@ -141,7 +155,9 @@ export class SandboxHost {
     const startedAt = this.clock()
     let inner: { ok: boolean; value: unknown; error?: string }
     try {
-      inner = await this.runtime.evalCode(request.code, request.input, bridge, request.limits)
+      inner = await this.runtime.evalCode(request.code, request.input, bridge, request.limits, {
+        toolName: request.toolName,
+      })
     } catch (err) {
       const elapsedMs = this.clock() - startedAt
       return failure(

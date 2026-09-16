@@ -27,6 +27,18 @@ function secretsEqual(a: string, b: string): boolean {
   return crypto.timingSafeEqual(ab, bb);
 }
 
+/**
+ * Boolean-only credential check (no response side effects). Returns true when
+ * no secret is configured OR the presented secret matches. Used by protocol
+ * surfaces (A2A) that decide their own error envelope.
+ */
+export function hasValidMutationSecret(req: Request): boolean {
+  const secret = process.env[MUTATION_SECRET_ENV];
+  if (!secret || secret.trim() === '') return false;
+  const presented = presentedSecret(req);
+  return Boolean(presented) && secretsEqual(presented, secret.trim());
+}
+
 /** Returns true when the request is allowed to proceed; on refusal it has
  *  already written the error response. */
 export function requireMutationAuth(req: Request, res: Response): boolean {

@@ -22,9 +22,31 @@ import { PPQ, CHORD_TONES, voiceMuChord, voiceRootless, DOMINANT_QUALITIES, bass
 
 const VALID_BARS = [4, 8, 16];
 
+/**
+ * Deterministic fallback seed derived from the brief itself (FNV-1a). The same
+ * brief always yields the same track, so composition is reproducible even when
+ * the caller omits `seed` — never wall-clock or Math.random.
+ */
+function deriveSeedFromBrief(brief: ComposeBrief): number {
+  const basis = JSON.stringify({
+    style: brief.style ?? null,
+    key: brief.key ?? null,
+    major: brief.major ?? null,
+    bpm: brief.bpm ?? null,
+    bars: brief.bars ?? null,
+    title: brief.title ?? null,
+  });
+  let h = 0x811c9dc5;
+  for (let i = 0; i < basis.length; i++) {
+    h ^= basis.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0) || 1;
+}
+
 function resolveBrief(brief: ComposeBrief): Required<Pick<ComposeBrief, 'seed' | 'bars' | 'key' | 'major' | 'bpm'>> {
   const lx = getLexicon(brief.style);
-  const seed = brief.seed ?? Math.floor(Math.random() * 0x7fffffff);
+  const seed = brief.seed ?? deriveSeedFromBrief(brief);
   const rng = createRng(seed);
   let key: number;
   let major: boolean;

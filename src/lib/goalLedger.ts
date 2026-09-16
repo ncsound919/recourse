@@ -75,6 +75,21 @@ let state: LedgerState = {
 
 const MAX_HISTORY = 500;
 
+// Deterministic, sequence-based ids. Seeded from the largest existing numeric
+// suffix (so restarts never reuse an id) and persisted implicitly via the ids
+// themselves — no wall-clock or Math.random in the id, so a replay is stable.
+let mathSeq = 0;
+let biotechSeq = 0;
+
+function maxSeq(ids: Array<{ id: string }>, prefix: string): number {
+  let max = 0;
+  for (const e of ids) {
+    const m = new RegExp(`^${prefix}_(\\d+)$`).exec(e.id || '');
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return max;
+}
+
 function ledgerFilePath(): string {
   return path.resolve(process.cwd(), 'recourse_goals.json');
 }
@@ -95,6 +110,8 @@ export function initGoalLedger(): void {
         lastUpdatedAt: Number(parsed.lastUpdatedAt) || 0,
       };
     }
+    mathSeq = Math.max(mathSeq, maxSeq(state.mathAttempts, 'math'));
+    biotechSeq = Math.max(biotechSeq, maxSeq(state.biotechClaims, 'biotech'));
   } catch (err) {
     console.warn('[goalLedger] init failed, starting empty:', (err as Error).message);
   }
@@ -109,8 +126,9 @@ export function saveGoalLedger(): void {
 }
 
 export function recordMathAttempt(attempt: Omit<MathAttempt, 'id' | 'timestamp'>): MathAttempt {
+  mathSeq += 1;
   const entry: MathAttempt = {
-    id: `math_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    id: `math_${mathSeq}`,
     timestamp: Date.now(),
     ...attempt,
   };
@@ -125,8 +143,9 @@ export function recordMathAttempt(attempt: Omit<MathAttempt, 'id' | 'timestamp'>
 }
 
 export function recordBiotechClaim(claim: Omit<BiotechClaim, 'id' | 'timestamp'>): BiotechClaim {
+  biotechSeq += 1;
   const entry: BiotechClaim = {
-    id: `biotech_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    id: `biotech_${biotechSeq}`,
     timestamp: Date.now(),
     ...claim,
   };
@@ -194,5 +213,12 @@ export function clearGoalLedger(): void {
     biotechTotal: 0,
     lastUpdatedAt: Date.now(),
   };
+  mathSeq = 0;
+  biotechSeq = 0;
   saveGoalLedger();
+}
+
+/** Raw ledger snapshot for deterministic replay verification. */
+export function goalLedgerSnapshot(): { mathAttempts: MathAttempt[]; biotechClaims: BiotechClaim[] } {
+  return { mathAttempts: [...state.mathAttempts], biotechClaims: [...state.biotechClaims] };
 }

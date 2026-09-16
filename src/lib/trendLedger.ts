@@ -38,7 +38,9 @@ function ensureDir(): void {
   fs.mkdirSync(path.dirname(ledgerFilePath()), { recursive: true });
 }
 
-function hashRecord(r: Omit<LedgerInsight, 'hash'>): string {
+/** SHA-256 over a record's content (chained via prevInsightHash). Exported so
+ *  the replay verifier recomputes hashes with the exact same algorithm. */
+export function hashInsightRecord(r: Omit<LedgerInsight, 'hash'>): string {
   const canonical = JSON.stringify({
     id: r.id,
     createdRun: r.createdRun,
@@ -81,9 +83,11 @@ export function appendInsight(input: {
 }): LedgerInsight | null {
   const ledger = readLedger();
   const prevInsightHash = ledger.length ? ledger[ledger.length - 1].hash : GENESIS;
-  const id = `ins_${crypto.randomBytes(8).toString('hex')}`;
+  // Deterministic, position-based id (no random bytes): same append sequence
+  // yields the same id, so the chain is reproducible bit-for-bit.
+  const id = `ins_${ledger.length + 1}`;
   const rec: Omit<LedgerInsight, 'hash'> = { ...input, id, prevInsightHash };
-  const hash = hashRecord(rec);
+  const hash = hashInsightRecord(rec);
   const full: LedgerInsight = { ...rec, hash };
   ensureDir();
   fs.appendFileSync(ledgerFilePath(), JSON.stringify(full) + '\n', 'utf-8');
@@ -99,7 +103,7 @@ export function verifyLedgerChain(): { valid: boolean; length: number; brokenAt?
     const rec = ledger[i];
     if (rec.prevInsightHash !== prev) return { valid: false, length: ledger.length, brokenAt: i };
     const { hash: _h, ...content } = rec;
-    const recomputed = hashRecord(content);
+    const recomputed = hashInsightRecord(content);
     if (recomputed !== rec.hash) return { valid: false, length: ledger.length, brokenAt: i };
     prev = rec.hash;
   }

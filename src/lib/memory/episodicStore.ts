@@ -8,6 +8,11 @@ import type { Episode, EpisodeStoreDriver } from './types'
 export interface EpisodicStoreOptions {
   driver: EpisodeStoreDriver
   idPrefix?: string
+  /**
+   * Sequence to resume from. Durable drivers pass the number of already-stored
+   * episodes so ids stay unique across process lifetimes.
+   */
+  startSequence?: number
 }
 
 function tokens(fingerprint: string): string[] {
@@ -33,6 +38,7 @@ export class EpisodicStore {
   constructor(opts: EpisodicStoreOptions) {
     this.driver = opts.driver
     this.idPrefix = opts.idPrefix ?? 'ep'
+    this.sequence = Math.max(0, opts.startSequence ?? 0)
   }
 
   record(episode: Omit<Episode, 'id' | 'timestamp'>): Episode {
