@@ -6,11 +6,17 @@
  * provenance stay in sync without this router knowing about server state.
  */
 import { Router } from 'express';
+import type { Request, Response } from 'express';
 import { getSchedulerStatus, setJobEnabled, triggerJob } from '../lib/jobScheduler.js';
 
 export interface SchedulerRouterDeps {
   /** Called after a successful toggle (e.g. to mirror legacy flags + record provenance). */
   onJobToggled?: (id: string, enabled: boolean) => void;
+  /**
+   * Guard for the mutating routes (toggle/trigger). Config-gated on the host so
+   * local runs stay open while a configured secret is enforced.
+   */
+  requireMutationAuth?: (req: Request, res: Response) => boolean;
 }
 
 export function createSchedulerRouter(deps: SchedulerRouterDeps = {}): Router {
@@ -21,6 +27,7 @@ export function createSchedulerRouter(deps: SchedulerRouterDeps = {}): Router {
   });
 
   router.post('/toggle', (req, res) => {
+    if (deps.requireMutationAuth && !deps.requireMutationAuth(req, res)) return;
     const { id, enabled } = (req.body ?? {}) as { id?: string; enabled?: boolean };
     if (!id || typeof enabled !== 'boolean') {
       return res.status(400).json({ success: false, error: 'id (string) and enabled (boolean) required' });
@@ -32,6 +39,7 @@ export function createSchedulerRouter(deps: SchedulerRouterDeps = {}): Router {
   });
 
   router.post('/trigger', async (req, res) => {
+    if (deps.requireMutationAuth && !deps.requireMutationAuth(req, res)) return;
     const { id } = (req.body ?? {}) as { id?: string };
     if (!id) return res.status(400).json({ success: false, error: 'id (string) required' });
     const r = await triggerJob(id);

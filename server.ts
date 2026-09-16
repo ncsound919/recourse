@@ -2978,6 +2978,7 @@ app.get('/api/recourse/fleet-dashboard', async (_req, res) => {
 app.use(
   '/api/recourse/scheduler',
   createSchedulerRouter({
+    requireMutationAuth: requireMutationAuthIfConfigured,
     onJobToggled: (id, enabled) => {
       mirrorAutopilotFlag(id, enabled);
       appendProvenanceEvent('loop_started', { driverId: `scheduler:${id}`, enabled });

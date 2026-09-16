@@ -9,11 +9,11 @@ afterEach(async () => {
   await Promise.all(servers.splice(0).map((s) => new Promise<void>((r) => s.close(() => r()))));
 });
 
-async function setup() {
+async function setup(guard?: (req: express.Request, res: express.Response) => boolean) {
   const onJobToggled = vi.fn();
   const app = express();
   app.use(express.json());
-  app.use('/api/recourse/scheduler', createSchedulerRouter({ onJobToggled }));
+  app.use('/api/recourse/scheduler', createSchedulerRouter({ onJobToggled, ...(guard ? { requireMutationAuth: guard } : {}) }));
   const server = http.createServer(app);
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   servers.push(server);
@@ -43,6 +43,18 @@ describe('scheduler router (extracted)', () => {
     const { post } = await setup();
     expect((await post('/api/recourse/scheduler/trigger', { id: 'does_not_exist' })).status).toBe(409);
     expect((await post('/api/recourse/scheduler/trigger', {})).status).toBe(400);
+  });
+
+  it('enforces the mutation guard on toggle/trigger when provided', async () => {
+    const guard = (_req: express.Request, res: express.Response) => {
+      res.status(401).json({ success: false, error: 'unauthorized' });
+      return false;
+    };
+    const { base, post } = await setup(guard);
+    expect((await post('/api/recourse/scheduler/toggle', { id: 'x', enabled: true })).status).toBe(401);
+    expect((await post('/api/recourse/scheduler/trigger', { id: 'x' })).status).toBe(401);
+    // Reads stay open.
+    expect((await fetch(`${base}/api/recourse/scheduler`)).status).toBe(200);
   });
 
   it('toggles a real job and fires the onJobToggled hook', async () => {
