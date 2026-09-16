@@ -234,7 +234,7 @@ async function chatCompleteFor(
   if (typeof opts.temperature === 'number') body.temperature = opts.temperature;
 
   let endpoint = `${cfg.baseUrl}/chat/completions`;
-  const isNativeOllama = cfg.baseUrl.includes(':11434') || cfg.baseUrl.includes('localhost') && !cfg.baseUrl.includes('v1');
+  const isNativeOllama = cfg.baseUrl.includes(':11434') || (cfg.baseUrl.includes('localhost') && !cfg.baseUrl.includes('v1'));
   if (isNativeOllama && cfg.baseUrl) {
     const nativeBase = cfg.baseUrl.replace(/\/v1$/, '');
     endpoint = `${nativeBase}/api/chat`;
