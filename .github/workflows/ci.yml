@@ -34,3 +34,37 @@ jobs:
       - name: Coverage (gated)
         if: matrix.node-version == 20
         run: npm run test:coverage
+
+  docker-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+      # Build only (never push). Layer cache keeps rebuilds fast and stable.
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: recourse:smoke
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      # Boot the image and require a real 200 from the open status route.
+      - name: Run container and health-check
+        run: |
+          docker run -d --name recourse-smoke -p 3050:3050 recourse:smoke
+          for i in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:3050/api/recourse/status > /tmp/status.json; then
+              echo "healthy after ${i}s"; cat /tmp/status.json; exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::container did not become healthy within 90s"
+          docker logs recourse-smoke
+          exit 1
+      - name: Cleanup
+        if: always()
+        run: docker rm -f recourse-smoke || true

@@ -18,6 +18,7 @@ recourse_*.json-wal
 recourse_*.json.tmp
 *.pid
 prometheus
+tests
 "bisim and abm"
 "deteministic researcher"
 "BF Resolver"
