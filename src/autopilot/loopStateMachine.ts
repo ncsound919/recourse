@@ -22,6 +22,7 @@ import {
   PRState,
   type AuditStatementT,
   type BusinessScorecardT,
+  type GapT,
   type GitHubClient,
   type LoopContext,
   type LoopState,
@@ -38,7 +39,7 @@ import {
 import { runAudit, type AuditAdapters } from './auditRunner';
 import { loadLatestScorecard, projectScorecard, saveScorecard, slugify } from './scorecard';
 import { analyzeGaps } from './gapAnalyzer';
-import { generateUpgrade } from './upgradeGenerator';
+import { generateUpgrade, type PlannedCode } from './upgradeGenerator';
 import { runGate, type GateExecutors } from './preMergeGate';
 import { checkAndMerge, computeVetoDeadline, parseOwnerRepo, savePRState } from './vetoScheduler';
 import { fetchGitHubToken } from './keywireClient';
@@ -60,6 +61,12 @@ export type LoopRunOptions = {
   requireCheckpoint?: boolean;
   /** Checkpoint store for testing. Defaults to FileCheckpointStore. */
   checkpointStore?: import('./checkpoint').CheckpointStore;
+  /**
+   * Optional real planner (model/forge) that synthesizes Tier A code and its
+   * acceptance test. When present, the produced file is gated by a real sandbox
+   * run of that test; when absent, Tier A code gaps stay honest placeholders.
+   */
+  planner?: (gap: GapT, profile: BusinessProfileT) => Promise<PlannedCode | null>;
 };
 
 export type LoopOutcome = { state: LoopState; context: LoopContext };
@@ -154,7 +161,7 @@ export async function runLoop(options: LoopRunOptions): Promise<LoopOutcome> {
     for (const gap of queue.gaps) {
       if (quarantinedGaps.has(gap.id)) continue;
       if (!options.dryRun && gap.tier !== 'A') continue;
-      const proposal = await generateUpgrade(gap, profile);
+      const proposal = await generateUpgrade(gap, profile, options.planner ? { planner: options.planner } : {});
       const result = await runGate(
         proposal,
         repo.localPath,

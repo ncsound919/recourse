@@ -44,6 +44,7 @@ import { verifySuiteInSandbox } from './selfHostSandbox.js';
 import { lintSource } from './lintGate.js';
 import { readWallet, computeBalances, canAutoMerge } from './wallet.js';
 import { runLoop as runAutopilotLoop } from '../autopilot/loopStateMachine.js';
+import type { LoopRunOptions } from '../autopilot/loopStateMachine.js';
 import { listBusinessSlugs, loadBusinessProfile } from '../autopilot/businessProfile.js';
 
 /* -------------------------------------------------------------------------- */
@@ -299,7 +300,9 @@ export interface AutopilotProbeResult {
  *    - the profile has autoMergeEnabled=true
  *    - the profile has a repo binding
  * Dry-run only — no PR opens. Logs a single line per business. */
-export async function probeAutopilotOnce(): Promise<AutopilotProbeResult[]> {
+export async function probeAutopilotOnce(
+  opts: { planner?: LoopRunOptions['planner'] } = {},
+): Promise<AutopilotProbeResult[]> {
   if (String(process.env.RECOURSE_AUTOPILOT_DISABLED ?? '').trim().toLowerCase() === '1') {
     return [{ ran: false, reason: 'kill_switch' }];
   }
@@ -327,6 +330,7 @@ export async function probeAutopilotOnce(): Promise<AutopilotProbeResult[]> {
         profile,
         dryRun: true,
         requireCheckpoint,
+        ...(opts.planner ? { planner: opts.planner } : {}),
       });
       out.push({
         ran: true,

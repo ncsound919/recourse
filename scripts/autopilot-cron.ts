@@ -47,8 +47,14 @@ import { fetchGitHubToken } from '../src/autopilot/keywireClient';
 import { createGitHubClient } from '../src/autopilot/gitHubClient';
 import type { GitHubClient } from '../src/autopilot/loopTypes';
 import { readWallet, computeBalances, canAutoMerge } from '../src/lib/wallet';
+import { createCodePlanner } from '../src/autopilot/codePlanner';
+import { chatComplete } from '../src/lib/modelProvider';
 
 const DEFAULT_AUDIT_DIR = 'data/business-profiles';
+
+// Real planner for Tier A code gaps: produces source + an acceptance test that
+// the pre-merge gate runs in the sandbox. Returns null when the model is offline.
+const codePlanner = createCodePlanner((messages) => chatComplete(messages));
 
 /** GitHub client for a profile via the Keywire zero-trust token (PR-time only). */
 export async function githubForProfile(profile: BusinessProfileT): Promise<GitHubClient | null> {
@@ -217,7 +223,7 @@ export async function runScheduledAudit(
         }
       }
 
-      const outcome = (await runLoop({ profile, dryRun })) as LoopOutcomeLike;
+      const outcome = (await runLoop({ profile, dryRun, planner: codePlanner })) as LoopOutcomeLike;
       console.log(formatOutcome(slug, outcome));
       // State-machine errors are returned, not thrown — surface them as exit 1
       // so cron wrappers can detect a failed pass.

@@ -332,6 +332,7 @@ import { createSelfModGuard, makeHarnessGate } from './src/lib/selfModification.
 import { createSelfImprovementRouter } from './src/routes/selfImprovement.js';
 import { openPolicyEngine } from './src/lib/policy.js';
 import { attemptRemediation, resolveRemediationService, parseRemediationMap } from './src/lib/remediation.js';
+import { createCodePlanner } from './src/autopilot/codePlanner.js';
 const STATE_FILE = path.join(process.cwd(), 'recourse_storage.json');
 
 // Budgeted action wallet (durable, hash-chained). Also installed as the sandbox
@@ -353,6 +354,10 @@ const productRouter = createProductRouter({
 const policyEngine = openPolicyEngine();
 // Durable A2A task store so tasks/get survives a restart.
 const a2aTaskStore = openA2aTaskStore();
+// Real code planner for the business autopilot: Tier A code gaps get real
+// source + an acceptance test (gated by a real sandbox run) instead of a
+// placeholder. Offline/unparseable output falls back to the honest placeholder.
+const autopilotCodePlanner = createCodePlanner((messages) => chatComplete(messages));
 
 // ---------------------------------------------------------------------------
 // Wave 1 commercial layer: durable usage metering, tenant/API-key identity, and
@@ -7056,7 +7061,7 @@ function maybeRefreshBenchmarks() {
 async function maybeRunAutopilotProbe() {
   autopilotProbeTickCounter += 1;
   if (autopilotProbeTickCounter % 10 !== 0) return;
-  const results = await probeAutopilotOnce();
+    const results = await probeAutopilotOnce({ planner: autopilotCodePlanner });
   for (const r of results) {
     if (!r.ran) {
       if (r.reason === 'no_profiles') {
