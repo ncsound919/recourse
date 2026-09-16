@@ -323,6 +323,7 @@ import { federationSkillProviders } from './src/lib/ecosystem/skillFederation.js
 import { createEcosystemRouter } from './src/routes/ecosystem.js';
 import { createSecurityRouter } from './src/routes/security.js';
 import { createSchedulerRouter } from './src/routes/scheduler.js';
+import { createSubagentsRouter } from './src/routes/subagents.js';
 import { loadBusinessProfile, listBusinessSlugs } from './src/autopilot/businessProfile.js';
 import type { BusinessProfileT } from './src/autopilot/businessProfile.js';
 import { publishToGlobalLens } from './src/lib/globalLensBridge.js';
@@ -6219,64 +6220,40 @@ function stopSwarmAutopilot(): void {
   setJobEnabled('swarm', false);
 }
 
-app.get('/api/recourse/subagents/status', (req, res) => {
-  res.json({
-    success: true,
-    swarmStatus: { ...swarmStatus, subTeamStates: swarmTeamStates },
-    autopilotIntervalMs: SWARM_AUTOPILOT_MS,
-    model: currentProviderStatus().model,
-    executorNote: swarmBusy ? 'busy' : (swarmStatus.activeTaskQueue.some((t) => t.status === 'queued') ? 'queued tasks awaiting configured provider' : 'idle'),
-  });
-});
-
-app.post('/api/recourse/subagents/toggle-autopilot', (req, res) => {
-  swarmStatus.isSwarmAutopilotActive = !swarmStatus.isSwarmAutopilotActive;
-  if (swarmStatus.isSwarmAutopilotActive) {
-    ensureSwarmAutopilot();
-    pumpSwarmQueue(1).catch(() => {});
-  } else {
-    stopSwarmAutopilot();
-  }
-  saveStateToDisk();
-  res.json({ success: true, isSwarmAutopilotActive: swarmStatus.isSwarmAutopilotActive });
-});
-
-app.post('/api/recourse/subagents/dispatch', async (req, res) => {
-  const { agentType, title, domain } = req.body;
-  if (!agentType || !title || !domain) {
-    return res.status(400).json({ error: 'agentType, title, and domain are required' });
-  }
-  if (!swarmStatus.agents.some((a) => a.id === agentType)) {
-    return res.status(400).json({ error: `unknown agentType: ${agentType}` });
-  }
-
-  const result = dispatchSubAgentTask(agentType, title, domain, swarmStatus);
-  swarmStatus = result.updatedSwarm;
-  saveStateToDisk();
-
-  // Kick a real execution attempt when the autopilot is on.
-  if (swarmStatus.isSwarmAutopilotActive) {
-    pumpSwarmQueue(1).catch(() => {});
-  }
-
-  res.json({
-    success: true,
-    swarmStatus,
-    newTask: result.newTask,
-    note: 'Task is QUEUED. It is only completed when the configured provider produces code that passes the real sandbox verifier.',
-  });
-});
-
-/** Manually drive the real swarm executor (also used by the UI if present). */
-app.post('/api/recourse/subagents/process', async (req, res) => {
-  try {
-    const limit = Math.max(1, Math.min(5, Number(req.body?.limit ?? 1)));
-    const processed = await pumpSwarmQueue(limit);
-    res.json({ success: true, processedCount: processed, swarmStatus });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
+// Subagent-swarm routes mounted from src/routes/subagents.ts. The swarm's mutable
+// state stays here; the router receives operations so state has one owner.
+app.use(
+  '/api/recourse/subagents',
+  createSubagentsRouter({
+    status: () => ({
+      swarmStatus: { ...swarmStatus, subTeamStates: swarmTeamStates },
+      intervalMs: SWARM_AUTOPILOT_MS,
+      model: currentProviderStatus().model,
+      busy: swarmBusy,
+    }),
+    toggleAutopilot: () => {
+      swarmStatus.isSwarmAutopilotActive = !swarmStatus.isSwarmAutopilotActive;
+      if (swarmStatus.isSwarmAutopilotActive) {
+        ensureSwarmAutopilot();
+        pumpSwarmQueue(1).catch(() => {});
+      } else {
+        stopSwarmAutopilot();
+      }
+      saveStateToDisk();
+      return swarmStatus.isSwarmAutopilotActive;
+    },
+    dispatch: (agentType, title, domain) => {
+      const result = dispatchSubAgentTask(agentType as SubAgentType, title, domain as ToolDomain, swarmStatus);
+      swarmStatus = result.updatedSwarm;
+      saveStateToDisk();
+      if (swarmStatus.isSwarmAutopilotActive) {
+        pumpSwarmQueue(1).catch(() => {});
+      }
+      return { swarmStatus, newTask: result.newTask };
+    },
+    process: (limit) => pumpSwarmQueue(limit),
+  }),
+);
 
 // =========================================================================
 // 5. FIVE-FORMULA RECURSIVE LEARNING LOOP ROUTES
