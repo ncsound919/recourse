@@ -316,6 +316,9 @@ import { openArticleStore, openPublishTargetStore, openDeliveryLog } from './src
 import { createPublishingRouter } from './src/routes/publishing.js';
 import { openCrmStore, openSuppressionStore, openOutbox } from './src/lib/growth/index.js';
 import { createGrowthRouter } from './src/routes/growth.js';
+import { openSkillRegistry } from './src/lib/skillRegistry.js';
+import { federationSkillProviders } from './src/lib/ecosystem/skillFederation.js';
+import { createEcosystemRouter } from './src/routes/ecosystem.js';
 import { loadBusinessProfile, listBusinessSlugs } from './src/autopilot/businessProfile.js';
 import type { BusinessProfileT } from './src/autopilot/businessProfile.js';
 import { publishToGlobalLens } from './src/lib/globalLensBridge.js';
@@ -398,11 +401,16 @@ const commerceRouter = createCommerceRouter({
 // ---------------------------------------------------------------------------
 const federationIdentity = loadOrCreateIdentity();
 const peerStore = openPeerStore();
+// The signed skill registry is the concrete provider behind federation's
+// injectable export/import seam, so skills actually replicate between peers.
+const skillRegistry = openSkillRegistry();
 const federationRouter = createFederationRouter({
   identity: federationIdentity,
   peers: peerStore,
   requireMutationAuth,
+  ...federationSkillProviders(skillRegistry),
 });
+const ecosystemRouter = createEcosystemRouter({ requireMutationAuth });
 
 const articleStore = openArticleStore();
 const publishTargetStore = openPublishTargetStore();
@@ -2564,6 +2572,8 @@ app.use('/api/recourse/commerce', commerceRouter);
 app.use('/api/recourse/federation', federationRouter);
 app.use('/api/recourse/publishing', publishingRouter);
 app.use('/api/recourse/growth', growthRouter);
+// Wave 3 ecosystem primitives (skills / plugins / connectors).
+app.use('/api/recourse/ecosystem', ecosystemRouter);
 
 // ---------------------------------------------------------------------------
 // Science conductor — the 24/7 research loop driving the connected stack.

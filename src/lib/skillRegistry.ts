@@ -97,6 +97,12 @@ export interface SkillRegistry {
   publish(input: PublishInput): { ok: boolean; entry?: SkillRegistryEntry; signed: boolean; error?: string };
   list(): SkillRegistryEntry[];
   get(id: string): SkillRegistryEntry | undefined;
+  /**
+   * Store a FOREIGN entry (e.g. received over federation), preserving its own
+   * signature — never re-signed with the local secret. Newer-wins by
+   * `publishedAt`. Reports `applied:false` when the local copy is not older.
+   */
+  importEntry(entry: SkillRegistryEntry): { ok: boolean; applied: boolean; error?: string };
   revoke(id: string): { ok: boolean; error?: string };
   verify(id: string): { found: boolean; signed: boolean; valid: boolean; reason?: string };
 }
@@ -136,6 +142,33 @@ export function openSkillRegistry(file = skillRegistryFile()): SkillRegistry {
     get(id) {
       const e = doc.entries.find((x) => x.id === id);
       return e ? { ...e } : undefined;
+    },
+    importEntry(entry) {
+      if (!entry || typeof entry.id !== 'string' || typeof entry.name !== 'string' || typeof entry.version !== 'string') {
+        return { ok: false, applied: false, error: 'imported entry requires id, name and version' };
+      }
+      const existing = doc.entries.find((x) => x.id === entry.id);
+      if (existing && existing.publishedAt >= entry.publishedAt) {
+        return { ok: true, applied: false };
+      }
+      // Preserve the foreign signature exactly; do not re-sign.
+      const stored: SkillRegistryEntry = {
+        id: entry.id,
+        name: entry.name,
+        version: entry.version,
+        description: entry.description ?? '',
+        domain: entry.domain,
+        toolName: entry.toolName,
+        sourceHash: entry.sourceHash,
+        license: entry.license,
+        author: entry.author,
+        publishedAt: entry.publishedAt,
+        signature: entry.signature,
+      };
+      if (existing) doc.entries[doc.entries.indexOf(existing)] = stored;
+      else doc.entries.push(stored);
+      persist();
+      return { ok: true, applied: true };
     },
     revoke(id) {
       const before = doc.entries.length;
