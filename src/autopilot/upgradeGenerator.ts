@@ -31,9 +31,31 @@ const HONEST_CODE_NOTE =
 // Public API
 // ============================================================================
 
+/** Real, machine-checkable code produced by a planner/model. */
+export interface PlannedCode {
+  /** Repo-relative path for the new/changed file. */
+  file: string;
+  content: string;
+  /** Assertion body (`assert ...;`) that proves the code works. */
+  acceptanceTest: string;
+  functionName?: string;
+}
+
+export interface GenerateUpgradeOptions {
+  /**
+   * Optional planner (a real model/agent) that synthesizes the code a Tier A
+   * code gap needs. When it returns a result, the generator emits the real file
+   * AND its acceptance test, and the gate runs that test in the sandbox. When it
+   * is absent or returns null, the generator keeps its honest placeholder (it
+   * never fabricates working source).
+   */
+  planner?: (gap: GapT, profile: BusinessProfileT) => Promise<PlannedCode | null>;
+}
+
 export async function generateUpgrade(
   gap: GapT,
   profile: BusinessProfileT,
+  opts: GenerateUpgradeOptions = {},
 ): Promise<UpgradeProposalT> {
   const nowMs = Date.now();
   const base = {
@@ -46,7 +68,7 @@ export async function generateUpgrade(
   };
 
   if (gap.tier === 'A') {
-    return UpgradeProposal.parse({ ...base, ...buildTierA(gap, profile) });
+    return UpgradeProposal.parse({ ...base, ...(await buildTierA(gap, profile, opts)) });
   }
   if (gap.tier === 'B') {
     return UpgradeProposal.parse({ ...base, ...buildTierB(gap, profile) });
@@ -77,10 +99,11 @@ export function markerContent(marker: 'REVIEW_REQUIRED' | 'NO_AUTO_DEPLOY'): str
 // Tier A — code / tooling
 // ============================================================================
 
-function buildTierA(
+async function buildTierA(
   gap: GapT,
   profile: BusinessProfileT,
-): Pick<UpgradeProposalT, 'description' | 'files' | 'requiresSandboxVerify'> {
+  opts: GenerateUpgradeOptions,
+): Promise<Pick<UpgradeProposalT, 'description' | 'files' | 'requiresSandboxVerify' | 'verification'>> {
   const description = gap.description;
   const wantsCode = /bug|fix|refactor|implement|write|build|rotate|migrat|add (a )?(unit )?test|test coverage|function|class|module/i.test(description);
 
@@ -94,6 +117,31 @@ function buildTierA(
     const content = envExampleTemplate(profile);
     const file: UpgradeFileT = { path: '.env.example', action: 'create', content };
     return { description, files: [file], requiresSandboxVerify: false };
+  }
+
+  // A real planner (model/agent) may synthesize the code this gap needs. When it
+  // does, emit the actual file AND its acceptance test so the gate can run a real
+  // sandbox suite. The generator itself never fabricates source.
+  if (opts.planner) {
+    let planned: PlannedCode | null = null;
+    try {
+      planned = await opts.planner(gap, profile);
+    } catch {
+      planned = null;
+    }
+    if (planned && planned.file && planned.content && planned.acceptanceTest) {
+      const plannedFile: UpgradeFileT = { path: planned.file, action: 'create', content: planned.content };
+      return {
+        description: `${description}\n\nVerified by the pre-merge gate: the acceptance test below runs in the sandbox against the emitted file.`,
+        files: [plannedFile],
+        requiresSandboxVerify: true,
+        verification: {
+          file: planned.file,
+          acceptanceTest: planned.acceptanceTest,
+          ...(planned.functionName ? { functionName: planned.functionName } : {}),
+        },
+      };
+    }
   }
 
   const docPath = `docs/upgrades/${slugify(gap.id) || 'upgrade'}.md`;

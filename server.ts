@@ -300,6 +300,7 @@ import { setSandboxSpendSink } from './src/lib/selfHostSandbox.js';
 import { createProductRouter } from './src/routes/product.js';
 import { createOpsRouter, metricsText } from './src/routes/ops.js';
 import { metrics } from './src/lib/metrics.js';
+import { tracer, runInSpan, parseTraceparent, formatTraceparent, currentSpan } from './src/lib/tracing.js';
 import { handleMcpHttp } from './src/lib/mcpHttp.js';
 import { agentCard, handleA2aRpc, A2A_SKILLS, openA2aTaskStore } from './src/lib/a2a.js';
 import type { A2aOperation } from './src/lib/a2a.js';
@@ -386,7 +387,14 @@ setModelUsageSink((u) => {
       description: `model ${u.model} (${u.profile})`,
     });
   } catch { /* metering must never break generation */ }
-  // Observability: every model call is counted (independent of metering success).
+  // Observability: every model call is counted (independent of metering success)
+  // and traced as a child of whatever request/task span is active.
+  const parentSpan = currentSpan();
+  const span = tracer.startSpan('model.call', {
+    parent: parentSpan?.context,
+    attributes: { 'model.name': u.model, 'model.profile': u.profile, 'model.total_tokens': u.totalTokens, 'model.estimated': u.estimated },
+  });
+  tracer.endSpan(span, { status: 'ok' });
   modelCallsTotal.inc({ model: u.model, profile: u.profile, estimated: String(u.estimated) });
   modelTokensTotal.inc({ model: u.model, direction: 'input' }, u.promptTokens);
   modelTokensTotal.inc({ model: u.model, direction: 'output' }, u.completionTokens);
@@ -938,6 +946,29 @@ app.use((req, res, next) => {
     httpRequestSeconds.observe(seconds, { method: req.method });
   });
   next();
+});
+
+// Distributed tracing: one root span per request, propagating W3C trace context
+// to any child work (model calls, tool executions) run inside the handler.
+app.use((req, res, next) => {
+  const parent = parseTraceparent(req.headers['traceparent'] as string | undefined);
+  const span = tracer.startSpan(`HTTP ${req.method} ${req.path}`, {
+    parent,
+    attributes: { 'http.method': req.method, 'http.target': req.path },
+  });
+  res.setHeader('traceparent', formatTraceparent(span));
+  let ended = false;
+  const finish = () => {
+    if (ended) return;
+    ended = true;
+    tracer.endSpan(span, {
+      status: res.statusCode >= 500 ? 'error' : 'ok',
+      attributes: { 'http.status_code': res.statusCode },
+    });
+  };
+  res.on('finish', finish);
+  res.on('close', finish);
+  runInSpan(span, () => next());
 });
 
 // ---------------------------------------------------------------------------

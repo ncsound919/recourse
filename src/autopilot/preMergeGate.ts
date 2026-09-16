@@ -32,6 +32,7 @@ import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
 
 import { GateResult, type GateResultT, type UpgradeProposalT } from './loopTypes';
+import { executeTestSuite } from '../lib/executionSandbox';
 import type { RepoBindingT } from './businessProfile';
 
 // ============================================================================
@@ -249,7 +250,33 @@ function runNode(cliJs: string, args: string[], cwd: string): { stdout: string; 
 
 const sandbox: Executor = (ctx) => {
   if (ctx.proposal?.requiresSandboxVerify === true) {
-    return { passed: false, output: 'requires_sandbox_not_available' };
+    // Real sandbox verification when the proposal carries an acceptance test:
+    // run it against the changed file's content in the isolated sandbox. A
+    // proposal that requires verification but supplies no test is refused
+    // honestly (never a fabricated pass).
+    const verification = ctx.proposal.verification;
+    if (!verification) {
+      return { passed: false, output: 'requires_sandbox_not_available' };
+    }
+    const file = ctx.proposal.files.find(
+      (f) => toPosix(f.path) === toPosix(verification.file),
+    );
+    if (!file) {
+      return {
+        passed: false,
+        output: `verification.file "${verification.file}" does not match any proposal file`,
+        error: 'verification file not found in proposal',
+      };
+    }
+    const run = executeTestSuite(file.content, verification.acceptanceTest);
+    const failures = run.testDetails.filter((d) => d.startsWith('[FAIL'));
+    return run.passed
+      ? { passed: true, output: `sandbox suite passed for ${file.path} (${run.testDetails.length - 1} assertion(s))` }
+      : {
+          passed: false,
+          output: failures.join('\n') || 'sandbox suite failed',
+          error: `sandbox verification failed for ${file.path}`,
+        };
   }
   const jsFiles = ctx.changedFiles.filter((f) => SYNTAX_EXT.test(f));
   if (jsFiles.length === 0) {

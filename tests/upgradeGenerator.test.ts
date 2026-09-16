@@ -105,6 +105,37 @@ describe('upgradeGenerator', () => {
     expect(proposal.files[0].content).toMatch(/model-based code synthesis is pending/i);
   });
 
+  it('with a planner, a tier A code gap emits real code + an acceptance test (verification)', async () => {
+    const gap = makeGap({
+      tier: 'A',
+      description: 'Implement input sanitization for the upload endpoint',
+      fixability: 0.6,
+      affectedDimensions: ['securityPosture'],
+    });
+    const proposal = await generateUpgrade(gap, makeProfile(), {
+      planner: async () => ({
+        file: 'src/sanitize.js',
+        content: 'export function sanitize(s) { return String(s).replace(/[<>]/g, ""); }',
+        acceptanceTest: 'assert sanitize("<x>") === "x";',
+        functionName: 'sanitize',
+      }),
+    });
+
+    expect(proposal.requiresSandboxVerify).toBe(true);
+    expect(proposal.verification?.file).toBe('src/sanitize.js');
+    expect(proposal.verification?.acceptanceTest).toMatch(/sanitize/);
+    const file = proposal.files.find((f) => f.path === 'src/sanitize.js');
+    expect(file?.content).toContain('export function sanitize');
+  });
+
+  it('without a planner, a tier A code gap stays an honest placeholder (no fabricated source)', async () => {
+    const gap = makeGap({ tier: 'A', description: 'Implement input sanitization for the upload endpoint', fixability: 0.6 });
+    const proposal = await generateUpgrade(gap, makeProfile(), { planner: async () => null });
+    expect(proposal.requiresSandboxVerify).toBe(true);
+    expect(proposal.verification).toBeUndefined();
+    for (const f of proposal.files) expect(f.path.endsWith('.md')).toBe(true);
+  });
+
   it('tier A gitignore-style gap produces a real .gitignore template without sandbox verify', async () => {
     const gap = makeGap({
       tier: 'A',

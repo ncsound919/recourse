@@ -10,6 +10,7 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { metrics } from '../lib/metrics';
+import { tracer, exportOtlp } from '../lib/tracing';
 import { openPolicyEngine, type PolicyAction, type PolicyEngine } from '../lib/policy';
 import { openApprovalStore, type ApprovalStore } from '../lib/approvals';
 import { buildDockerComposePlan, runDeployPlan } from '../lib/deploy';
@@ -120,6 +121,29 @@ export function createOpsRouter(deps: OpsRouterDeps): Router {
     } catch (e: any) {
       res.status(500).json({ success: false, error: e.message });
     }
+  });
+
+  // --- Tracing ------------------------------------------------------------
+  router.get('/traces', (req, res) => {
+    const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
+    res.json({ success: true, count: tracer.count, spans: tracer.recent(limit) });
+  });
+
+  router.get('/tracing/status', (_req, res) => {
+    const endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
+    res.json({
+      success: true,
+      enabled: Boolean(endpoint),
+      exporterEndpoint: endpoint ?? null,
+      serviceName: process.env.OTEL_SERVICE_NAME || 'recourse',
+      bufferedSpans: tracer.count,
+    });
+  });
+
+  router.post('/traces/export', async (req, res) => {
+    if (!deps.requireMutationAuth(req, res)) return;
+    const result = await exportOtlp(tracer.recent(500));
+    res.status(result.ok ? 200 : 503).json({ success: result.ok, ...result });
   });
 
   return router;

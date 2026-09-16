@@ -299,6 +299,69 @@ describe('preMergeGate DEFAULT_EXECUTORS.sandbox', () => {
     expect(result.passed).toBe(false);
     expect(result.output).toContain('requires_sandbox_not_available');
   });
+
+  it('runs a real sandbox suite when the proposal carries verification (pass)', async () => {
+    const repo = makeTmpRepo();
+    const proposal = makeProposal({
+      requiresSandboxVerify: true,
+      files: [{ path: 'add.js', action: 'create', content: 'export function add(a, b) { return a + b; }' }],
+      verification: { file: 'add.js', acceptanceTest: 'assert add(2, 3) === 5;' },
+    });
+    const result = await DEFAULT_EXECUTORS.sandbox({ repoPath: repo, changedFiles: [], repoBinding: null, proposal });
+    expect(result.passed).toBe(true);
+    expect(result.output).toContain('sandbox suite passed');
+  });
+
+  it('rejects when the real sandbox suite fails', async () => {
+    const repo = makeTmpRepo();
+    const proposal = makeProposal({
+      requiresSandboxVerify: true,
+      files: [{ path: 'add.js', action: 'create', content: 'export function add(a, b) { return a + b; }' }],
+      verification: { file: 'add.js', acceptanceTest: 'assert add(2, 3) === 6;' },
+    });
+    const result = await DEFAULT_EXECUTORS.sandbox({ repoPath: repo, changedFiles: [], repoBinding: null, proposal });
+    expect(result.passed).toBe(false);
+    expect(result.error).toMatch(/sandbox verification failed/);
+  });
+
+  it('rejects a verification that points at a file the proposal does not contain', async () => {
+    const repo = makeTmpRepo();
+    const proposal = makeProposal({
+      requiresSandboxVerify: true,
+      files: [{ path: 'add.js', action: 'create', content: 'export function add(a, b) { return a + b; }' }],
+      verification: { file: 'other.js', acceptanceTest: 'assert true;' },
+    });
+    const result = await DEFAULT_EXECUTORS.sandbox({ repoPath: repo, changedFiles: [], repoBinding: null, proposal });
+    expect(result.passed).toBe(false);
+    expect(result.output).toMatch(/does not match any proposal file/);
+  });
+
+  it('passes the full gate only when the provided verification suite is green', async () => {
+    const repo = makeTmpRepo();
+    const executors = { sandbox: DEFAULT_EXECUTORS.sandbox, lint: passExecutor(), typecheck: passExecutor(), tests: passExecutor() };
+    const ok = await runGate(
+      makeProposal({
+        requiresSandboxVerify: true,
+        files: [{ path: 'add.js', action: 'create', content: 'export function add(a, b) { return a + b; }' }],
+        verification: { file: 'add.js', acceptanceTest: 'assert add(1, 1) === 2;' },
+      }),
+      repo,
+      executors,
+    );
+    expect(ok.passed).toBe(true);
+
+    const bad = await runGate(
+      makeProposal({
+        requiresSandboxVerify: true,
+        files: [{ path: 'add.js', action: 'create', content: 'export function add(a, b) { return a - b; }' }],
+        verification: { file: 'add.js', acceptanceTest: 'assert add(1, 1) === 2;' },
+      }),
+      repo,
+      executors,
+    );
+    expect(bad.passed).toBe(false);
+    expect(bad.rejectedReason).toContain('sandbox failed');
+  });
 });
 
 describe('preMergeGate checkProtectedPaths', () => {

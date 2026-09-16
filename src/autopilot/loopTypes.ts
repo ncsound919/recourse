@@ -154,6 +154,22 @@ export const UpgradeFile = z.object({
 });
 export type UpgradeFileT = z.infer<typeof UpgradeFile>;
 
+/**
+ * A machine-checkable acceptance test for a proposal's code change. When
+ * present and `requiresSandboxVerify` is set, the pre-merge gate executes it in
+ * the REAL sandbox against the changed file's content (never a fabricated pass).
+ * `file` must match one of `files`.
+ */
+export const ProposalVerification = z.object({
+  /** Repo-relative path of the changed file the test exercises. */
+  file: z.string(),
+  /** Optional callable name; the sandbox resolves the entrypoint itself. */
+  functionName: z.string().optional(),
+  /** Assertion body (`assert ...;` statements) run against the file's code. */
+  acceptanceTest: z.string().min(1),
+});
+export type ProposalVerificationT = z.infer<typeof ProposalVerification>;
+
 export const UpgradeProposal = z.object({
   id: z.string(),
   gapId: z.string(),
@@ -165,6 +181,8 @@ export const UpgradeProposal = z.object({
   generatedAt: z.string().datetime(),
   markerFile: z.string().optional(),
   requiresSandboxVerify: z.boolean().default(false),
+  /** Present => the gate can run a real sandbox suite instead of refusing. */
+  verification: ProposalVerification.optional(),
   passedSandbox: z.boolean().optional(),
   passedLint: z.boolean().optional(),
   passedTypecheck: z.boolean().optional(),
