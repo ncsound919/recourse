@@ -1,0 +1,35 @@
+# Recourse — one-command local deploy.
+#   docker compose up --build
+# The server defaults to the local `ollama` service for generation. Point
+# MODEL_BASE_URL at a remote OpenAI-compatible endpoint to skip Ollama.
+services:
+  recourse:
+    build: .
+    image: recourse:local
+    ports:
+      - "3050:3050"
+    env_file:
+      - .env
+    environment:
+      # Inside the compose network the model server is reachable by name.
+      MODEL_BASE_URL: ${MODEL_BASE_URL:-http://ollama:11434/v1}
+      PORT: "3050"
+    volumes:
+      - recourse-data:/app/data
+      - recourse-selfhosted:/app/.selfhosted
+    depends_on:
+      - ollama
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    restart: unless-stopped
+
+volumes:
+  recourse-data:
+  recourse-selfhosted:
+  ollama-models:

@@ -23,7 +23,7 @@ import type {
 } from './mutator-types';
 import type { InvariantCheck, ToolDomain } from './types';
 
-let currentPolicy: PromotionPolicy = 'auto_promote';
+let currentPolicy: PromotionPolicy = 'any_pass';
 let globalGeneration = 1;
 
 export function getActiveModel(): string {
@@ -34,8 +34,55 @@ export function getActivePolicy(): PromotionPolicy {
   return currentPolicy;
 }
 
-export function setActivePolicy(policy: PromotionPolicy): void {
-  currentPolicy = policy;
+/** Normalize any accepted policy label (canonical or legacy) to the canonical
+ *  vocabulary. Legacy aliases are mapped and reported via `note`. */
+export function normalizePromotionPolicy(
+  input: string,
+): { policy: PromotionPolicy; note?: string } | { error: string } {
+  const p = String(input ?? '').trim().toLowerCase();
+  if (p === 'auto_promote') return { policy: 'any_pass', note: 'auto_promote is an alias of any_pass' };
+  if (p === 'manual_approval') return { policy: 'human_approval', note: 'manual_approval is an alias of human_approval' };
+  if (p === 'any_pass' || p === 'non_regressing' || p === 'strict_improve' || p === 'human_approval') {
+    return { policy: p };
+  }
+  return { error: `unknown promotion policy "${input}"` };
+}
+
+/** Accepts canonical labels or legacy aliases; normalized internally. A plain
+ *  `string` is allowed so env/API boundaries need no pre-cast. */
+export function setActivePolicy(policy: string): void {
+  const normalized = normalizePromotionPolicy(policy);
+  if ('error' in normalized) throw new Error(normalized.error);
+  currentPolicy = normalized.policy;
+}
+
+/** Pure promotion decision for a verified candidate under a gate policy. */
+export function resolvePromotion(
+  policy: PromotionPolicy,
+  input: { verified: boolean; score?: number; priorScore?: number },
+): { outcome: MutationOutcome; status: GeneStatus; reason: string } {
+  if (!input.verified) return { outcome: 'rejected', status: 'rejected', reason: 'sandbox verifier failed' };
+  const score = input.score ?? 0;
+  switch (policy) {
+    case 'any_pass':
+      return { outcome: 'promoted', status: 'active', reason: 'verified (any_pass)' };
+    case 'human_approval':
+      return { outcome: 'pending_approval', status: 'pending_approval', reason: 'verified; queued for human approval' };
+    case 'non_regressing': {
+      const ok = input.priorScore === undefined || score >= input.priorScore;
+      return ok
+        ? { outcome: 'promoted', status: 'active', reason: `verified; score ${score} >= baseline ${input.priorScore ?? 'n/a'}` }
+        : { outcome: 'pending_approval', status: 'pending_approval', reason: `verified but score ${score} < baseline ${input.priorScore}` };
+    }
+    case 'strict_improve': {
+      const ok = input.priorScore === undefined ? score > 0 : score > input.priorScore;
+      return ok
+        ? { outcome: 'promoted', status: 'active', reason: `verified; score ${score} > baseline ${input.priorScore ?? 0}` }
+        : { outcome: 'pending_approval', status: 'pending_approval', reason: `verified but score ${score} not > baseline ${input.priorScore}` };
+    }
+    default:
+      return { outcome: 'pending_approval', status: 'pending_approval', reason: `unrecognized policy ${String(policy)}; held for human review` };
+  }
 }
 
 export interface GeneRegistryStore {
@@ -456,13 +503,18 @@ export async function evolveGene(
   let status: GeneStatus;
 
   if (verifierResult.verified) {
-    if (currentPolicy === 'auto_promote') {
-      outcome = 'promoted';
-      status = 'active';
-    } else {
-      outcome = 'pending_approval';
-      status = 'pending_approval';
-    }
+    // Comparable score = fraction of invariant checks passed (all pass when
+    // verified). Baseline = the current active gene for the same tool, if any.
+    const score = verifierResult.checks.length
+      ? verifierResult.checks.filter((c) => c.passed).length / verifierResult.checks.length
+      : 0;
+    const prior = (await store.list()).find((g) => g.status === 'active' && g.name === candidate.toolName);
+    const priorScore = prior && prior.verifierChecks.length
+      ? prior.verifierChecks.filter((c) => c.passed).length / prior.verifierChecks.length
+      : undefined;
+    const decision = resolvePromotion(currentPolicy, { verified: true, score, priorScore });
+    outcome = decision.outcome;
+    status = decision.status;
   } else {
     outcome = 'rejected';
     status = 'rejected';

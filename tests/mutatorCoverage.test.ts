@@ -82,11 +82,16 @@ describe('mutator.ts coverage', () => {
       expect(getActiveModel()).toBe('deepseek-v4-flash-0731');
     });
 
-    it('getActivePolicy/setActivePolicy round-trip', () => {
+    it('getActivePolicy/setActivePolicy round-trip (canonical vocabulary + legacy aliases)', () => {
+      setActivePolicy('human_approval');
+      expect(getActivePolicy()).toBe('human_approval');
+      setActivePolicy('any_pass');
+      expect(getActivePolicy()).toBe('any_pass');
+      // Legacy labels are normalized to the canonical vocabulary.
       setActivePolicy('manual_approval');
-      expect(getActivePolicy()).toBe('manual_approval');
+      expect(getActivePolicy()).toBe('human_approval');
       setActivePolicy('auto_promote');
-      expect(getActivePolicy()).toBe('auto_promote');
+      expect(getActivePolicy()).toBe('any_pass');
     });
   });
 
@@ -190,12 +195,12 @@ describe('mutator.ts coverage', () => {
       expect(store.saved[0].status).toBe('active');
     });
 
-    it('lands pending_approval under manual_approval policy', async () => {
+    it('lands pending_approval under human_approval policy', async () => {
       h.chatComplete.mockResolvedValue(ok(JSON.stringify({
         source: VALID_SOURCE, testVectors: [1], description: 'd',
       })));
       const store = new CaptureStore();
-      setActivePolicy('manual_approval');
+      setActivePolicy('human_approval');
       const res = await evolve(store, { domain: 'math', instructions: 'x', targetToolName: 'mutate' });
       expect(res.outcome).toBe('pending_approval');
       expect(store.saved[0].status).toBe('pending_approval');

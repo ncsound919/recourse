@@ -4,10 +4,19 @@ import type { InvariantCheck, ToolDomain } from './types';
 import type { BiasOptions } from '../lib/memory/failureMemory';
 import type { Episode } from '../lib/memory/types';
 
-/** Gate policy applied to verified genes.
- *  - auto_promote:    verified genes become active immediately
- *  - manual_approval: verified genes land in pending_approval until approved */
-export type PromotionPolicy = 'auto_promote' | 'manual_approval';
+/** Canonical gate policy applied to verified genes (one vocabulary, shared by
+ *  the mutator, the HTTP API, and the UI).
+ *  - any_pass:        verified genes become active immediately
+ *  - non_regressing:  promote only when the verified score is >= the current
+ *                     active baseline for the same tool (no baseline => promote)
+ *  - strict_improve:  promote only when the verified score is strictly greater
+ *  - human_approval:  verified genes land in pending_approval until approved */
+export type PromotionPolicy = 'any_pass' | 'non_regressing' | 'strict_improve' | 'human_approval';
+
+/** Legacy labels accepted at API boundaries for backward compatibility. */
+export type LegacyPromotionPolicy = 'auto_promote' | 'manual_approval';
+
+export type PromotionPolicyInput = PromotionPolicy | LegacyPromotionPolicy;
 
 export type MutationOutcome = 'promoted' | 'pending_approval' | 'rejected';
 

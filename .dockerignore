@@ -1,0 +1,25 @@
+node_modules
+dist
+coverage
+coverage-baseline
+data
+.selfhosted
+recourse-fix-bundle
+.git
+.github
+*.log
+*.err
+*.out
+boot-*.log
+server-*.log
+recourse_*.json
+recourse_*.json-shm
+recourse_*.json-wal
+recourse_*.json.tmp
+*.pid
+prometheus
+"bisim and abm"
+"deteministic researcher"
+"BF Resolver"
+docs
+media-package
