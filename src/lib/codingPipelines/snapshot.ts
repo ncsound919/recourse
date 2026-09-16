@@ -29,6 +29,8 @@ const SKIP_DIRS = new Set([
   '.cache',
   'composer-out',
   'recourse-fix-bundle',
+  // Settlement run artifacts (receipts/worktrees/opencode.db) — not source.
+  '.settlement',
 ]);
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024;

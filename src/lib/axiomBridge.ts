@@ -177,3 +177,100 @@ export async function dispatchAxiomRepair(opts: {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
+
+// ---------------------------------------------------------------------------
+// Project-loop launch + polling. Axiom runs loops asynchronously and writes to
+// targetDir directly, so a benchmark must wait for the loop to finish before
+// snapshotting the diff.
+// ---------------------------------------------------------------------------
+
+export interface AxiomLoopLaunchResult {
+  ok: boolean;
+  id?: string;
+  maxIterations?: number;
+  status?: number;
+  error?: string;
+}
+
+export async function launchAxiomLoop(opts: {
+  goal: string;
+  targetDir: string;
+  maxIterations?: number;
+  mode?: 'existing' | 'greenfield';
+  timeoutMs?: number;
+}): Promise<AxiomLoopLaunchResult> {
+  try {
+    const res = await fetch(`${AXIOM_URL}/api/project/run`, {
+      method: 'POST',
+      headers: axiomHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({
+        goal: opts.goal,
+        targetDir: opts.targetDir,
+        maxIterations: opts.maxIterations ?? 6,
+        mode: opts.mode ?? 'existing',
+      }),
+      signal: AbortSignal.timeout(opts.timeoutMs ?? 30_000),
+    });
+    const data = await res.json().catch(() => ({})) as Record<string, unknown>;
+    if (!res.ok) {
+      return { ok: false, status: res.status, error: typeof data.error === 'string' ? data.error : `Axiom HTTP ${res.status}` };
+    }
+    return {
+      ok: true,
+      ...(typeof data.id === 'string' ? { id: data.id } : {}),
+      ...(typeof data.maxIterations === 'number' ? { maxIterations: data.maxIterations } : {}),
+    };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export interface AxiomLoopStatusResult {
+  ok: boolean;
+  state?: Record<string, unknown>;
+  status?: number;
+  error?: string;
+}
+
+export async function axiomLoopStatus(id: string, timeoutMs = 15_000): Promise<AxiomLoopStatusResult> {
+  try {
+    const res = await fetch(`${AXIOM_URL}/api/project/status/${encodeURIComponent(id)}`, {
+      headers: axiomHeaders(),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    const data = await res.json().catch(() => ({})) as Record<string, unknown>;
+    if (!res.ok) {
+      return { ok: false, status: res.status, error: typeof data.error === 'string' ? data.error : `Axiom HTTP ${res.status}` };
+    }
+    return { ok: true, state: data };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** Poll until the loop leaves the "running" state or the deadline passes. */
+export async function waitForAxiomLoop(
+  id: string,
+  opts: { timeoutMs?: number; pollMs?: number } = {},
+): Promise<{ ok: boolean; status?: string; iterations?: number; error?: string }> {
+  const deadline = Date.now() + (opts.timeoutMs ?? 900_000);
+  const pollMs = opts.pollMs ?? 5_000;
+  let last: string | undefined;
+  for (;;) {
+    const r = await axiomLoopStatus(id);
+    if (!r.ok) return { ok: false, status: last, error: r.error };
+    const state = r.state ?? {};
+    last = typeof state.status === 'string' ? state.status : undefined;
+    if (last && last !== 'running') {
+      return {
+        ok: last === 'done' || last === 'complete' || last === 'completed',
+        status: last,
+        ...(typeof state.iteration === 'number' ? { iterations: state.iteration } : {}),
+      };
+    }
+    if (Date.now() >= deadline) {
+      return { ok: false, status: last, error: `timed out waiting for Axiom loop ${id}` };
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+}

@@ -66,12 +66,14 @@ async function main(): Promise<void> {
   const ids = pipelinesArg ? pipelinesArg.split(',').map((s) => s.trim()).filter(Boolean) : null;
   const contractPath = arg('contract');
   const testCommand = arg('test');
+  const worktreeRoot = arg('worktree-root');
 
   const target = {
     repoDir,
     task,
     ...(contractPath ? { contractPath } : {}),
     ...(testCommand ? { testCommand } : {}),
+    ...(worktreeRoot ? { worktreeRoot } : {}),
     ...(has('keep') ? { keepWorktree: true } : {}),
   };
 

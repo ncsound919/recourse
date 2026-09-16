@@ -9,6 +9,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 import type { PipelineId, PipelineSpec, PipelineStatus, PipelineRunResult } from './types.js';
 import { getPipeline, installDefaultPipelines, listPipelines } from './registry.js';
@@ -61,13 +62,39 @@ const COPY_SKIP = new Set([
 /** Copy `repoDir` into a fresh temp worktree, skipping heavy/derived trees. */
 export function prepareWorktree(repoDir: string, worktreeRoot?: string): string {
   if (!fs.existsSync(repoDir)) throw new Error(`repoDir not found: ${repoDir}`);
-  const parent = worktreeRoot || fs.mkdtempSync(path.join(os.tmpdir(), 'pipeline-bench-'));
+  const configured = worktreeRoot || process.env.PIPELINE_WORKTREE_ROOT?.trim();
+  let parent: string;
+  if (configured) {
+    fs.mkdirSync(configured, { recursive: true });
+    parent = configured;
+  } else {
+    parent = fs.mkdtempSync(path.join(os.tmpdir(), 'pipeline-bench-'));
+  }
   const workdir = fs.mkdtempSync(path.join(parent, 'wt-'));
   fs.cpSync(repoDir, workdir, {
     recursive: true,
     filter: (src) => !COPY_SKIP.has(path.basename(src)),
   });
+  ensureGitRepo(workdir);
   return workdir;
+}
+
+/**
+ * Ensure the worktree is a git repo with an initial commit. The settlement
+ * pipeline's shadow execution needs `git worktree add HEAD` / `git diff HEAD`
+ * to work; agents in general also behave better with a VCS root. A fresh init
+ * is used (the heavy `.git` of a real target is not copied).
+ */
+function ensureGitRepo(workdir: string): void {
+  if (fs.existsSync(path.join(workdir, '.git'))) return;
+  const git = (args: string[]) => spawnSync('git', args, { cwd: workdir, stdio: 'ignore' });
+  git(['init', '-q']);
+  git(['-c', 'user.email=benchmark@recourse.local', '-c', 'user.name=recourse-benchmark', 'add', '-A']);
+  git([
+    '-c', 'user.email=benchmark@recourse.local',
+    '-c', 'user.name=recourse-benchmark',
+    'commit', '-q', '-m', 'benchmark base',
+  ]);
 }
 
 export async function runPipelineBenchmark(

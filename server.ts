@@ -320,6 +320,7 @@ import { createGrowthRouter } from './src/routes/growth.js';
 import { openSkillRegistry } from './src/lib/skillRegistry.js';
 import { federationSkillProviders } from './src/lib/ecosystem/skillFederation.js';
 import { createEcosystemRouter } from './src/routes/ecosystem.js';
+import { createSecurityRouter } from './src/routes/security.js';
 import { loadBusinessProfile, listBusinessSlugs } from './src/autopilot/businessProfile.js';
 import type { BusinessProfileT } from './src/autopilot/businessProfile.js';
 import { publishToGlobalLens } from './src/lib/globalLensBridge.js';
@@ -1694,15 +1695,7 @@ function executeSelfRepair(
 
 // API Routes
 import { axiomBridgeStatus, integrateAxiomTool, dispatchAxiomRepair, axiomReachable } from './src/lib/axiomBridge.js';
-import {
-  hackingtoolHealth,
-  hackingtoolCatalog,
-  hackingtoolCategories,
-  hackingtoolRecommend,
-  hackingtoolScopeCheck,
-  hackingtoolEngagement,
-  hackingtoolEngageEnabled,
-} from './src/lib/hackingtoolBridge.js';
+// (hackingtool security routes extracted to src/routes/security.ts)
 
 app.get('/api/recourse/axiom/status', async (_req, res) => {
   res.json(await axiomBridgeStatus());
@@ -1745,65 +1738,8 @@ app.post('/api/recourse/axiom/build-tool', async (req, res) => {
 // + an explicit scope allowlist. Abuse-shaped goals are refused up front.
 // =========================================================================
 
-app.get('/api/recourse/security/hackingtool/health', async (_req, res) => {
-  try { res.json(await hackingtoolHealth()); }
-  catch (e: any) { res.status(500).json({ ok: false, error: e.message }); }
-});
-
-app.get('/api/recourse/security/hackingtool/catalog', async (req, res) => {
-  try {
-    const q = req.query;
-    res.json(await hackingtoolCatalog({
-      category: typeof q.category === 'string' ? q.category : undefined,
-      search: typeof q.search === 'string' ? q.search : undefined,
-      includeOutOfScope: q.includeOutOfScope === 'true',
-      limit: Number(q.limit) || undefined,
-    }));
-  } catch (e: any) { res.status(500).json({ ok: false, error: e.message }); }
-});
-
-app.get('/api/recourse/security/hackingtool/categories', async (req, res) => {
-  try { res.json(await hackingtoolCategories({ includeOutOfScope: req.query.includeOutOfScope === 'true' })); }
-  catch (e: any) { res.status(500).json({ ok: false, error: e.message }); }
-});
-
-app.get('/api/recourse/security/hackingtool/recommend', async (req, res) => {
-  try {
-    const goal = typeof req.query.goal === 'string' ? req.query.goal : '';
-    if (!goal.trim()) return res.status(400).json({ ok: false, error: 'goal is required' });
-    const limit = Number(req.query.limit) || undefined;
-    res.json(await hackingtoolRecommend(goal.trim(), { limit }));
-  } catch (e: any) { res.status(500).json({ ok: false, error: e.message }); }
-});
-
-app.get('/api/recourse/security/hackingtool/scope-check', async (req, res) => {
-  try {
-    const target = typeof req.query.target === 'string' ? req.query.target : '';
-    if (!target.trim()) return res.status(400).json({ ok: false, error: 'target is required' });
-    res.json(await hackingtoolScopeCheck(target.trim()));
-  } catch (e: any) { res.status(500).json({ ok: false, error: e.message }); }
-});
-
-// The only executing path. Fail-closed: requires RECOURSE_API_SECRET, the
-// HACKINGTOOL_ENGAGE_ENABLED=1 kill switch, authorized:true, and a target in
-// HACKINGTOOL_SCOPE_ALLOWLIST. Disabled by default.
-app.post('/api/recourse/security/hackingtool/engagement', async (req, res) => {
-  if (!requireMutationAuth(req, res)) return;
-  try {
-    const body = req.body ?? {};
-    const targets = Array.isArray(body.targets) ? body.targets.map((t: unknown) => String(t)) : [];
-    const result = await hackingtoolEngagement({
-      authorized: body.authorized === true,
-      name: typeof body.name === 'string' ? body.name : undefined,
-      targets,
-      pipeline: typeof body.pipeline === 'string' ? body.pipeline : undefined,
-      timeoutMs: Number(body.timeoutMs) || undefined,
-    });
-    const status = result.ok ? 200 : result.refused ? 403 : 503;
-    res.status(status).json({ ...result, engageEnabled: hackingtoolEngageEnabled() });
-  } catch (e: any) { res.status(500).json({ ok: false, error: e.message }); }
-});
-
+// Security / authorized-testing routes are mounted from src/routes/security.ts
+// (mode/status route below).
 app.get('/api/recourse/status', async (req, res) => {
   const integrity = verifyChainIntegrity();
   status.hashChainIntegrity = integrity.valid;
@@ -2713,6 +2649,8 @@ app.use('/api/recourse/growth', growthRouter);
 app.use('/api/recourse/self-improvement', selfImprovementRouter);
 // Wave 3 ecosystem primitives (skills / plugins / connectors).
 app.use('/api/recourse/ecosystem', ecosystemRouter);
+// Authorized-testing security surface (extracted from the monolith).
+app.use('/api/recourse/security', createSecurityRouter({ requireMutationAuth }));
 
 // ---------------------------------------------------------------------------
 // Science conductor — the 24/7 research loop driving the connected stack.
