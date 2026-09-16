@@ -124,7 +124,6 @@ import {
 } from './src/lib/componentTemplates.js';
 import {
   listSelfHostedEntries,
-  getSelfHostedEntry,
   writeSelfHostedTool,
   writeStatelessSelfHostedTool,
   verifyAllSelfHosted,
@@ -134,7 +133,6 @@ import {
   toSafeModuleName
 } from './src/lib/selfHosting.js';
 import type { SelfHostedManifestEntry } from './src/lib/selfHosting.js';
-import { isSandboxRuntimeAvailable, getSandboxRuntime } from './src/lib/selfHostSandbox.js';
 
 // Capability Forge: the closed, honest self-improvement loop. Materializes
 // verified model-built functions into live self-hosted tools and records every
@@ -197,7 +195,6 @@ import {
 } from './src/lib/recourseActivator.js';
 
 // AgentBrowser web-fetch connector (download from the web through the real browser).
-import { isWebCategory, htmlFromResult, pickRenderMethod } from './src/lib/webArtifact.js';
 import { createWebChannelRouter } from './src/server/routes/webChannel.js';
 import { buildQDArchive, buildIslands } from './src/lib/qualityDiversity.js';
 import {
@@ -215,11 +212,6 @@ import {
   renderUpgradeMarkdown,
   renderPlainLanguageSummary,
 } from './src/lib/systemDiff.js';
-import {
-  resolveKind,
-  artifactCard,
-  unpackCall,
-} from './src/lib/artifactHost.js';
 import {
   isIsolateAvailable,
   executeToolInIsolate,
@@ -324,6 +316,9 @@ import { createEcosystemRouter } from './src/routes/ecosystem.js';
 import { createSecurityRouter } from './src/routes/security.js';
 import { createSchedulerRouter } from './src/routes/scheduler.js';
 import { createSubagentsRouter } from './src/routes/subagents.js';
+import { createIntelRouter } from './src/routes/intel.js';
+import { createReporterRouter } from './src/routes/reporter.js';
+import { createSelfhostedRouter } from './src/routes/selfhosted.js';
 import { loadBusinessProfile, listBusinessSlugs } from './src/autopilot/businessProfile.js';
 import type { BusinessProfileT } from './src/autopilot/businessProfile.js';
 import { publishToGlobalLens } from './src/lib/globalLensBridge.js';
@@ -3260,87 +3255,39 @@ async function previewSelfReporterArticle(opts: { voiceId?: string; format?: str
   return composeArticle(buildReporterFacts(state), Date.now());
 }
 
-app.get('/api/recourse/reporter/status', (_req, res) => {
-  res.json({
-    success: true,
-    ...reporterStatus(),
-    cadenceMs: REPORTER_MS,
-    voices: listVoices(),
-    formats: listFormats(),
-    soulLoaded: Boolean(loadReporterSoul()),
-  });
-});
-
-app.get('/api/recourse/reporter/voices', (_req, res) => {
-  res.json({ success: true, voices: listVoices(), formats: listFormats(), protocols: allProtocols().length, soulLoaded: Boolean(loadReporterSoul()) });
-});
-
-app.get('/api/recourse/reporter/preview', async (req, res) => {
-  try {
-    const voiceId = typeof req.query.voice === 'string' ? req.query.voice : undefined;
-    const format = typeof req.query.format === 'string' ? req.query.format : undefined;
-    const article = await previewSelfReporterArticle({ voiceId, format });
-    res.json({ success: true, preview: true, article });
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'preview failed';
-    res.status(500).json({ success: false, error: message });
-  }
-});
-
-app.get('/api/recourse/reporter/latest', (_req, res) => {
-  const article = latestReporterArticle();
-  res.json({ success: true, available: Boolean(article), article });
-});
-
-app.get('/api/recourse/reporter/articles', (req, res) => {
-  const limit = Number(req.query.limit);
-  res.json({ success: true, articles: listReporterArticles(Number.isFinite(limit) && limit > 0 ? limit : 20) });
-});
-
-app.get('/api/recourse/reporter/article/:fingerprint', (req, res) => {
-  const article = getReporterArticle(req.params.fingerprint);
-  if (!article) return res.status(404).json({ success: false, error: 'article not found' });
-  res.json({ success: true, article });
-});
-
-app.post('/api/recourse/reporter/generate', async (req, res) => {
-  if (!requireMutationAuthIfConfigured(req, res)) return;
-  try {
-    const body = (req.body ?? {}) as { force?: unknown; voice?: unknown; format?: unknown };
-    const result = await generateSelfReporterArticle({
-      force: Boolean(body.force),
-      voiceId: typeof body.voice === 'string' ? body.voice : undefined,
-      format: typeof body.format === 'string' ? body.format : undefined,
-    });
-    res.json({ success: true, ...result });
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'self-report generation failed';
-    res.status(500).json({ success: false, error: message });
-  }
-});
-
-app.post('/api/recourse/reporter/narrate', async (req, res) => {
-  if (!requireMutationAuthIfConfigured(req, res)) return;
-  try {
-    const body = (req.body ?? {}) as { fingerprint?: unknown };
-    const fingerprint = typeof body.fingerprint === 'string' ? body.fingerprint : '';
-    const base = fingerprint ? getReporterArticle(fingerprint) : latestReporterArticle();
-    if (!base) return res.status(404).json({ success: false, available: false, error: 'no article to narrate' });
-    const narration = await narrateArticle(base, chatComplete);
-    if (!narration.ok || !narration.prose) {
-      return res.status(503).json({ success: false, available: false, ...narration });
-    }
-    const narrated: ReporterArticle = {
-      ...base,
-      narration: { prose: narration.prose, ...(narration.model ? { model: narration.model } : {}), nonCanonical: true },
-    };
-    saveReporterArticle(narrated);
-    res.json({ success: true, available: true, article: narrated });
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'narration failed';
-    res.status(500).json({ success: false, available: false, error: message });
-  }
-});
+// Self Reporter routes mounted from src/routes/reporter.ts. State collection and
+// the article store stay here; the router receives operations.
+app.use(
+  '/api/recourse/reporter',
+  createReporterRouter({
+    requireMutationAuth: requireMutationAuthIfConfigured,
+    cadenceMs: () => REPORTER_MS,
+    status: () => reporterStatus() as Record<string, unknown>,
+    voices: () => listVoices(),
+    formats: () => listFormats(),
+    protocolsCount: () => allProtocols().length,
+    soulLoaded: () => Boolean(loadReporterSoul()),
+    preview: (voiceId, format) => previewSelfReporterArticle({ voiceId, format }),
+    latest: () => latestReporterArticle(),
+    articles: (limit) => listReporterArticles(limit),
+    article: (fingerprint) => getReporterArticle(fingerprint),
+    generate: (opts) => generateSelfReporterArticle(opts),
+    narrate: async (fingerprint) => {
+      const base = fingerprint ? getReporterArticle(fingerprint) : latestReporterArticle();
+      if (!base) return { kind: 'not_found' as const };
+      const narration = await narrateArticle(base, chatComplete);
+      if (!narration.ok || !narration.prose) {
+        return { kind: 'unavailable' as const, payload: narration as unknown as Record<string, unknown> };
+      }
+      const narrated: ReporterArticle = {
+        ...base,
+        narration: { prose: narration.prose, ...(narration.model ? { model: narration.model } : {}), nonCanonical: true },
+      };
+      saveReporterArticle(narrated);
+      return { kind: 'ok' as const, article: narrated };
+    },
+  }),
+);
 
 // ---------------------------------------------------------------------------
 // =========================================================================
@@ -3693,7 +3640,7 @@ app.post('/api/recourse/templates/build', async (req, res) => {
     if (selfHostOutcome.selfHosted) {
       await verifyAllSelfHosted().catch(() => {});
       // A freshly built loop artifact is picked up by the supervisor.
-      if ((tpl.artifactKind ?? 'function') === 'loop') startLoopSupervisor(cleanCompName);
+      if ((tpl.artifactKind ?? 'function') === 'loop') selfhostedRouter.startLoop(cleanCompName);
     }
 
     const newVersion = {
@@ -4347,346 +4294,30 @@ void (async () => {
 // from Recourse templates become live parts of Recourse.
 // =========================================================================
 
-// List self-hosted tools with their stored boot/last verify verdicts.
-app.get('/api/recourse/selfhosted', (req, res) => {
-  const entries = listSelfHostedEntries();
-  res.json({ success: true, count: entries.length, tools: entries });
-});
-
-// Capability-sandbox status: whether the WASM runtime is live, how many guest
-// contexts are warm, and the effective default execution path.
-app.get('/api/recourse/selfhosted/sandbox', async (req, res) => {
-  const runtimeAvailable = await isSandboxRuntimeAvailable();
-  const requestedDefault = (process.env.SELFHOST_SANDBOX || 'auto').toLowerCase();
-  const defaultMode =
-    requestedDefault === 'direct' || requestedDefault === '0' ? 'direct'
-    : runtimeAvailable ? 'sandbox' : 'direct';
-  res.json({
-    success: true,
-    runtime: 'quickjs-wasm',
-    runtimeAvailable,
-    defaultMode,
-    liveGuestContexts: runtimeAvailable ? getSandboxRuntime().liveContexts : 0,
-    grantsDefault: 'deny-all',
-  });
-});
-
-// Force a fresh, real re-verification of every self-hosted module.
-app.post('/api/recourse/selfhosted/verify', async (req, res) => {
-  try {
-    const entries = await verifyAllSelfHosted();
-    const healthy = entries.filter((e) => e.lastVerified?.passed).length;
-    res.json({ success: true, count: entries.length, healthy, tools: entries });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// Call a live self-hosted tool: { method, args } through its real module.
-app.post('/api/recourse/selfhosted/:name/execute', async (req, res) => {
-  try {
-    const { name } = req.params;
-    const { method, args = [], mode } = req.body ?? {};
-    const entry = getSelfHostedEntry(name);
-    if (!entry) {
-      return res.status(404).json({ success: false, error: `No self-hosted tool named "${toSafeModuleName(name)}"` });
+// Self-hosted tool runtime + loop supervisor mounted from
+// src/routes/selfhosted.ts. The host supplies provenance, the generation
+// counter, and the registry cleanup that must run on removal.
+const selfhostedRouter = createSelfhostedRouter({
+  appendProvenanceEvent: (type, data) => appendProvenanceEvent(type as any, data),
+  generation: () => status.generation,
+  onRemoved: (name, removedFile) => {
+    let registryToolRemoved = false;
+    const tool = registry.find((t) => t.name === name);
+    if (tool && tool.entrypoint && tool.entrypoint.includes('.selfhosted/')) {
+      registry.splice(registry.indexOf(tool), 1);
+      registryToolRemoved = true;
+      status.registeredToolsCount = registry.length;
     }
-    const execMode =
-      mode === 'sandbox' || mode === 'direct' || mode === 'auto'
-        ? mode
-        : (process.env.SELFHOST_SANDBOX || 'auto').toLowerCase() === 'direct'
-          ? 'direct'
-          : 'auto';
-    const result = await executeSelfHostedTool(entry.name, { method, args }, undefined, { mode: execMode });
-    if (result.success === false) {
-      return res.status(400).json({ success: false, error: result.error, mode: result.mode });
-    }
-    appendProvenanceEvent('selfhosted_tool_called', {
-      tool: entry.name,
-      method,
-      templateId: entry.templateId,
-      hash: entry.hash,
-      mode: result.mode,
-      executionTimeMs: result.executionTimeMs
-    });
-    res.json({
-      success: true,
-      tool: entry.name,
-      method,
-      mode: result.mode,
-      grantUse: result.grantUse ?? [],
-      result: result.result,
-      executionTimeMs: result.executionTimeMs
-    });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
+    appendProvenanceEvent('selfhosted_tool_removed', { tool: name, removedFile, removedGene: registryToolRemoved });
+    saveStateToDisk();
+    void sweepCapabilityAdoptions().catch(() => {});
+    try { recordSystemChange('selfhosted-remove'); } catch { /* non-fatal */ }
+    return { registryToolRemoved };
+  },
 });
-
-// Artifact inspection card (kind-aware). Used by A2A/MCP discovery + the UI.
-app.get('/api/recourse/selfhosted/:name/card', (req, res) => {
-  const entry = getSelfHostedEntry(req.params.name);
-  if (!entry) return res.status(404).json({ success: false, error: 'Not found' });
-  res.json({ success: true, card: artifactCard(entry), kind: resolveKind(entry) });
-});
-
-// Serve a built `web`-category artifact as a REAL text/html document. This is
-// what makes Recourse's web-development capability a reachable page rather than
-// a JSON envelope: the self-hosted module's render() output is returned with
-// Content-Type text/html. Only `web` templates are eligible, and only results
-// that are actually an HTML string are served — never a JSON object or an error
-// dressed up as a page (see webArtifact.ts for the honest decision logic).
-app.get('/api/recourse/web/artifact/:name', async (req, res) => {
-  try {
-    const entry = getSelfHostedEntry(req.params.name);
-    if (!entry) return res.status(404).json({ success: false, error: `No self-hosted tool named "${toSafeModuleName(req.params.name)}"` });
-    const tpl = getComponentTemplate(entry.templateId);
-    const category = tpl?.category;
-    if (!isWebCategory(category)) {
-      return res.status(400).json({ success: false, error: `"${entry.name}" is not a web artifact (category: ${category ?? 'unknown'}) — only 'web' templates are served as pages` });
-    }
-    const method = pickRenderMethod(entry.methods)?.method;
-    if (!method) {
-      return res.status(400).json({ success: false, error: `"${entry.name}" exposes no renderable method` });
-    }
-    const result = await executeSelfHostedTool(entry.name, { method, args: [] });
-    if (result.success === false) {
-      return res.status(502).json({ success: false, error: result.error });
-    }
-    const decision = htmlFromResult(result.result);
-    if (decision.ok === false) {
-      return res.status(406).json({ success: false, error: decision.reason });
-    }
-    appendProvenanceEvent('capability_served', {
-      tool: entry.name, templateId: entry.templateId, method, kind: resolveKind(entry), contentType: 'text/html'
-    });
-    res.set('Content-Type', 'text/html; charset=utf-8');
-    res.set('Cache-Control', 'no-store');
-    res.send(decision.html);
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// Generic artifact call: { method?, args? } → execute. Works for any kind
-// (function/api/cli share one JSON surface). Missing method = first whitelisted.
-app.post('/api/recourse/selfhosted/:name/call', async (req, res) => {
-  try {
-    const entry = getSelfHostedEntry(req.params.name);
-    if (!entry) return res.status(404).json({ success: false, error: 'Not found' });
-    const inv = unpackCall(entry, req.body ?? {});
-    const result = await executeSelfHostedTool(entry.name, inv);
-    if (result.success === false) return res.status(400).json({ success: false, error: result.error });
-    appendProvenanceEvent('selfhosted_tool_called', {
-      tool: entry.name, method: inv.method, kind: resolveKind(entry), hash: entry.hash,
-      executionTimeMs: result.executionTimeMs
-    });
-    res.json({ success: true, kind: resolveKind(entry), tool: entry.name, method: inv.method, result: result.result, executionTimeMs: result.executionTimeMs });
-  } catch (err: any) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-// JSON-RPC 2.0 transport for mcp/a2a artifacts (tools/list, tools/call,
-// agent/card, message, ping). Discovery is served from the manifest card;
-// call-type methods go through the real execute adapter.
-app.post('/api/recourse/selfhosted/:name/jsonrpc', async (req, res) => {
-  try {
-    const entry = getSelfHostedEntry(req.params.name);
-    if (!entry) return res.status(404).json({ success: false, error: 'Not found' });
-    const id = (req.body ?? {})?.id ?? null;
-    const method: string = (req.body ?? {})?.method ?? '';
-    const params: any = (req.body ?? {})?.params ?? {};
-
-    if (method === 'tools/list' || method === 'capabilities/list' || method === 'agent/card') {
-      return res.json({ id, result: artifactCard(entry) });
-    }
-    if (method === 'ping') return res.json({ id, result: 'pong' });
-
-    if (method === 'tools/call' || method === 'agent/message' || method === 'message/send' || method === 'message') {
-      const name = params?.name ?? params?.method ?? null;
-      const args = params?.arguments ?? params?.params ?? [];
-      const inv = { method: name || (entry.methods?.[0]?.method as string), args: Array.isArray(args) ? args : [args] };
-      if (!inv.method) throw new Error(`Artifact "${entry.name}" has no callable method`);
-      const result = await executeSelfHostedTool(entry.name, inv);
-      if (result.success === false) return res.json({ id, error: { code: -32000, message: result.error } });
-      appendProvenanceEvent('selfhosted_tool_called', {
-        tool: entry.name, method: inv.method, kind: resolveKind(entry), hash: entry.hash, transport: 'jsonrpc',
-        executionTimeMs: result.executionTimeMs
-      });
-      return res.json({ id, result: result.result });
-    }
-    return res.json({ id, error: { code: -32601, message: `Method not found: ${method}` } });
-  } catch (err: any) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-// =========================================================================
-// LOOP SUPERVISOR — supervised daemons for `loop`-kind artifacts
-// A loop artifact is a self-hosted module whose whitelisted `tick` method is
-// invoked on an interval by this server. Heartbeats (cycle, ok, result) are
-// kept in a bounded in-memory ledger and surfaced via the API; lifecycle
-// (start/stop/error) is written to the provenance chain. Heartbeat detail is
-// intentionally not persisted every beat (that would churn the state file);
-// the supervisor re-starts verified loop artifacts after each boot.
-// =========================================================================
-
-interface LoopSupervisorState {
-  tool: string;
-  method: string;
-  startedAt: number;
-  intervalMs: number;
-  cycles: number;
-  ok: number;
-  failed: number;
-  lastAt: number | null;
-  lastOk: boolean | null;
-  lastResult?: unknown;
-  lastError?: string;
-}
-interface LoopHeartbeat {
-  at: number;
-  tool: string;
-  cycle: number;
-  ok: boolean;
-}
-const LOOP_INTERVAL_MS = Number(process.env.LOOP_TICK_MS || 5000);
-const loopSupervisors: Record<string, LoopSupervisorState> = {};
-const loopTimers: Record<string, NodeJS.Timeout> = {};
-const loopHeartbeats: LoopHeartbeat[] = [];
-
-function loopTickMethod(entry: any): string | null {
-  const m = entry?.methods?.[0]?.method;
-  return typeof m === 'string' ? m : null;
-}
-
-async function tickLoop(name: string, state: LoopSupervisorState): Promise<void> {
-  state.cycles += 1;
-  const res = await executeSelfHostedTool(name, { method: state.method, args: [] });
-  state.lastAt = Date.now();
-  if (res.success === false) {
-    state.failed += 1;
-    state.lastOk = false;
-    state.lastError = res.error;
-    appendProvenanceEvent('loop_error', { tool: name, cycle: state.cycles, error: res.error, generation: status.generation });
-  } else {
-    state.ok += 1;
-    state.lastOk = true;
-    state.lastResult = res.result;
-  }
-  loopHeartbeats.push({ at: state.lastAt, tool: name, cycle: state.cycles, ok: state.lastOk === true });
-  if (loopHeartbeats.length > 200) loopHeartbeats.shift();
-}
-
-function startLoopSupervisor(name: string, intervalMs: number = LOOP_INTERVAL_MS): { ok: boolean; error?: string } {
-  const safe = toSafeModuleName(name);
-  if (loopTimers[safe]) return { ok: true };
-  const entry = getSelfHostedEntry(safe);
-  const kind = entry?.artifactKind ?? 'function';
-  const method = loopTickMethod(entry);
-  if (!entry || kind !== 'loop' || !method) {
-    return { ok: false, error: `"${safe}" is not a supervised loop-kind artifact` };
-  }
-  const state: LoopSupervisorState = {
-    tool: safe, method, startedAt: Date.now(), intervalMs,
-    cycles: 0, ok: 0, failed: 0, lastAt: null, lastOk: null,
-  };
-  loopSupervisors[safe] = state;
-  appendProvenanceEvent('loop_started', { tool: safe, method, intervalMs, generation: status.generation });
-  loopTimers[safe] = setInterval(() => { tickLoop(safe, state).catch(() => {}); }, intervalMs);
-  // First tick soon so a heartbeat is observable without waiting a full interval.
-  setTimeout(() => { tickLoop(safe, state).catch(() => {}); }, 100);
-  return { ok: true };
-}
-
-function stopLoopSupervisor(name: string): boolean {
-  const safe = toSafeModuleName(name);
-  if (loopTimers[safe]) {
-    clearInterval(loopTimers[safe]);
-    delete loopTimers[safe];
-    delete loopSupervisors[safe];
-    appendProvenanceEvent('loop_stopped', { tool: safe, generation: status.generation });
-    return true;
-  }
-  return false;
-}
-
-/** Auto-supervise every live-verified `loop` artifact (idempotent). */
-function ensureLoopSupervisors(): number {
-  let started = 0;
-  for (const entry of listSelfHostedEntries()) {
-    if ((entry.artifactKind ?? 'function') !== 'loop') continue;
-    if (entry.lastVerified?.passed !== true) continue;
-    if (startLoopSupervisor(entry.name).ok) started += 1;
-  }
-  return started;
-}
-
+app.use('/api/recourse', selfhostedRouter.router);
 // Boot auto-supervision after boot self-host verification settles.
-void (async () => {
-  await new Promise((r) => setTimeout(r, 400));
-  try { ensureLoopSupervisors(); } catch { /* non-fatal */ }
-})();
-
-// Loop supervisor API.
-app.get('/api/recourse/selfhosted/loops', (req, res) => {
-  res.json({
-    success: true,
-    intervalMs: LOOP_INTERVAL_MS,
-    running: Object.values(loopSupervisors),
-    heartbeatCount: loopHeartbeats.length,
-    heartbeats: loopHeartbeats.slice(-30),
-  });
-});
-app.post('/api/recourse/selfhosted/loops/start', (req, res) => {
-  const name = req.body?.name as string | undefined;
-  if (name) {
-    const r = startLoopSupervisor(name);
-    return res.json({ success: r.ok, error: r.error, running: Object.values(loopSupervisors) });
-  }
-  const n = ensureLoopSupervisors();
-  res.json({ success: true, started: n, running: Object.values(loopSupervisors) });
-});
-app.post('/api/recourse/selfhosted/loops/stop', (req, res) => {
-  const name = req.body?.name as string | undefined;
-  if (name) {
-    const stopped = stopLoopSupervisor(name);
-    return res.json({ success: true, stopped, running: Object.values(loopSupervisors) });
-  }
-  let stopped = 0;
-  for (const k of Object.keys(loopTimers)) if (stopLoopSupervisor(k)) stopped++;
-  res.json({ success: true, stopped, running: Object.values(loopSupervisors) });
-});
-
-// Remove a self-hosted tool: deletes the module file + manifest entry, and
-// unregisters the matching registry gene (so nothing references a dead module).
-app.delete('/api/recourse/selfhosted/:name', (req, res) => {
-  const { name } = req.params;
-  const safeName = toSafeModuleName(name);
-  const removed = removeSelfHostedTool(safeName);
-  if (!removed.success) {
-    return res.status(404).json({ success: false, error: removed.error });
-  }
-  // A removed loop artifact must be desupervised.
-  stopLoopSupervisor(safeName);
-
-  let removedGene = false;
-  const tool = registry.find((t) => t.name === safeName);
-  if (tool && tool.entrypoint && tool.entrypoint.includes('.selfhosted/')) {
-    registry.splice(registry.indexOf(tool), 1);
-    removedGene = true;
-    status.registeredToolsCount = registry.length;
-  }
-
-  appendProvenanceEvent('selfhosted_tool_removed', {
-    tool: safeName,
-    removedFile: removed.removedFile,
-    removedGene
-  });
-  saveStateToDisk();
-  // A removed self-hosted tool may have been backing a capability — re-sweep.
-  void sweepCapabilityAdoptions().catch(() => {});
-  try { recordSystemChange('selfhosted-remove'); } catch { /* non-fatal */ }
-
-  res.json({ success: true, removed, registryToolRemoved: removedGene });
-});
+setTimeout(() => { try { selfhostedRouter.ensureLoops(); } catch { /* non-fatal */ } }, 400);
 
 // Execute Self-Learning Directive to synthesize a template component
 app.post('/api/recourse/learn/synthesize-directive', async (req, res) => {
@@ -9309,62 +8940,54 @@ async function runIntelRank(): Promise<{ ranked: number; strategyUsed: boolean }
   return { ranked: candidates.length, strategyUsed };
 }
 
-app.get('/api/recourse/intel', async (req, res) => {
-  try { res.json({ success: true, intel: await intelView() }); } catch (err: any) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-app.post('/api/recourse/intel/pull', async (req, res) => {
-  try {
-    const r = await runIntelPull();
-    res.json({ success: true, ...r, intel: await intelView() });
-  } catch (err: any) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-app.post('/api/recourse/intel/rank', async (req, res) => {
-  try {
-    const r = await runIntelRank();
-    res.json({ success: true, ...r, intel: await intelView() });
-  } catch (err: any) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-/** Adopt a proposal into the forge agenda. REAL gate: a human-authored
- *  reference suite is required, so an invented idea only becomes buildable when
- *  there is a concrete, testable contract for it. */
-app.post('/api/recourse/intel/adopt', async (req, res) => {
-  try {
-    const { proposalId, functionName, prompt, referenceSuite, domain, title } = req.body ?? {};
-    if (typeof proposalId !== 'string') return res.status(400).json({ success: false, error: 'proposalId required' });
-    const prop = intelProposals.find((p) => p.id === proposalId);
-    if (!prop) return res.status(404).json({ success: false, error: 'proposal not found' });
-    if (typeof functionName !== 'string' || !/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(functionName)) {
-      return res.status(400).json({ success: false, error: 'functionName must be a valid identifier' });
-    }
-    if (typeof prompt !== 'string' || !prompt.trim() || prompt.trim().length < 20) {
-      return res.status(400).json({ success: false, error: 'prompt must describe the behavior (>=20 chars)' });
-    }
-    if (typeof referenceSuite !== 'string' || referenceSuite.trim().length < 10) {
-      return res.status(400).json({ success: false, error: 'referenceSuite is required — invented ideas need a real, testable contract before they can be built+verified' });
-    }
-    const dom = (domain as ToolDomain) && (['coding', 'math', 'biotech', 'systemic', 'neuro_symbolic', 'cyber_defense', 'quantum_sim'] as ToolDomain[]).includes(domain)
-      ? (domain as ToolDomain)
-      : prop.domain;
-    const spec: ForgeSpec = {
-      id: `intel_${proposalId.slice(-20)}`,
-      name: functionName,
-      domain: dom,
-      title: typeof title === 'string' && title.trim() ? title : prop.title,
-      prompt: prompt,
-      refSuite: referenceSuite,
-    };
-    if (!dynamicAgenda.some((d) => d.name === spec.name)) dynamicAgenda.push(spec);
-    prop.status = 'adopted';
-    prop.adoptedSpecId = spec.id;
-    prop.adoptedAt = Date.now();
-    saveStateToDisk();
-    appendProvenanceEvent('capability_adopted', { driverId: `intel:${prop.source}`, proposalId: prop.id, spec: spec.id, toolName: spec.name });
-    res.json({ success: true, spec, intel: intelSnapshot() });
-  } catch (err: any) { res.status(500).json({ success: false, error: err.message }); }
-});
+// External-intel routes mounted from src/routes/intel.ts. Proposals + the
+// dynamic forge agenda stay here; adoption is the ONE gated path (a real
+// reference suite is required before an invented idea becomes buildable).
+app.use(
+  '/api/recourse/intel',
+  createIntelRouter({
+    view: () => intelView(),
+    pull: () => runIntelPull(),
+    rank: () => runIntelRank(),
+    snapshot: () => intelSnapshot(),
+    adopt: (input) => {
+      const { proposalId, functionName, prompt, referenceSuite, domain, title } = input as {
+        proposalId?: unknown; functionName?: unknown; prompt?: unknown;
+        referenceSuite?: unknown; domain?: unknown; title?: unknown;
+      };
+      if (typeof proposalId !== 'string') return { ok: false, status: 400, error: 'proposalId required' };
+      const prop = intelProposals.find((p) => p.id === proposalId);
+      if (!prop) return { ok: false, status: 404, error: 'proposal not found' };
+      if (typeof functionName !== 'string' || !/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(functionName)) {
+        return { ok: false, status: 400, error: 'functionName must be a valid identifier' };
+      }
+      if (typeof prompt !== 'string' || !prompt.trim() || prompt.trim().length < 20) {
+        return { ok: false, status: 400, error: 'prompt must describe the behavior (>=20 chars)' };
+      }
+      if (typeof referenceSuite !== 'string' || referenceSuite.trim().length < 10) {
+        return { ok: false, status: 400, error: 'referenceSuite is required — invented ideas need a real, testable contract before they can be built+verified' };
+      }
+      const dom = (domain as ToolDomain) && (['coding', 'math', 'biotech', 'systemic', 'neuro_symbolic', 'cyber_defense', 'quantum_sim'] as ToolDomain[]).includes(domain as ToolDomain)
+        ? (domain as ToolDomain)
+        : prop.domain;
+      const spec: ForgeSpec = {
+        id: `intel_${proposalId.slice(-20)}`,
+        name: functionName,
+        domain: dom,
+        title: typeof title === 'string' && title.trim() ? title : prop.title,
+        prompt,
+        refSuite: referenceSuite,
+      };
+      if (!dynamicAgenda.some((d) => d.name === spec.name)) dynamicAgenda.push(spec);
+      prop.status = 'adopted';
+      prop.adoptedSpecId = spec.id;
+      prop.adoptedAt = Date.now();
+      saveStateToDisk();
+      appendProvenanceEvent('capability_adopted', { driverId: `intel:${prop.source}`, proposalId: prop.id, spec: spec.id, toolName: spec.name });
+      return { ok: true, spec };
+    },
+  }),
+);
 
 /** Dev-only seed: populates sample proposals so the UI panel can be inspected
  *  without the real source services running. Disabled unless RECOURSE_DEV_SEED=1. */
