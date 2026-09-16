@@ -1,0 +1,16 @@
+# Default owners for everything in the repo. Review is required for changes.
+*       @ncsound919
+
+# Security- and trust-critical paths get explicit ownership.
+/server.ts                      @ncsound919
+/mcp-server.ts                  @ncsound919
+/api/recourse/                  @ncsound919
+/src/lib/mutationAuth.ts        @ncsound919
+/src/lib/wasmSandbox/           @ncsound919
+/src/lib/policy.ts              @ncsound919
+/src/lib/approvals.ts           @ncsound919
+/src/lib/wallet.ts              @ncsound919
+/src/lib/federation/            @ncsound919
+/src/lib/pluginSdk.ts           @ncsound919
+/src/lib/skillRegistry.ts       @ncsound919
+/.github/workflows/             @ncsound919
