@@ -141,6 +141,12 @@ const finding = (over: Record<string, unknown> = {}) => ({
 
 beforeAll(() => {
   TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'sci-cond-test-'));
+  // Hermetic: `discoverServices` probes the deterministic brain DIRECTLY with
+  // fetch (not through a mocked bridge). Disable all real network so a locally
+  // running brain (e.g. :3210) cannot flip the "all offline" assertion.
+  vi.stubGlobal('fetch', vi.fn(async () => {
+    throw new Error('network disabled in tests');
+  }));
 });
 
 beforeEach(async () => {
@@ -205,6 +211,7 @@ beforeEach(async () => {
 
 afterAll(() => {
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   fs.rmSync(TMP, { recursive: true, force: true });
 });
 
