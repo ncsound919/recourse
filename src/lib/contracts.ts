@@ -357,6 +357,20 @@ export const biotechClaimExtra = z
 
 export type BiotechClaimExtra = z.infer<typeof biotechClaimExtra>;
 
+// --- Coding pipeline benchmark (head-to-head harness comparison) -----------
+export const pipelineIds = z.enum(['opencode', 'deepseek', 'axiom', 'settlement']);
+
+export const pipelineBenchmarkReq = z.object({
+  pipelines: z.array(pipelineIds).min(1).max(4).optional(),
+  task: z.string().trim().min(1).max(4000),
+  repoDir: z.string().trim().min(1).max(2000),
+  contractPath: z.string().trim().min(1).max(2000).optional(),
+  testCommand: z.string().trim().min(1).max(500).optional(),
+  pipelineTimeoutMs: z.number().int().positive().max(3_600_000).optional(),
+  scoreTimeoutMs: z.number().int().positive().max(3_600_000).optional(),
+  keepWorktree: z.boolean().optional(),
+});
+
 // --- Express helper --------------------------------------------------------
 /**
  * Validate `req.body` against `schema`. On success returns the parsed data; on

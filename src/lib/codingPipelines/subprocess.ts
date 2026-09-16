@@ -7,7 +7,7 @@
  * and friends) is reported as `ok:false` with the real message.
  */
 
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 
 export interface SpawnOptions {
   cwd?: string;
@@ -34,7 +34,6 @@ const DEFAULT_MAX_OUTPUT = 512 * 1024;
 
 /** True when a CLI named `command` is on PATH (best-effort, no shell). */
 export function commandExists(command: string): boolean {
-  const { spawnSync } = require('node:child_process') as typeof import('node:child_process');
   const probe = process.platform === 'win32' ? 'where' : 'which';
   try {
     const res = spawnSync(probe, [command], { stdio: 'ignore' });
@@ -44,7 +43,29 @@ export function commandExists(command: string): boolean {
   }
 }
 
+/** Last non-empty line of a stream, trimmed and length-capped — for errors. */
+export function lastLine(text: string, maxLength = 400): string {
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const line = lines.length ? lines[lines.length - 1] : '';
+  return line.length > maxLength ? `${line.slice(0, maxLength)}…` : line;
+}
+
 export function runProcess(command: string, args: string[], opts: SpawnOptions = {}): Promise<SpawnResult> {
+  return spawnInternal(command, args, { ...opts, shell: false });
+}
+
+/**
+ * Run a shell command string (for user-configured test commands like
+ * `npm test`). Uses a shell to honour quoting/pipes; only used with commands
+ * from trusted config/env, never with agent-authored input.
+ */
+export function runShellCommand(command: string, opts: SpawnOptions = {}): Promise<SpawnResult> {
+  const shell = process.platform === 'win32' ? process.env.COMSPEC || 'cmd.exe' : '/bin/sh';
+  const args = process.platform === 'win32' ? ['/d', '/s', '/c', command] : ['-c', command];
+  return spawnInternal(shell, args, { ...opts, shell: false });
+}
+
+function spawnInternal(command: string, args: string[], opts: SpawnOptions & { shell: boolean }): Promise<SpawnResult> {
   const timeoutMs = opts.timeoutMs ?? 300_000;
   const maxOutputBytes = opts.maxOutputBytes ?? DEFAULT_MAX_OUTPUT;
   const started = Date.now();
@@ -54,11 +75,11 @@ export function runProcess(command: string, args: string[], opts: SpawnOptions =
     try {
       child = spawn(command, args, {
         cwd: opts.cwd,
-        env: { ...process.env, ...(opts.env ?? {}) },
+        env: { ...process.env, ...opts.env },
         stdio: ['ignore', 'pipe', 'pipe'],
         // Node/libuv resolves PATHEXT entries on Windows, so a bare `opencode`
         // finds opencode.cmd without a shell. No shell => no argument injection.
-        shell: false,
+        shell: opts.shell,
       });
     } catch (err) {
       resolve({

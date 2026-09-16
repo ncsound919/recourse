@@ -8,6 +8,8 @@ import {
   type BusinessProfileT,
 } from '../src/autopilot/businessProfile';
 import type { AuditAdapter } from '../src/autopilot/auditRunner';
+import { runAudit } from '../src/autopilot/auditRunner';
+import { projectScorecard, saveScorecard } from '../src/autopilot/scorecard';
 import { resumeAfterVeto, runLoop } from '../src/autopilot/loopStateMachine';
 import { PRState, type GitHubClient, type PRStateT } from '../src/autopilot/loopTypes';
 
@@ -212,13 +214,18 @@ describe('resumeAfterVeto — closing the loop', () => {
   it('merges when the deadline passed without a veto and folds post-merge fitness', async () => {
     const repo = makeTmpRepo();
     const auditDir = makeTmpRepo();
+    const profile = makeProfile({ repoPath: repo });
+    // Seed a pre-merge scorecard so the fitness/outcome fold has a baseline.
+    const preStatement = await runAudit({ profile, adapters: { grader: graderFixture }, auditDir });
+    saveScorecard(projectScorecard(preStatement, profile), auditDir);
     const github = makeGithub(); // getComments -> [], mergePR ok
     const out = await resumeAfterVeto({
-      profile: makeProfile({ repoPath: repo }),
+      profile,
       prState: makePrState(),
       github,
       adapters: { grader: graderFixture },
       auditDir,
+      ledgerRoot: auditDir,
       now: new Date('2026-09-06T00:00:00.000Z'),
     });
     expect(github.mergePR).toHaveBeenCalledTimes(1);
@@ -227,6 +234,11 @@ describe('resumeAfterVeto — closing the loop', () => {
     // Post-merge audit persisted a new scorecard.
     const files = fs.readdirSync(path.join(auditDir, 'testbiz'), { recursive: true });
     expect(files.some((f: unknown) => String(f).includes('scorecard-'))).toBe(true);
+    // The real outcome is fed back to the learner's external reward ledger.
+    const feedback = JSON.parse(fs.readFileSync(path.join(auditDir, 'data', 'outcome-feedback.json'), 'utf-8'));
+    expect(feedback.signals).toHaveLength(1);
+    expect(feedback.signals[0].source).toBe('merge');
+    expect(typeof feedback.signals[0].reward).toBe('number');
   });
 
   it('returns veto_wait unchanged while still inside the window', async () => {

@@ -41,6 +41,45 @@ export interface ChatCompleteResult {
   model: string;
   error?: string;
   latencyMs: number;
+  /** Real token counts when the provider reported them; estimated otherwise. */
+  usage?: ModelUsageTokens;
+}
+
+export interface ModelUsageTokens {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  estimated: boolean;
+}
+
+/** Emitted after every successful completion so the host can meter + debit it. */
+export interface ModelUsage extends ModelUsageTokens {
+  profile: ProviderProfileId;
+  model: string;
+  latencyMs: number;
+  at: number;
+}
+
+let usageSink: ((usage: ModelUsage) => void) | null = null;
+
+/** Install a process-wide model usage sink (null clears it). The sink must
+ *  never throw; a metering failure must not break generation. */
+export function setModelUsageSink(sink: ((usage: ModelUsage) => void) | null): void {
+  usageSink = sink;
+}
+
+function emitUsage(usage: ModelUsage): void {
+  try {
+    usageSink?.(usage);
+  } catch {
+    /* a metering sink must never break a model call */
+  }
+}
+
+/** ~4 chars/token estimate, used only when a provider omits usage counts. */
+function estimateTokens(text: string | null | undefined): number {
+  if (!text) return 0;
+  return Math.max(0, Math.round(text.length / 4));
 }
 
 /** Strip markdown fences and pull the first JSON object/array out of a model
@@ -288,13 +327,42 @@ async function chatCompleteFor(
       };
     }
 
+    // Token accounting: prefer the provider's real counts (OpenAI `usage`, or
+    // Ollama's `prompt_eval_count`/`eval_count`), fall back to a length estimate
+    // clearly flagged as such.
+    let promptTokens = 0;
+    let completionTokens = 0;
+    let estimated = false;
+    if (isNativeOllama && cfg.baseUrl) {
+      promptTokens = Number(data?.prompt_eval_count) || 0;
+      completionTokens = Number(data?.eval_count) || 0;
+    } else {
+      promptTokens = Number(data?.usage?.prompt_tokens) || 0;
+      completionTokens = Number(data?.usage?.completion_tokens) || 0;
+    }
+    if (promptTokens === 0 && completionTokens === 0) {
+      promptTokens = messages.reduce((n, m) => n + estimateTokens(m.content), 0);
+      completionTokens = estimateTokens(content);
+      estimated = true;
+    }
+    const usage: ModelUsageTokens = {
+      promptTokens,
+      completionTokens,
+      totalTokens: promptTokens + completionTokens,
+      estimated,
+    };
+
+    const latencyMs = Date.now() - started;
+    emitUsage({ ...usage, profile: profileId, model: cfg.model, latencyMs, at: Date.now() });
+
     return {
       ok: true,
       content,
       status: 'online',
       model: cfg.model,
       error: undefined,
-      latencyMs: Date.now() - started,
+      latencyMs,
+      usage,
     };
   } catch (err: any) {
     const aborted = err?.name === 'AbortError';

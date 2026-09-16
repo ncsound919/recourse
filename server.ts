@@ -104,13 +104,14 @@ import {
   approveGene,
   getActiveModel,
   getActivePolicy,
-  setActivePolicy
+  setActivePolicy,
+  normalizePromotionPolicy
 } from './src/dream/mutator.js';
 import { INITIAL_SWARM_STATUS, dispatchSubAgentTask, stepSubTeams, INITIAL_SUB_TEAM_STATES, SubTeamState } from './src/lib/subagentSwarm.js';
 import { createInitialLoopState, executeRecursiveStep, DEFAULT_LOOP_CONFIG } from './src/lib/recursiveMathEngine.js';
 import { createLearnerStore, RecursiveLearner } from './src/dream/learner.js';
 import { globalLegoEngine } from './src/lego/engine.js';
-import {   checkOnline as modelCheckOnline, providerStatus, providerStatuses, chatComplete, extractJsonBlock, setActiveProviderProfile, activeProviderProfile, providerProfiles } from './src/lib/modelProvider.js';
+import {   checkOnline as modelCheckOnline, providerStatus, providerStatuses, chatComplete, extractJsonBlock, setActiveProviderProfile, activeProviderProfile, providerProfiles, setModelUsageSink } from './src/lib/modelProvider.js';
 import type { ProviderProfileId } from './src/lib/modelProvider.js';
 import { lintSource } from './src/lib/lintGate.js';
 import type { LintReport } from './src/lib/lintGate.js';
@@ -285,6 +286,7 @@ import { createOncologyRouter } from './src/routes/oncology.js';
 import { createBioRouter } from './src/routes/bio.js';
 import { createBridgesRouter } from './src/routes/bridges.js';
 import { createToolsRouter } from './src/routes/tools.js';
+import { createPipelinesRouter } from './src/routes/pipelines.js';
 import { createServicesRouter } from './src/routes/services.js';
 import { createSynergyRouter } from './src/routes/synergy.js';
 import { createVizRouter } from './src/routes/viz.js';
@@ -296,10 +298,27 @@ import { renderTrackToWav, renderStemToWav } from './src/lib/composer/encode/wav
 import { openWallet } from './src/lib/wallet.js';
 import { setSandboxSpendSink } from './src/lib/selfHostSandbox.js';
 import { createProductRouter } from './src/routes/product.js';
+import { createOpsRouter, metricsText } from './src/routes/ops.js';
+import { handleMcpHttp } from './src/lib/mcpHttp.js';
 import { agentCard, handleA2aRpc, A2A_SKILLS } from './src/lib/a2a.js';
 import type { A2aOperation } from './src/lib/a2a.js';
 import { replayTrendLedger, replayGoalLedger, deterministicHash } from './src/lib/replay.js';
 import { buildOpenApiSpec, listOperations } from './src/lib/openapi.js';
+import { openUsageMeter, priceForModel, tokenCostCents } from './src/lib/usageMeter.js';
+import { openTenantStore } from './src/lib/auth/tenants.js';
+import { openApiKeyStore } from './src/lib/auth/apikeys.js';
+import { openOutcomeLedger } from './src/lib/outcomeFeedback.js';
+import { createV1Router } from './src/routes/v1.js';
+import { createCommerceRouter } from './src/routes/commerce.js';
+import { loadOrCreateIdentity, openPeerStore } from './src/lib/federation/index.js';
+import { createFederationRouter } from './src/routes/federation.js';
+import { openArticleStore, openPublishTargetStore, openDeliveryLog } from './src/lib/publishing/index.js';
+import { createPublishingRouter } from './src/routes/publishing.js';
+import { openCrmStore, openSuppressionStore, openOutbox } from './src/lib/growth/index.js';
+import { createGrowthRouter } from './src/routes/growth.js';
+import { loadBusinessProfile, listBusinessSlugs } from './src/autopilot/businessProfile.js';
+import type { BusinessProfileT } from './src/autopilot/businessProfile.js';
+import { publishToGlobalLens } from './src/lib/globalLensBridge.js';
 const STATE_FILE = path.join(process.cwd(), 'recourse_storage.json');
 
 // Budgeted action wallet (durable, hash-chained). Also installed as the sandbox
@@ -313,6 +332,116 @@ const productRouter = createProductRouter({
   wallet,
   repoRoot: () => devRepoRoot(),
   requireMutationAuth,
+});
+
+// Wave 2 safety layers: policy engine, approval queue, deployment actuator.
+const opsRouter = createOpsRouter({ requireMutationAuth });
+
+// ---------------------------------------------------------------------------
+// Wave 1 commercial layer: durable usage metering, tenant/API-key identity, and
+// the outcome-feedback ledger that ties real business results to the learner.
+// The model-usage sink below feeds EVERY model call (from any call site) into
+// the meter, and debits the `model` wallet budget when the cost rounds to >=1c.
+// ---------------------------------------------------------------------------
+const usageMeter = openUsageMeter();
+const tenantStore = openTenantStore();
+const apiKeyStore = openApiKeyStore();
+const outcomeLedger = openOutcomeLedger();
+
+setModelUsageSink((u) => {
+  const cents = tokenCostCents(priceForModel(u.model), u.promptTokens, u.completionTokens);
+  try {
+    usageMeter.record({
+      tenantId: process.env.RECOURSE_SYSTEM_TENANT || 'system',
+      kind: 'model_call',
+      provider: u.profile,
+      model: u.model,
+      inputTokens: u.promptTokens,
+      outputTokens: u.completionTokens,
+      cents,
+      estimated: u.estimated,
+      description: `model ${u.model} (${u.profile})`,
+    });
+  } catch { /* metering must never break generation */ }
+  const whole = Math.round(cents);
+  if (whole > 0) {
+    try {
+      wallet.debit(process.env.RECOURSE_MODEL_BUDGET_TOKEN || 'model', whole, `model ${u.model}`);
+    } catch { /* an absent/unfunded budget must never break generation */ }
+  }
+});
+
+// Versioned, API-key-authenticated, quota-metered commercial surface mounted at
+// /v1 (see src/routes/v1.ts). `learner` is declared later in the file; the
+// closure below is only invoked at request time, after module init completes.
+const v1Router = createV1Router({
+  meter: usageMeter,
+  keys: apiKeyStore,
+  tenants: tenantStore,
+  wallet,
+  outcome: outcomeLedger,
+  runLearnerEpisode: (externalScore) => learner.runEpisode(externalScore),
+  statusInfo: () => ({ version: '1.0.0' }),
+});
+// Operator control plane for tenants/keys/usage (guarded writes).
+const commerceRouter = createCommerceRouter({
+  tenants: tenantStore,
+  keys: apiKeyStore,
+  meter: usageMeter,
+  outcome: outcomeLedger,
+  requireMutationAuth,
+});
+
+// ---------------------------------------------------------------------------
+// Wave 4 — network effects: instance federation, public publishing + paywall,
+// and the growth channels (CRM / compliant outbound / SEO / ads / lead capture).
+// ---------------------------------------------------------------------------
+const federationIdentity = loadOrCreateIdentity();
+const peerStore = openPeerStore();
+const federationRouter = createFederationRouter({
+  identity: federationIdentity,
+  peers: peerStore,
+  requireMutationAuth,
+});
+
+const articleStore = openArticleStore();
+const publishTargetStore = openPublishTargetStore();
+const deliveryLog = openDeliveryLog();
+const publishingRouter = createPublishingRouter({
+  store: articleStore,
+  targets: publishTargetStore,
+  log: deliveryLog,
+  tenants: tenantStore,
+  requireMutationAuth,
+  globalLensPublish: async (article) => {
+    const res = await publishToGlobalLens({
+      title: article.title,
+      body: article.body,
+      category: 'recourse',
+      source_name: 'Recourse',
+      url: `recourse://articles/${article.slug}`,
+    });
+    return { ok: res.ok, inserted: res.inserted, error: res.error };
+  },
+});
+
+function currentBusinessProfile(): BusinessProfileT | null {
+  try {
+    const slugs = listBusinessSlugs();
+    return slugs.length ? loadBusinessProfile(slugs[0]) : null;
+  } catch {
+    return null;
+  }
+}
+const crmStore = openCrmStore();
+const suppressionStore = openSuppressionStore();
+const growthOutbox = openOutbox();
+const growthRouter = createGrowthRouter({
+  crm: crmStore,
+  suppression: suppressionStore,
+  outbox: growthOutbox,
+  requireMutationAuth,
+  getProfile: currentBusinessProfile,
 });
 
 // Math solver state. Hoisted to module top so the function declaration at
@@ -676,7 +805,14 @@ async function learnFromGhidra(input: GhidraLearnInput): Promise<GhidraLearnResu
   return result;
 }
 
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({
+  limit: '10mb',
+  // Preserve the exact bytes for Stripe webhook signature verification
+  // (signatures are computed over the raw body, not a re-serialization).
+  verify: (req, _res, buf) => {
+    (req as typeof req & { rawBody?: string }).rawBody = buf.toString('utf-8');
+  },
+}));
 
 // ---------------------------------------------------------------------------
 // Security hardening: helmet headers + configurable rate limiting.
@@ -898,6 +1034,31 @@ let status: SystemStatus = { ...INITIAL_STATUS };let registry: ToolEntry[] = JSO
 let provenanceEvents: ProvenanceEvent[] = JSON.parse(JSON.stringify(INITIAL_PROVENANCE_EVENTS));
 let reports: HourlyReport[] = JSON.parse(JSON.stringify(INITIAL_HOURLY_REPORTS));
 let growthWeights: GrowthFactorWeights = { ...DEFAULT_GROWTH_WEIGHTS };
+
+// --- Promotion-gate policy: one vocabulary, one setter, one status mirror ----
+// Both the legacy /policy route and /mutate/policy route funnel through here, so
+// the mutator, the persisted status, and the UI can never diverge again.
+function applyPromotionPolicy(
+  raw: unknown
+): { ok: true; policy: PromotionPolicy; note?: string } | { ok: false; error: string } {
+  const normalized = normalizePromotionPolicy(String(raw ?? ''));
+  if ('error' in normalized) return { ok: false, error: normalized.error };
+  setActivePolicy(normalized.policy);
+  status.activePolicy = normalized.policy;
+  return { ok: true, policy: normalized.policy, ...(normalized.note ? { note: normalized.note } : {}) };
+}
+
+if (process.env.RECOURSE_PROMOTION_POLICY) {
+  try {
+    setActivePolicy(process.env.RECOURSE_PROMOTION_POLICY);
+    status.activePolicy = getActivePolicy();
+  } catch (err) {
+    console.warn(
+      '[policy] ignoring invalid RECOURSE_PROMOTION_POLICY:',
+      err instanceof Error ? err.message : String(err)
+    );
+  }
+}
 // Mirror of the Dreaming Engine's own durable store. Honest genesis here; the
 // live value is refreshed from dreamEngine.status() and persisted by the
 // engine's FileDreamStore.
@@ -1921,6 +2082,26 @@ app.post('/api/a2a', async (req, res) => {
   }
 });
 
+// Remote MCP transport over HTTP (JSON-RPC). Same tool surface as the stdio MCP
+// server; scope-gated: a valid mutation secret grants `write`, callers without
+// it get read-only tools.
+app.post('/api/mcp', async (req, res) => {
+  try {
+    const scopes = hasValidMutationSecret(req) ? ['read', 'write'] : ['read'];
+    const result = await handleMcpHttp(
+      req.body,
+      {
+        operations: buildA2aOperations(),
+        authorize: (ctx, required) => ctx.scopes.includes(required),
+      },
+      scopes,
+    );
+    res.status(result.status).json(result.body);
+  } catch (e: any) {
+    res.status(500).json({ jsonrpc: '2.0', id: null, error: { code: -32603, message: e.message } });
+  }
+});
+
 app.get('/api/recourse/memory/recall', async (req, res) => {
   try {
     const q = String(req.query.q || '');
@@ -1954,18 +2135,17 @@ app.post('/api/recourse/fleet/memory', async (req, res) => {
 });
 
 app.post('/api/recourse/policy', (req, res) => {
-  const { policy } = req.body;
-  if (!['any_pass', 'non_regressing', 'strict_improve', 'human_approval'].includes(policy)) {
-    return res.status(400).json({ error: 'Invalid policy' });
+  const applied = applyPromotionPolicy(req.body?.policy);
+  if ('error' in applied) {
+    return res.status(400).json({ error: applied.error, allowed: ['any_pass', 'non_regressing', 'strict_improve', 'human_approval'] });
   }
-  status.activePolicy = policy as PromotionPolicy;
   appendProvenanceEvent('system_tick', {
     action: 'policy_change',
-    newPolicy: policy,
-    generation: status.generation
+    newPolicy: applied.policy,
+    generation: status.generation,
   });
   saveStateToDisk();
-  res.json({ success: true, policy: status.activePolicy });
+  res.json({ success: true, policy: applied.policy, ...(applied.note ? { note: applied.note } : {}) });
 });
 
 app.post('/api/recourse/toggle-auto', (req, res) => {
@@ -2286,7 +2466,9 @@ app.get('/api/recourse/benchmark', (_req, res) => {
       solved: last ? last.solvedIds.includes(p.id) : false,
     })),
     realProgress: status.realProgress ?? null,
-    rewardWeightBenchmark: 0.3,
+    rewardWeightBenchmark: 0.25,
+    rewardWeightOutcome: 0.15,
+    outcomeReward: outcomeLedger.reward(5) ?? null,
   });
 });
 
@@ -2356,6 +2538,32 @@ app.use('/api/recourse/oncology', createOncologyRouter());
 // bridges. Extracted to src/routes/bridges.ts (stateless proxies over libs).
 // ---------------------------------------------------------------------------
 app.use('/api/recourse', createBridgesRouter());
+
+// ---------------------------------------------------------------------------
+// Coding pipelines — selectable coding harnesses (opencode / deepseek /
+// axiom / settlement) + the head-to-head benchmark runner driven by
+// Benchmark Olympics. Extracted to src/routes/pipelines.ts.
+// ---------------------------------------------------------------------------
+app.use('/api/recourse', createPipelinesRouter());
+
+// ---------------------------------------------------------------------------
+// Versioned commercial API (/v1): API-key auth + per-tenant monthly quota +
+// usage metering. Distinct from the operator /api/recourse surface.
+// ---------------------------------------------------------------------------
+app.use('/v1', v1Router);
+
+// ---------------------------------------------------------------------------
+// Commerce control plane (operator): bootstrap tenants, mint/rotate/revoke API
+// keys, inspect usage and outcomes. Writes are behind requireMutationAuth.
+// ---------------------------------------------------------------------------
+app.use('/api/recourse/commerce', commerceRouter);
+
+// ---------------------------------------------------------------------------
+// Wave 4 — federation (signed peer protocol), publishing + paywall, growth.
+// ---------------------------------------------------------------------------
+app.use('/api/recourse/federation', federationRouter);
+app.use('/api/recourse/publishing', publishingRouter);
+app.use('/api/recourse/growth', growthRouter);
 
 // ---------------------------------------------------------------------------
 // Science conductor — the 24/7 research loop driving the connected stack.
@@ -5501,12 +5709,23 @@ app.post('/api/recourse/mutate/approve', async (req, res) => {
 app.post('/api/recourse/mutate/policy', async (req, res) => {
   if (!requireMutationAuthIfConfigured(req, res)) return;
   try {
-    const { policy } = req.body ?? {};
-    if (policy !== 'auto_promote' && policy !== 'manual_approval') {
-      return res.status(400).json({ success: false, error: "policy must be 'auto_promote' or 'manual_approval'" });
+    // Same canonical vocabulary as /policy (legacy auto_promote/manual_approval
+    // still accepted and normalized).
+    const applied = applyPromotionPolicy(req.body?.policy);
+    if ('error' in applied) {
+      return res.status(400).json({
+        success: false,
+        error: applied.error,
+        allowed: ['any_pass', 'non_regressing', 'strict_improve', 'human_approval'],
+      });
     }
-    setActivePolicy(policy);
-    res.json({ success: true, activePolicy: policy });
+    appendProvenanceEvent('system_tick', {
+      action: 'policy_change',
+      newPolicy: applied.policy,
+      generation: status.generation,
+    });
+    saveStateToDisk();
+    res.json({ success: true, activePolicy: applied.policy, ...(applied.note ? { note: applied.note } : {}) });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -6134,8 +6353,13 @@ app.get('/api/recourse/learn/status', async (req, res) => {
 
 app.post('/api/recourse/learn/episode', async (req, res) => {
   try {
-    const report = await learner.runEpisode();
-    res.json({ success: true, report });
+    const explicit = Number(req.query.externalScore ?? req.body?.externalScore);
+    // Default to the real blended capability/outcome reward rather than the
+    // learner's self-score, so an HTTP-triggered episode is driven by the same
+    // measured signal as the server tick. Callers may override explicitly.
+    const externalScore = Number.isFinite(explicit) ? explicit : realSystemReward();
+    const report = await learner.runEpisode(externalScore);
+    res.json({ success: true, externalScore, report });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -6145,8 +6369,11 @@ app.post('/api/recourse/learn/run', async (req, res) => {
   try {
     const raw = Number(req.query.episodes ?? req.body?.episodes ?? 5);
     const episodes = Number.isFinite(raw) ? Math.max(1, Math.min(50, Math.floor(raw))) : 5;
-    const reports = await learner.runEpisodes(episodes);
-    res.json({ success: true, episodesRun: reports.length, reports });
+    const explicit = Number(req.query.externalScore ?? req.body?.externalScore);
+    const externalScore = Number.isFinite(explicit) ? explicit : realSystemReward();
+    const reports: Awaited<ReturnType<typeof learner.runEpisode>>[] = [];
+    for (let i = 0; i < episodes; i++) reports.push(await learner.runEpisode(externalScore));
+    res.json({ success: true, episodesRun: reports.length, externalScore, reports });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -6188,10 +6415,21 @@ function realSystemReward(): number {
   // neutrally at 0 so it never inflates the reward before real evidence exists.
   const lastB = latestBenchmark;
   const benchmarkFrac = lastB && lastB.total > 0 ? lastB.solved / lastB.total : 0;
-  // 0.35 verifier pass-rate + 0.30 real external benchmark solves + 0.25 live
-  // self-hosted + 0.10 cleanliness. Benchmark is now a first-class driver, not
-  // a decorative dashboard number.
-  const reward = 0.35 * verifier + 0.3 * benchmarkFrac + 0.25 * selfHostFrac + 0.1 * cleanFrac;
+  // Real-world outcome term: the mean reward from the outcome-feedback ledger,
+  // which is fed by post-merge scorecard deltas (loopStateMachine) and by any
+  // revenue/external signals recorded through /v1/outcome. Neutral 0.5 until a
+  // real outcome exists, so it never inflates the reward before evidence.
+  const outcome = outcomeLedger.reward(5);
+  const outcomeReward = typeof outcome === 'number' ? outcome : 0.5;
+  // 0.30 verifier pass-rate + 0.25 real external benchmark solves + 0.20 live
+  // self-hosted + 0.10 cleanliness + 0.15 real-world outcome. The outcome term
+  // is the signal that closes the loop from business results back to learning.
+  const reward =
+    0.3 * verifier +
+    0.25 * benchmarkFrac +
+    0.2 * selfHostFrac +
+    0.1 * cleanFrac +
+    0.15 * outcomeReward;
   // A self-hosted tool that backs an internal op but failed/mismatched in the
   // self-use watchdog is a real health signal: penalize the reward.
   const finalReward = selfUseLastOk === false ? reward - 0.12 : reward;
@@ -7128,6 +7366,13 @@ app.get('/api/recourse/benchmark/leaderboard', (req, res) => {
 // Productized surfaces (telemetry / audio / wallet) are mounted from their own
 // router module — see src/routes/product.ts.
 app.use('/api/recourse', productRouter.router);
+// Policy / approvals / deploy (Wave 2), namespaced to avoid route collisions.
+app.use('/api/recourse/ops', opsRouter);
+// Prometheus metrics exposition (Wave 2 observability).
+app.get('/metrics', (_req, res) => {
+  res.setHeader('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
+  res.send(metricsText());
+});
 
 app.get('/api/recourse/readout', async (req, res) => {
   const chain = verifyChainIntegrity();

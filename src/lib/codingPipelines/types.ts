@@ -39,6 +39,8 @@ export interface PipelineStatus {
   command?: string;
   /** Resolved base URL for http pipelines. */
   endpoint?: string;
+  /** Bare-harness provenance, e.g. `"dev@350c726"` or `"master@0d1f500"`. */
+  version?: string;
 }
 
 export interface PipelineRunRequest {

@@ -405,3 +405,62 @@ describe('chatComplete routing + fallback', () => {
     expect(r.model).toBe('olmoe');
   });
 });
+
+describe('usage accounting + sink', () => {
+  it('reports provider usage and emits it to the installed sink', async () => {
+    vi.stubEnv('API_MODEL_BASE_URL', 'http://api.test/v1');
+    vi.stubEnv('API_MODEL_NAME', 'api-model');
+    vi.stubEnv('RECOURSE_GENERATION_PROFILE', 'api');
+    installFetch(async (url) => {
+      if (url.endsWith('/models')) return ok({ data: [] });
+      return ok({ choices: [{ message: { content: 'hello back' } }], usage: { prompt_tokens: 12, completion_tokens: 34 } });
+    });
+    const m = await load();
+    const events: any[] = [];
+    m.setModelUsageSink((u: any) => events.push(u));
+    const r = await m.chatComplete(msg('hi'));
+    expect(r.usage).toEqual({ promptTokens: 12, completionTokens: 34, totalTokens: 46, estimated: false });
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ profile: 'api', model: 'api-model', promptTokens: 12, completionTokens: 34, estimated: false });
+  });
+
+  it('estimates usage when the provider omits it, flagged estimated', async () => {
+    vi.stubEnv('API_MODEL_BASE_URL', 'http://api.test/v1');
+    vi.stubEnv('RECOURSE_GENERATION_PROFILE', 'api');
+    installFetch(async (url) => {
+      if (url.endsWith('/models')) return ok({ data: [] });
+      return ok({ choices: [{ message: { content: 'x'.repeat(40) } }] });
+    });
+    const m = await load();
+    const r = await m.chatComplete(msg('a'.repeat(40)));
+    expect(r.usage!.estimated).toBe(true);
+    expect(r.usage!.totalTokens).toBe(20); // (40 prompt + 40 output) / 4
+  });
+
+  it('parses native Ollama eval counts', async () => {
+    vi.stubEnv('LOCAL_MODEL_BASE_URL', 'http://127.0.0.1:11434');
+    vi.stubEnv('LOCAL_MODEL_NAME', 'olmo');
+    vi.stubEnv('RECOURSE_GENERATION_PROFILE', 'local');
+    installFetch(async (url) => {
+      if (url.endsWith('/models')) return ok({ data: [] });
+      return ok({ message: { content: 'native answer' }, prompt_eval_count: 7, eval_count: 11 });
+    });
+    const m = await load();
+    const r = await m.chatCompleteProfile('local', msg('hi'));
+    expect(r.usage).toEqual({ promptTokens: 7, completionTokens: 11, totalTokens: 18, estimated: false });
+  });
+
+  it('a throwing sink never breaks generation', async () => {
+    vi.stubEnv('API_MODEL_BASE_URL', 'http://api.test/v1');
+    vi.stubEnv('RECOURSE_GENERATION_PROFILE', 'api');
+    installFetch(async (url) => {
+      if (url.endsWith('/models')) return ok({ data: [] });
+      return ok({ choices: [{ message: { content: 'still works' } }] });
+    });
+    const m = await load();
+    m.setModelUsageSink(() => { throw new Error('metering exploded'); });
+    const r = await m.chatComplete(msg('hi'));
+    expect(r.ok).toBe(true);
+    expect(r.content).toBe('still works');
+  });
+});

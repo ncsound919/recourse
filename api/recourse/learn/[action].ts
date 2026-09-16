@@ -16,6 +16,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createLearnerStore, RecursiveLearner } from '../../../src/dream/learner';
+import { openOutcomeLedger } from '../../../src/lib/outcomeFeedback';
 import { requireMutationAuth, serverError } from '../_guard';
 
 const MAX_BATCH_EPISODES = 50;
@@ -60,16 +61,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
 
       case 'episode': {
         if (req.method !== 'POST') return res.status(405).json({ success: false, error: 'POST only' });
-        const report = await learner.runEpisode();
-        return res.status(200).json({ success: true, report });
+        const explicit = Number(req.query.externalScore ?? req.body?.externalScore);
+        const externalScore = Number.isFinite(explicit) ? explicit : openOutcomeLedger().reward(5);
+        const report = await learner.runEpisode(externalScore);
+        return res.status(200).json({ success: true, externalScore: externalScore ?? null, report });
       }
 
       case 'run': {
         if (req.method !== 'POST') return res.status(405).json({ success: false, error: 'POST only' });
         const raw = Number(req.query.episodes ?? req.body?.episodes ?? 5);
         const episodes = Number.isFinite(raw) ? Math.max(1, Math.min(MAX_BATCH_EPISODES, Math.floor(raw))) : 5;
-        const reports = await learner.runEpisodes(episodes);
-        return res.status(200).json({ success: true, episodesRun: reports.length, reports });
+        const explicit = Number(req.query.externalScore ?? req.body?.externalScore);
+        const externalScore = Number.isFinite(explicit) ? explicit : openOutcomeLedger().reward(5);
+        const reports: Awaited<ReturnType<RecursiveLearner['runEpisode']>>[] = [];
+        for (let i = 0; i < episodes; i++) reports.push(await learner.runEpisode(externalScore));
+        return res.status(200).json({ success: true, episodesRun: reports.length, externalScore: externalScore ?? null, reports });
       }
 
       case 'replay': {

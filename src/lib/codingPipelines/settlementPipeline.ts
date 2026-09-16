@@ -15,7 +15,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 
 import type { CodingPipeline, PipelineRunRequest, PipelineRunResult, PipelineStatus } from './types.js';
-import { commandExists, runProcess } from './subprocess.js';
+import { commandExists, lastLine, runProcess } from './subprocess.js';
 import { opencodeBin } from './opencodePipeline.js';
 
 export function settlementHarnessDir(): string {
@@ -104,7 +104,7 @@ export const settlementPipeline: CodingPipeline = {
       stdout: res.stdout,
       stderr: res.stderr,
       durationMs: res.durationMs,
-      error: res.error ?? (!res.ok ? `exit ${res.code ?? 'null'}` : undefined),
+      error: res.error ?? (!res.ok ? lastLine(res.stderr) || `exit ${res.code ?? 'null'}` : undefined),
     };
   },
 };

@@ -44,6 +44,7 @@ import { checkAndMerge, computeVetoDeadline, parseOwnerRepo, savePRState } from 
 import { fetchGitHubToken } from './keywireClient';
 import { createGitHubClient } from './gitHubClient';
 import { DEFAULT_LEDGER_ROOT, loadLedger, quarantinedGapIds, updateGeneFitness } from './fitnessLoop';
+import { recordMergedOutcome } from '../lib/outcomeFeedback';
 import { FileCheckpointStore, buildCheckpoint, evaluateCheckpointTimeout, resolveCheckpoint } from './checkpoint';
 
 export type LoopRunOptions = {
@@ -367,6 +368,20 @@ export async function resumeAfterVeto(options: ResumeOptions): Promise<LoopOutco
         post,
         ledgerRoot: options.ledgerRoot,
       });
+      // Feed the real business outcome (scorecard delta) to the learner's
+      // external reward ledger. This is the signal that was previously written
+      // into the fitness ledger and never consumed.
+      try {
+        recordMergedOutcome({
+          ledgerRoot: options.ledgerRoot ?? DEFAULT_LEDGER_ROOT,
+          proposalId: updated.proposalId,
+          gapId: updated.gapId,
+          scorecardDelta: post.overallScore - pre.overallScore,
+          notes: `scorecard ${pre.overallScore} -> ${post.overallScore}`,
+        });
+      } catch {
+        // Outcome feedback must never fail the merge path.
+      }
       context.currentProposal = null;
       return {
         state: quarantined
