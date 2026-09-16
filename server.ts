@@ -507,7 +507,12 @@ const nightlyStore = openNightlyStore();
 
 // Wave 2 ops surface reuses the shared policy + approval engines above, so a
 // remediation approval queued by self-repair is visible to the ops routes.
-const opsRouter = createOpsRouter({ requireMutationAuth, policy: policyEngine, approvals: approvalStore });
+const opsRouter = createOpsRouter({
+  requireMutationAuth,
+  policy: policyEngine,
+  approvals: approvalStore,
+  requireReadAuth: telemetryAuthorized,
+});
 
 function nightlyMetrics(): UpgradeSnapshot {
   const dossier = devDossierInput();
@@ -1209,6 +1214,18 @@ function applyPromotionPolicy(
   setActivePolicy(normalized.policy);
   status.activePolicy = normalized.policy;
   return { ok: true, policy: normalized.policy, ...(normalized.note ? { note: normalized.note } : {}) };
+}
+
+/**
+ * Telemetry reads (`/metrics`, trace inspection) are open on the local bind by
+ * default. Set `RECOURSE_TELEMETRY_AUTH=1` to require the mutation secret — the
+ * metrics expose model names/costs and traces expose request paths.
+ */
+function telemetryAuthorized(req: any, res: any): boolean {
+  if (process.env.RECOURSE_TELEMETRY_AUTH !== '1') return true;
+  if (hasValidMutationSecret(req)) return true;
+  res.status(401).json({ success: false, error: 'unauthorized (RECOURSE_TELEMETRY_AUTH=1)' });
+  return false;
 }
 
 if (process.env.RECOURSE_PROMOTION_POLICY) {
@@ -2119,8 +2136,10 @@ function buildA2aOperations(): Record<string, A2aOperation> {
       }, true)).data),
     make('recourse.revert', async (args) =>
       (await internalApiCall('POST', '/api/recourse/develop/revert', { token: args.token }, true)).data),
-    make('recourse.traces', async () => (await internalApiCall('GET', '/api/recourse/ops/traces')).data),
-    make('recourse.tracing_status', async () => (await internalApiCall('GET', '/api/recourse/ops/tracing/status')).data),
+    // Telemetry reads may be guarded by RECOURSE_TELEMETRY_AUTH; authenticate the
+    // internal hop so these agent tools keep working when it is enabled.
+    make('recourse.traces', async () => (await internalApiCall('GET', '/api/recourse/ops/traces', undefined, true)).data),
+    make('recourse.tracing_status', async () => (await internalApiCall('GET', '/api/recourse/ops/tracing/status', undefined, true)).data),
     make('recourse.skills', async () => (await internalApiCall('GET', '/api/recourse/ecosystem/skills')).data),
     make('recourse.skill_verify', async (args) => {
       const id = encodeURIComponent(String(args.id ?? ''));
@@ -7482,7 +7501,8 @@ app.use('/api/recourse', productRouter.router);
 // Policy / approvals / deploy (Wave 2), namespaced to avoid route collisions.
 app.use('/api/recourse/ops', opsRouter);
 // Prometheus metrics exposition (Wave 2 observability).
-app.get('/metrics', (_req, res) => {
+app.get('/metrics', (req, res) => {
+  if (!telemetryAuthorized(req, res)) return;
   res.setHeader('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
   res.send(metricsText());
 });

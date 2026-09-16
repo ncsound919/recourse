@@ -20,6 +20,8 @@ export interface OpsRouterDeps {
   /** Shared engines so self-repair remediation and the ops routes agree. */
   policy?: PolicyEngine;
   approvals?: ApprovalStore;
+  /** Optional guard for read-only telemetry inspection (traces). */
+  requireReadAuth?: (req: Request, res: Response) => boolean;
 }
 
 export function createOpsRouter(deps: OpsRouterDeps): Router {
@@ -28,7 +30,11 @@ export function createOpsRouter(deps: OpsRouterDeps): Router {
   const approvals = deps.approvals ?? openApprovalStore();
 
   // --- Policy -------------------------------------------------------------
-  router.get('/policy', (_req, res) => {
+  const allowRead = (req: Request, res: Response): boolean =>
+    !deps.requireReadAuth || deps.requireReadAuth(req, res);
+
+  router.get('/policy', (req, res) => {
+    if (!allowRead(req, res)) return;
     res.json({ success: true, rules: policy.rules() });
   });
 
@@ -53,7 +59,8 @@ export function createOpsRouter(deps: OpsRouterDeps): Router {
   });
 
   // --- Approvals ----------------------------------------------------------
-  router.get('/approvals', (_req, res) => {
+  router.get('/approvals', (req, res) => {
+    if (!allowRead(req, res)) return;
     res.json({ success: true, pending: approvals.pendingCount(), requests: approvals.list({ limit: 50 }) });
   });
 
@@ -125,11 +132,13 @@ export function createOpsRouter(deps: OpsRouterDeps): Router {
 
   // --- Tracing ------------------------------------------------------------
   router.get('/traces', (req, res) => {
+    if (!allowRead(req, res)) return;
     const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
     res.json({ success: true, count: tracer.count, spans: tracer.recent(limit) });
   });
 
-  router.get('/tracing/status', (_req, res) => {
+  router.get('/tracing/status', (req, res) => {
+    if (!allowRead(req, res)) return;
     const endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
     res.json({
       success: true,
