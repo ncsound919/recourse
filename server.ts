@@ -70,6 +70,23 @@ import { registerScheduledJob, getSchedulerStatus, setJobEnabled, triggerJob, li
 import { keywireHealth } from './src/lib/keywireBridge.js';
 import { computeIssueProgress, readIssueRecords, renderIssueDocs, renderIssueIndex } from './src/lib/issueTracker.js';
 import { generateFleetReport, renderDailyReport, recentReports } from './src/lib/researchReports.js';
+// SelfReporter — deterministic first-person field dispatches about Recourse.
+import {
+  buildReporterFacts,
+  composeArticle,
+  narrateArticle,
+  type ReporterState,
+  type ReporterArticle,
+} from './src/lib/selfReporter.js';
+import {
+  saveReporterArticle,
+  latestReporterArticle,
+  getReporterArticle,
+  listReporterArticles,
+  reporterStatus,
+} from './src/lib/reporterStore.js';
+import { listVoices, listFormats, loadReporterSoul, resolveFormat } from './src/lib/reporterVoice.js';
+import { allProtocols } from './src/lib/reporterMetaphor.js';
 import { renderAndPersistAgenda, computeAgenda, selectNextMathMilestone, selectNextOncologyMilestone } from './src/lib/breakthroughAgenda.js';
 import { computeGameProfile, persistGameProfile, leaderboard } from './src/lib/gamification.js';
 import { renderDashboard } from './src/lib/fleetDashboard.js';
@@ -116,6 +133,7 @@ import {
   toSafeModuleName
 } from './src/lib/selfHosting.js';
 import type { SelfHostedManifestEntry } from './src/lib/selfHosting.js';
+import { isSandboxRuntimeAvailable, getSandboxRuntime } from './src/lib/selfHostSandbox.js';
 
 // Capability Forge: the closed, honest self-improvement loop. Materializes
 // verified model-built functions into live self-hosted tools and records every
@@ -172,6 +190,9 @@ import {
   applyFailureBias,
   probeAutopilotOnce,
   maybeRefreshBenchmark,
+  memoryStoreStatus,
+  consolidateSemanticMemory,
+  runSkillPromotionPass,
 } from './src/lib/recourseActivator.js';
 
 // AgentBrowser web-fetch connector (download from the web through the real browser).
@@ -210,7 +231,8 @@ import { SignalStore, DEFAULT_TOPIC_QUERIES, DEFAULT_RSS_FEEDS } from './src/int
 import type { IntakeSnapshot, BenchmarkRun, ExternalSignal, SourcePollResult } from './src/intake/types.js';
 import { pollAllSources } from './src/intake/poll.js';
 import { groundSignal } from './src/intake/grounding.js';
-import { runBenchmark, BENCHMARK_PROBLEMS } from './src/benchmark/benchmark.js';
+import { runBenchmark, BENCHMARK_PROBLEMS, registryAttestation } from './src/benchmark/benchmark.js';
+import { appendBenchmarkRun, readBenchmarkLedger, verifyBenchmarkLedger, benchmarkLeaderboard } from './src/lib/benchmarkLedger.js';
 import { buildDevelopmentReadout } from './src/intake/readout.js';
 import type { ReadoutContext } from './src/intake/readout.js';
 
@@ -266,8 +288,32 @@ import { createToolsRouter } from './src/routes/tools.js';
 import { createServicesRouter } from './src/routes/services.js';
 import { createSynergyRouter } from './src/routes/synergy.js';
 import { createVizRouter } from './src/routes/viz.js';
-import { requireMutationAuth, requireMutationAuthIfConfigured } from './src/lib/mutationAuth.js';
+import { createGhidraRouter } from './src/routes/ghidra.js';
+import { buildLearnResult } from './src/lib/ghidraLearning.js';
+import type { GhidraLearnInput, GhidraLearnResult } from './src/lib/ghidraLearning.js';
+import { requireMutationAuth, requireMutationAuthIfConfigured, hasValidMutationSecret } from './src/lib/mutationAuth.js';
+import { renderTrackToWav, renderStemToWav } from './src/lib/composer/encode/wav.js';
+import { openWallet } from './src/lib/wallet.js';
+import { setSandboxSpendSink } from './src/lib/selfHostSandbox.js';
+import { createProductRouter } from './src/routes/product.js';
+import { agentCard, handleA2aRpc, A2A_SKILLS } from './src/lib/a2a.js';
+import type { A2aOperation } from './src/lib/a2a.js';
+import { replayTrendLedger, replayGoalLedger, deterministicHash } from './src/lib/replay.js';
+import { buildOpenApiSpec, listOperations } from './src/lib/openapi.js';
 const STATE_FILE = path.join(process.cwd(), 'recourse_storage.json');
+
+// Budgeted action wallet (durable, hash-chained). Also installed as the sandbox
+// spend sink so any granted `spend` capability is debited against a real budget.
+const wallet = openWallet();
+setSandboxSpendSink((cents, description, budgetToken) => {
+  wallet.debit(budgetToken, cents, description);
+});
+// Productized surfaces (telemetry / audio / wallet) live in their own router.
+const productRouter = createProductRouter({
+  wallet,
+  repoRoot: () => devRepoRoot(),
+  requireMutationAuth,
+});
 
 // Math solver state. Hoisted to module top so the function declaration at
 // line 5275 and the route at 5363 always see an initialized variable (avoids
@@ -588,6 +634,47 @@ const SELF_REPAIR_BACKOFF_MS = Math.max(30_000, Number(process.env.RECOURSE_SELF
  *  the harness only when enabled. Dispatch + brain-ask always run when stuck. */
 const SELF_REPAIR_APPLY = process.env.RECOURSE_SELF_REPAIR_APPLY !== '0';
 const SELF_REPAIR_BAND = Math.max(50, Number(process.env.RECOURSE_SELF_REPAIR_BAND) || 50);
+
+// ---------------------------------------------------------------------------
+// Ghidra learning sink. A real Ghidra analysis (functions/imports/strings +
+// deterministic risk findings) is folded into (a) the recursive learner as a
+// per-artifact reward, (b) durable vector memory, (c) the provenance chain, and
+// (d) the stuck-issue ledger when the heuristic risk is high. Nothing is
+// fabricated: the learner reward is computed from the real analysis, and a
+// high-risk artifact is escalated only through the same stuck loop as any other
+// real signal.
+// ---------------------------------------------------------------------------
+async function learnFromGhidra(input: GhidraLearnInput): Promise<GhidraLearnResult> {
+  const result = buildLearnResult(input);
+  await learner.learnRealTools(result.tools);
+  try {
+    const mem = await ensureVectorMemory();
+    await mem.remember(
+      'snapshot',
+      `ghidra:${input.binaryName}:${input.analysis?.sha256 || Date.now()}`,
+      result.summary,
+      {
+        source: 'ghidra',
+        riskScore: input.findings.riskScore,
+        indicators: input.findings.indicatorCount,
+        sha256: input.analysis?.sha256 ?? null,
+      },
+    );
+  } catch {
+    // Vector memory is optional; the learner update above already happened.
+  }
+  appendProvenanceEvent('system_tick', {
+    action: 'ghidra_analysis',
+    binary: input.binaryName,
+    riskScore: input.findings.riskScore,
+    indicators: input.findings.indicatorCount,
+    reward: result.reward,
+  });
+  if (result.signals.some((s) => s.failing)) {
+    stuckIssues = updateStuckIssues(stuckIssues, result.signals, Date.now());
+  }
+  return result;
+}
 
 app.use(express.json({ limit: '10mb' }));
 
@@ -1320,7 +1407,7 @@ function executeSelfRepair(
 }
 
 // API Routes
-import { axiomBridgeStatus, integrateAxiomTool, dispatchAxiomRepair } from './src/lib/axiomBridge.js';
+import { axiomBridgeStatus, integrateAxiomTool, dispatchAxiomRepair, axiomReachable } from './src/lib/axiomBridge.js';
 import {
   hackingtoolHealth,
   hackingtoolCatalog,
@@ -1668,6 +1755,170 @@ app.get('/api/recourse/memory/status', async (_req, res) => {
 app.post('/api/recourse/memory/index', async (_req, res) => {
   try { res.json({ success: true, ...(await indexSystemMemory()) }); }
   catch (e: any) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// Tiered memory (episodic + semantic): durable SQLite-backed store status.
+app.get('/api/recourse/memory/tiered', (_req, res) => {
+  res.json({ success: true, ...memoryStoreStatus() });
+});
+
+// Consolidate episode clusters into durable semantic facts (idempotent).
+app.post('/api/recourse/memory/consolidate', (req, res) => {
+  if (!requireMutationAuth(req, res)) return;
+  try {
+    const minClusterSize = Math.max(1, Number(req.body?.minClusterSize) || 2);
+    const created = consolidateSemanticMemory({ minClusterSize });
+    res.json({ success: true, created: created.length, facts: created, ...memoryStoreStatus() });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// Skill auto-promotion pass: detect generalist genes, then verify + lint +
+// export the verified self-hosted tool backing them as a SKILL.md folder.
+app.post('/api/recourse/memory/promote-skills', async (req, res) => {
+  if (!requireMutationAuth(req, res)) return;
+  try {
+    const minDistinctProblemWins = Math.max(1, Number(req.body?.minDistinctProblemWins) || 2);
+    const maxPerRun = Math.min(10, Math.max(1, Number(req.body?.maxPerRun) || 3));
+    const result = await runSkillPromotionPass({ minDistinctProblemWins, maxPerRun });
+    res.json({ success: true, ...result });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// =========================================================================
+// A2A (Agent-to-Agent) surface — Recourse as a callable agent.
+// =========================================================================
+
+/** Public base URL for the agent card, honoring proxy headers. */
+function a2aBaseUrl(req: { headers: Record<string, any>; protocol?: string }): string {
+  const proto = String(req.headers['x-forwarded-proto'] ?? '').split(',')[0] || req.protocol || 'http';
+  const host = String(req.headers['x-forwarded-host'] ?? '') || req.headers.host || `127.0.0.1:${PORT}`;
+  return `${proto}://${host}`;
+}
+
+/** Same-process HTTP call (keeps the A2A ops thin — they reuse the REST routes). */
+async function internalApiCall(
+  method: 'GET' | 'POST',
+  apiPath: string,
+  body?: unknown,
+  withAuth = false,
+): Promise<{ status: number; data: any }> {
+  const headers: Record<string, string> = {};
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  const secret = process.env.RECOURSE_API_SECRET;
+  if (withAuth && secret) headers.Authorization = `Bearer ${secret}`;
+  const res = await fetch(`http://127.0.0.1:${PORT}${apiPath}`, {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  let data: any = null;
+  try { data = await res.json(); } catch { /* non-JSON */ }
+  return { status: res.status, data };
+}
+
+function buildA2aOperations(): Record<string, A2aOperation> {
+  const make = (
+    id: string,
+    run: (args: Record<string, unknown>) => Promise<unknown> | unknown,
+  ): [string, A2aOperation] => {
+    const skill = A2A_SKILLS.find((s) => s.id === id);
+    if (!skill) throw new Error(`A2A skill metadata missing for ${id}`);
+    return [id, { skill, run }];
+  };
+  return Object.fromEntries([
+    make('recourse.status', async () => (await internalApiCall('GET', '/api/recourse/status')).data),
+    make('recourse.registry', async () => (await internalApiCall('GET', '/api/recourse/registry')).data),
+    make('recourse.selfhosted', async () => (await internalApiCall('GET', '/api/recourse/selfhosted')).data),
+    make('recourse.sandbox_status', async () => (await internalApiCall('GET', '/api/recourse/selfhosted/sandbox')).data),
+    make('recourse.memory_tiered', async () => (await internalApiCall('GET', '/api/recourse/memory/tiered')).data),
+    make('recourse.recall_memory', async (args) => {
+      const q = encodeURIComponent(String(args.q ?? args.query ?? ''));
+      const kind = args.kind ? `&kind=${encodeURIComponent(String(args.kind))}` : '';
+      const topK = args.topK ? `&topK=${Number(args.topK)}` : '';
+      return (await internalApiCall('GET', `/api/recourse/memory/recall?q=${q}${kind}${topK}`)).data;
+    }),
+    make('recourse.inspect_learner', async () => (await internalApiCall('GET', '/api/recourse/learn/status')).data),
+    make('recourse.problems', async () => (await internalApiCall('GET', '/api/recourse/math/problems')).data),
+    make('recourse.run_forge', async (args) =>
+      (await internalApiCall('POST', '/api/recourse/forge/run', { count: args.count ?? 1 }, true)).data),
+    make('recourse.execute_selfhosted', async (args) => {
+      const name = String(args.name ?? '');
+      const method = String(args.method ?? '');
+      const url = `/api/recourse/selfhosted/${encodeURIComponent(name)}/execute`;
+      return (await internalApiCall('POST', url, { method, args: args.args ?? [], mode: args.mode }, true)).data;
+    }),
+    make('recourse.consolidate_memory', async (args) =>
+      (await internalApiCall('POST', '/api/recourse/memory/consolidate', { minClusterSize: args.minClusterSize }, true)).data),
+    make('recourse.promote_skills', async (args) =>
+      (await internalApiCall('POST', '/api/recourse/memory/promote-skills', {
+        minDistinctProblemWins: args.minDistinctProblemWins,
+        maxPerRun: args.maxPerRun,
+      }, true)).data),
+    make('recourse.revert', async (args) =>
+      (await internalApiCall('POST', '/api/recourse/develop/revert', { token: args.token }, true)).data),
+  ]);
+}
+
+// Deterministic replay: re-derive a subsystem from its ledger and compare to
+// live state. A mismatch is reported, never hidden.
+app.post('/api/recourse/replay', async (req, res) => {
+  const stream = String(req.body?.stream ?? 'trend').toLowerCase();
+  try {
+    if (stream === 'trend') {
+      return res.json({ success: true, report: replayTrendLedger() });
+    }
+    if (stream === 'goals') {
+      return res.json({ success: true, report: replayGoalLedger() });
+    }
+    if (stream === 'selfhosted') {
+      const entries = await verifyAllSelfHosted();
+      const summary = entries.map((e) => ({ name: e.name, hash: e.hash, passed: e.lastVerified?.passed === true, sandbox: e.lastSandboxVerified?.passed === true }));
+      const allPassed = summary.every((s) => s.passed);
+      return res.json({
+        success: true,
+        report: {
+          stream: 'selfhosted',
+          records: summary.length,
+          matches: allPassed,
+          replayHash: deterministicHash(summary),
+          details: [`re-verified ${summary.length} self-hosted module(s); ${summary.filter((s) => s.sandbox).length} green in the WASM sandbox`],
+        },
+      });
+    }
+    return res.status(400).json({ success: false, error: `unsupported replay stream "${stream}" (trend|goals|selfhosted)` });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// Productized API contract: OpenAPI document + a discoverable operation index.
+app.get('/api/openapi.json', (req, res) => {
+  res.json(buildOpenApiSpec(a2aBaseUrl(req)));
+});
+
+app.get('/api/recourse/routes', (req, res) => {
+  const spec = buildOpenApiSpec(a2aBaseUrl(req));
+  res.json({ success: true, count: listOperations(spec).length, operations: listOperations(spec) });
+});
+
+app.get('/.well-known/agent.json', (req, res) => {
+  res.json(agentCard(a2aBaseUrl(req)));
+});
+
+app.post('/api/a2a', async (req, res) => {
+  try {
+    const result = await handleA2aRpc(req.body, {
+      authorized: hasValidMutationSecret(req),
+      operations: buildA2aOperations(),
+    });
+    res.status(result.httpStatus).json(result.body);
+  } catch (e: any) {
+    res.status(500).json({ jsonrpc: '2.0', id: null, error: { code: -32603, message: e.message } });
+  }
 });
 
 app.get('/api/recourse/memory/recall', async (req, res) => {
@@ -2074,6 +2325,14 @@ app.use('/api/recourse', createBioRouter());
 app.use('/api/recourse/viz', createVizRouter());
 
 // ---------------------------------------------------------------------------
+// Ghidra reverse-engineering sidecar (NSA Ghidra headless analyzer). Stateless
+// disassembly/decompile proxies plus a gated /learn hook that folds a real
+// analysis into the recursive learner + self-repair loop. Honestly reports
+// available:false when Ghidra/JRE are absent - never a fabricated analysis.
+// ---------------------------------------------------------------------------
+app.use('/api/recourse/ghidra', createGhidraRouter({ learnFromAnalysis: learnFromGhidra }));
+
+// ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 // (grant / research / prometheus / bfr bridges live in src/routes/tools.ts,
 // mounted under /api/recourse)
@@ -2473,6 +2732,271 @@ app.post('/api/recourse/reports/generate', async (_req, res) => {
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'report generation failed';
     res.status(500).json({ success: false, error: message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// SelfReporter — Recourse writing a deterministic, first-person dispatch about
+// itself. The article is a pure function of live state (systems, development,
+// connections, growth, data), content-addressed by the SHA-256 of its facts.
+// The reporter's OWN provenance events are excluded from the facts so writing a
+// dispatch never changes the fingerprint and therefore never self-triggers.
+// ---------------------------------------------------------------------------
+/**
+ * Read the audit snapshot written by OpenHub (Workstream F4). A malformed or
+ * missing file yields null — the reporter then says no audit is recorded rather
+ * than fabricating one.
+ */
+function loadAuditSnapshot(): ReporterState['audit'] {
+  try {
+    const p = process.env.AUDIT_SNAPSHOT_PATH || path.join(process.cwd(), 'data', 'reports', 'audit-snapshot.json');
+    if (!fs.existsSync(p)) return null;
+    const raw = JSON.parse(fs.readFileSync(p, 'utf8')) as Record<string, unknown>;
+    if (typeof raw.grade !== 'string' || !Array.isArray(raw.dimensions) || typeof raw.findings !== 'object') return null;
+    return raw as unknown as ReporterState['audit'];
+  } catch {
+    return null;
+  }
+}
+
+async function collectSelfReporterState(opts: { voiceId?: string; format?: string } = {}): Promise<ReporterState> {
+  const registryTotal = registry.length;
+  const healthy = registry.filter((t) => t.healthStatus === 'healthy').length;
+  const degraded = registry.filter((t) => Boolean(t.healthStatus) && t.healthStatus !== 'healthy').length;
+  const selfHosted = registry.filter((t) => Boolean(t.entrypoint && t.entrypoint.includes('.selfhosted/'))).length;
+
+  const domainMap = new Map<string, number>();
+  for (const t of registry) {
+    const d = t.domain || 'unknown';
+    domainMap.set(d, (domainMap.get(d) || 0) + 1);
+  }
+
+  const factsProvenance = provenanceEvents.filter(
+    (e) => !(e.type === 'report_generated' && (e.data as Record<string, unknown> | undefined)?.driverId === 'self_reporter'),
+  );
+  const byTypeMap = new Map<string, number>();
+  for (const e of factsProvenance) byTypeMap.set(e.type, (byTypeMap.get(e.type) || 0) + 1);
+
+  let chainValid = true;
+  try { chainValid = verifyChainIntegrity().valid; } catch { chainValid = false; }
+  const lastHash = factsProvenance[factsProvenance.length - 1]?.hash ?? getLastHash();
+
+  let promotions = 0, repairs = 0, pending = 0, rejected = 0, heldBack = 0;
+  for (const e of factsProvenance) {
+    const d = (e as { data?: Record<string, unknown> }).data ?? {};
+    if (e.type === 'tool_promoted' || (e.type === 'tool_verification' && d.outcome === 'promoted')) promotions++;
+    else if (e.type === 'template_component_built') promotions++;
+    else if (e.type === 'signal_grounded') promotions++;
+    else if (e.type === 'dream_crystallized') promotions += typeof d.count === 'number' ? d.count : (d.verified === false ? 0 : 1);
+    else if (e.type === 'ai_mutation') promotions++;
+    else if (e.type === 'tool_human_approved') promotions++;
+    else if (e.type === 'gene_crossover' && d.verified !== false) promotions++;
+    if (e.type === 'tool_rejected' || (e.type === 'tool_verification' && d.outcome === 'rejected')) rejected++;
+    if (e.type === 'tool_held_back' || (e.type === 'tool_verification' && d.outcome === 'held_back')) heldBack++;
+    if (e.type === 'tool_pending_approval' || (e.type === 'tool_verification' && d.outcome === 'pending_approval')) pending++;
+    if (e.type === 'tool_repaired' || e.type === 'template_repair_synthesized') repairs++;
+  }
+
+  const jobs = listScheduledJobs().map((j) => ({
+    id: j.id,
+    name: j.name,
+    group: j.group,
+    enabled: j.enabled,
+    runCount: j.runCount,
+    failCount: j.failCount,
+    lastOk: j.lastOk,
+    cadenceMs: j.cadenceMs ?? null,
+  }));
+  const activeLoops = jobs.filter((j) => j.enabled && j.group !== 'system' && j.id !== 'self-reporter').map((j) => j.name);
+
+  let agendaHead: string | null = null;
+  try {
+    agendaHead = selectNextMathMilestone()?.milestone.title ?? selectNextOncologyMilestone()?.milestone.title ?? null;
+  } catch { agendaHead = null; }
+
+  const learnerState = await learner.status().catch(() => null);
+  const goals = getGoalProgress();
+
+  const connections: ReporterState['connections'] = [];
+  try {
+    const p = providerStatuses();
+    connections.push({ name: 'Local model', reachable: p.local.online === true, detail: p.local.model });
+    connections.push({ name: 'API model', reachable: p.api.online === true, detail: p.api.model });
+  } catch { /* provider status unavailable — omitted, not invented */ }
+  try {
+    connections.push({ name: 'Axiom bridge', reachable: await axiomReachable() });
+  } catch { connections.push({ name: 'Axiom bridge', reachable: false, detail: 'status check failed' }); }
+  try {
+    const h = await keywireHealth();
+    connections.push({ name: 'Keywire fleet', reachable: h.ok, ...(h.error ? { detail: h.error } : {}) });
+  } catch { connections.push({ name: 'Keywire fleet', reachable: false, detail: 'status check failed' }); }
+
+  const activeProfile = activeProviderProfile();
+  return {
+    generation: status.generation,
+    registry: { total: registryTotal, healthy, degraded, selfHosted, domains: [...domainMap.entries()].map(([domain, count]) => ({ domain, count })) },
+    provenance: { total: factsProvenance.length, byType: [...byTypeMap.entries()].map(([type, count]) => ({ type, count })), chainValid, lastHash },
+    jobs,
+    development: {
+      promotions,
+      repairs,
+      pending,
+      rejected,
+      heldBack,
+      agendaHead,
+      activeLoops: activeLoops.slice(0, 8),
+    },
+    growth: {
+      dreamActive: dreamState.isDreamingActive,
+      dreamCycles: dreamState.dreamCyclesCompleted,
+      cognitiveCoherence: dreamState.cognitiveCoherence,
+      crystallizedGenes: dreamState.totalCrystallizedGenes,
+      learnerEpisodes: learnerState?.episode ?? 0,
+      calibration: learnerState?.selfScore ?? null,
+      skills: skillCatalog.length,
+      corpusArtifacts: corpusArtifacts.length,
+    },
+    goals: {
+      mathSolved: goals.math.solved,
+      mathTotal: goals.math.total,
+      biotechPassed: goals.biotech.passed,
+      biotechTotal: goals.biotech.total,
+    },
+    connections,
+    data: {
+      registryTools: registryTotal,
+      provenanceEvents: factsProvenance.length,
+      modelProfile: activeProfile,
+      modelOnline: (() => {
+        try { return providerStatuses()[activeProfile].online === true; } catch { return false; }
+      })(),
+    },
+    audit: loadAuditSnapshot(),
+    ...(opts.voiceId ? { voiceId: opts.voiceId } : {}),
+    ...(opts.format ? { format: resolveFormat(opts.format) } : {}),
+    soul: loadReporterSoul(),
+  };
+}
+
+/**
+ * Compose and (when the deterministic fingerprint changed) persist a dispatch.
+ * `force` writes even when unchanged. Never fabricates: an offline article is
+ * still deterministic — only the optional narration can be unavailable.
+ */
+async function generateSelfReporterArticle(opts: { force?: boolean; voiceId?: string; format?: string } = {}): Promise<{
+  article: ReporterArticle;
+  written: boolean;
+  files: string[];
+  previousFingerprint: string | null;
+  reason?: string;
+}> {
+  const state = await collectSelfReporterState({ voiceId: opts.voiceId, format: opts.format });
+  const facts = buildReporterFacts(state);
+  const article = composeArticle(facts, Date.now());
+  const previous = latestReporterArticle();
+  if (!opts.force && previous?.fingerprint === article.fingerprint) {
+    return {
+      article,
+      written: false,
+      files: [],
+      previousFingerprint: previous.fingerprint,
+      reason: 'state unchanged since the last dispatch',
+    };
+  }
+  const saved = saveReporterArticle(article);
+  appendProvenanceEvent('report_generated', {
+    driverId: 'self_reporter',
+    fingerprint: article.fingerprint,
+    headline: article.headline,
+  });
+  return { article, written: true, files: saved.files, previousFingerprint: previous?.fingerprint ?? null };
+}
+
+/** Compose a dispatch without persisting it (for previewing a voice/format). */
+async function previewSelfReporterArticle(opts: { voiceId?: string; format?: string } = {}): Promise<ReporterArticle> {
+  const state = await collectSelfReporterState({ voiceId: opts.voiceId, format: opts.format });
+  return composeArticle(buildReporterFacts(state), Date.now());
+}
+
+app.get('/api/recourse/reporter/status', (_req, res) => {
+  res.json({
+    success: true,
+    ...reporterStatus(),
+    cadenceMs: REPORTER_MS,
+    voices: listVoices(),
+    formats: listFormats(),
+    soulLoaded: Boolean(loadReporterSoul()),
+  });
+});
+
+app.get('/api/recourse/reporter/voices', (_req, res) => {
+  res.json({ success: true, voices: listVoices(), formats: listFormats(), protocols: allProtocols().length, soulLoaded: Boolean(loadReporterSoul()) });
+});
+
+app.get('/api/recourse/reporter/preview', async (req, res) => {
+  try {
+    const voiceId = typeof req.query.voice === 'string' ? req.query.voice : undefined;
+    const format = typeof req.query.format === 'string' ? req.query.format : undefined;
+    const article = await previewSelfReporterArticle({ voiceId, format });
+    res.json({ success: true, preview: true, article });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'preview failed';
+    res.status(500).json({ success: false, error: message });
+  }
+});
+
+app.get('/api/recourse/reporter/latest', (_req, res) => {
+  const article = latestReporterArticle();
+  res.json({ success: true, available: Boolean(article), article });
+});
+
+app.get('/api/recourse/reporter/articles', (req, res) => {
+  const limit = Number(req.query.limit);
+  res.json({ success: true, articles: listReporterArticles(Number.isFinite(limit) && limit > 0 ? limit : 20) });
+});
+
+app.get('/api/recourse/reporter/article/:fingerprint', (req, res) => {
+  const article = getReporterArticle(req.params.fingerprint);
+  if (!article) return res.status(404).json({ success: false, error: 'article not found' });
+  res.json({ success: true, article });
+});
+
+app.post('/api/recourse/reporter/generate', async (req, res) => {
+  if (!requireMutationAuthIfConfigured(req, res)) return;
+  try {
+    const body = (req.body ?? {}) as { force?: unknown; voice?: unknown; format?: unknown };
+    const result = await generateSelfReporterArticle({
+      force: Boolean(body.force),
+      voiceId: typeof body.voice === 'string' ? body.voice : undefined,
+      format: typeof body.format === 'string' ? body.format : undefined,
+    });
+    res.json({ success: true, ...result });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'self-report generation failed';
+    res.status(500).json({ success: false, error: message });
+  }
+});
+
+app.post('/api/recourse/reporter/narrate', async (req, res) => {
+  if (!requireMutationAuthIfConfigured(req, res)) return;
+  try {
+    const body = (req.body ?? {}) as { fingerprint?: unknown };
+    const fingerprint = typeof body.fingerprint === 'string' ? body.fingerprint : '';
+    const base = fingerprint ? getReporterArticle(fingerprint) : latestReporterArticle();
+    if (!base) return res.status(404).json({ success: false, available: false, error: 'no article to narrate' });
+    const narration = await narrateArticle(base, chatComplete);
+    if (!narration.ok || !narration.prose) {
+      return res.status(503).json({ success: false, available: false, ...narration });
+    }
+    const narrated: ReporterArticle = {
+      ...base,
+      narration: { prose: narration.prose, ...(narration.model ? { model: narration.model } : {}), nonCanonical: true },
+    };
+    saveReporterArticle(narrated);
+    res.json({ success: true, available: true, article: narrated });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'narration failed';
+    res.status(500).json({ success: false, available: false, error: message });
   }
 });
 
@@ -3487,6 +4011,24 @@ app.get('/api/recourse/selfhosted', (req, res) => {
   res.json({ success: true, count: entries.length, tools: entries });
 });
 
+// Capability-sandbox status: whether the WASM runtime is live, how many guest
+// contexts are warm, and the effective default execution path.
+app.get('/api/recourse/selfhosted/sandbox', async (req, res) => {
+  const runtimeAvailable = await isSandboxRuntimeAvailable();
+  const requestedDefault = (process.env.SELFHOST_SANDBOX || 'auto').toLowerCase();
+  const defaultMode =
+    requestedDefault === 'direct' || requestedDefault === '0' ? 'direct'
+    : runtimeAvailable ? 'sandbox' : 'direct';
+  res.json({
+    success: true,
+    runtime: 'quickjs-wasm',
+    runtimeAvailable,
+    defaultMode,
+    liveGuestContexts: runtimeAvailable ? getSandboxRuntime().liveContexts : 0,
+    grantsDefault: 'deny-all',
+  });
+});
+
 // Force a fresh, real re-verification of every self-hosted module.
 app.post('/api/recourse/selfhosted/verify', async (req, res) => {
   try {
@@ -3502,23 +4044,38 @@ app.post('/api/recourse/selfhosted/verify', async (req, res) => {
 app.post('/api/recourse/selfhosted/:name/execute', async (req, res) => {
   try {
     const { name } = req.params;
-    const { method, args = [] } = req.body ?? {};
+    const { method, args = [], mode } = req.body ?? {};
     const entry = getSelfHostedEntry(name);
     if (!entry) {
       return res.status(404).json({ success: false, error: `No self-hosted tool named "${toSafeModuleName(name)}"` });
     }
-    const result = await executeSelfHostedTool(entry.name, { method, args });
+    const execMode =
+      mode === 'sandbox' || mode === 'direct' || mode === 'auto'
+        ? mode
+        : (process.env.SELFHOST_SANDBOX || 'auto').toLowerCase() === 'direct'
+          ? 'direct'
+          : 'auto';
+    const result = await executeSelfHostedTool(entry.name, { method, args }, undefined, { mode: execMode });
     if (result.success === false) {
-      return res.status(400).json({ success: false, error: result.error });
+      return res.status(400).json({ success: false, error: result.error, mode: result.mode });
     }
     appendProvenanceEvent('selfhosted_tool_called', {
       tool: entry.name,
       method,
       templateId: entry.templateId,
       hash: entry.hash,
+      mode: result.mode,
       executionTimeMs: result.executionTimeMs
     });
-    res.json({ success: true, tool: entry.name, method, result: result.result, executionTimeMs: result.executionTimeMs });
+    res.json({
+      success: true,
+      tool: entry.name,
+      method,
+      mode: result.mode,
+      grantUse: result.grantUse ?? [],
+      result: result.result,
+      executionTimeMs: result.executionTimeMs
+    });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -6214,6 +6771,9 @@ interface GlobalLensPublishRecord {
 let globalLensLastPublish: GlobalLensPublishRecord | null = null;
 // Corpus scan + agenda refill: 30 min default (env override CORPUS_SCAN_MS).
 const CORPUS_SCAN_MS = Math.max(60_000, Number(process.env.CORPUS_SCAN_MS) || 30 * 60 * 1000);
+// SelfReporter cadence: one first-person dispatch roughly every 2 hours. A
+// dispatch is only written when the deterministic state fingerprint changes.
+const REPORTER_MS = Math.max(60_000, Number(process.env.REPORTER_MS) || 2 * 60 * 60 * 1000);
 
 function ensureScienceAutopilot(): void {
   scienceAutopilotOn = true;
@@ -6425,6 +6985,20 @@ function runBenchmarkCycle(): BenchmarkRun {
     total: run.total,
     solvedIds: run.solvedIds,
   });
+  // Self-attest the run in the durable hash-chained ledger (registry hash proves
+  // exactly which live sources were scored). Never let a ledger failure hide the
+  // run itself — the history above is already updated.
+  try {
+    const record = appendBenchmarkRun(run, { registryHash: registryAttestation(registry) });
+    appendProvenanceEvent('benchmark_attested', {
+      recordId: record.id,
+      hash: record.hash,
+      registryHash: record.registryHash,
+      deltaSolved: record.deltaSolved,
+    });
+  } catch (err: any) {
+    console.warn('[benchmark] ledger attestation failed:', err?.message ?? String(err));
+  }
   saveStateToDisk();
   return run;
 }
@@ -6538,6 +7112,22 @@ app.post('/api/recourse/benchmark/run', (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
+// Self-attested benchmark ledger: the hash-chained record of every run.
+app.get('/api/recourse/benchmark/ledger', (req, res) => {
+  const chain = verifyBenchmarkLedger();
+  res.json({ success: true, chain, records: readBenchmarkLedger().slice(-50) });
+});
+
+// Self-attested leaderboard: every recorded run ranked by solved count.
+app.get('/api/recourse/benchmark/leaderboard', (req, res) => {
+  const entries = benchmarkLeaderboard();
+  res.json({ success: true, count: entries.length, entries });
+});
+
+// Productized surfaces (telemetry / audio / wallet) are mounted from their own
+// router module — see src/routes/product.ts.
+app.use('/api/recourse', productRouter.router);
 
 app.get('/api/recourse/readout', async (req, res) => {
   const chain = verifyChainIntegrity();
@@ -7453,6 +8043,104 @@ app.get('/api/recourse/compose/song.json', (req, res) => {
     res.header('Access-Control-Allow-Origin', '*');
     res.header('Cache-Control', 'no-store');
     res.json(payload);
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message ?? String(err) });
+  }
+});
+
+/**
+ * Offline WAV render (audio actuator). Renders a composed track to real PCM
+ * audio — no DAW, no network. Query params mirror `compose/song.json`; add
+ * `stem=<part>` to render a single stem.
+ *   GET /api/recourse/compose/wav?style=jasper-ballad&seed=1&bars=8
+ */
+function composeBriefFromQuery(q: Record<string, unknown>) {
+  const style = typeof q.style === 'string' && listStyles().includes(q.style as any) ? q.style : 'steely-dan';
+  const seed = Number(q.seed) || 1;
+  const bars = [4, 8, 16].includes(Number(q.bars)) ? Number(q.bars) : 8;
+  const mode = q.mode === 'arr' ? 'arr' : 'loop';
+  const keyParam = q.key !== undefined && q.key !== '' ? Number(q.key) : undefined;
+  const major = q.major === 'true' ? true : q.major === 'false' ? false : undefined;
+  const bpmParam = q.bpm !== undefined && q.bpm !== '' ? Number(q.bpm) : undefined;
+  return {
+    mode: mode as 'loop' | 'arr',
+    brief: {
+      style: style as never,
+      seed,
+      bars,
+      title: `${style} ${mode}`,
+      ...(keyParam !== undefined && Number.isFinite(keyParam) ? { key: keyParam } : {}),
+      ...(major !== undefined ? { major } : {}),
+      ...(bpmParam !== undefined && Number.isFinite(bpmParam) && bpmParam > 0 ? { bpm: bpmParam } : {}),
+    },
+  };
+}
+
+app.get('/api/recourse/compose/wav', (req, res) => {
+  try {
+    const { mode, brief } = composeBriefFromQuery(req.query as Record<string, unknown>);
+    const track = mode === 'arr' ? composeArrangement(brief) : compose(brief);
+    const stem = typeof req.query.stem === 'string' ? req.query.stem : '';
+    const bytes = stem
+      ? renderStemToWav(track, stem as never)
+      : renderTrackToWav(track);
+    const suffix = stem ? `-${stem}` : '';
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Content-Type', 'audio/wav');
+    res.setHeader('Content-Disposition', `inline; filename="recourse-${track.style}${suffix}.wav"`);
+    res.setHeader('X-Recourse-Seed', String(track.seed));
+    res.send(Buffer.from(bytes));
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message ?? String(err) });
+  }
+});
+
+app.get('/api/recourse/compose/stems', (req, res) => {
+  try {
+    const { mode, brief } = composeBriefFromQuery(req.query as Record<string, unknown>);
+    const track = mode === 'arr' ? composeArrangement(brief) : compose(brief);
+    const parts = Array.from(new Set(track.events.map((e) => e.part)));
+    const inline = req.query.inline === '1';
+    const stems = parts.map((part) => {
+      const wav = renderStemToWav(track, part);
+      return {
+        part,
+        bytes: wav.byteLength,
+        ...(inline ? { base64: Buffer.from(wav).toString('base64') } : {}),
+      };
+    });
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Cache-Control', 'no-store');
+    res.json({ success: true, style: track.style, seed: track.seed, bpm: track.bpm, bars: track.bars, stems, hint: 'GET /api/recourse/compose/wav?stem=<part> for one stem' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message ?? String(err) });
+  }
+});
+
+/** Full realized Track as JSON — consumed by the browser Web MIDI sender. */
+app.get('/api/recourse/compose/track.json', (req, res) => {
+  try {
+    const { mode, brief } = composeBriefFromQuery(req.query as Record<string, unknown>);
+    const track = mode === 'arr' ? composeArrangement(brief) : compose(brief);
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Cache-Control', 'no-store');
+    res.json(track);
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message ?? String(err) });
+  }
+});
+
+/** Standard MIDI File download (real .mid bytes, importable by any DAW). */
+app.get('/api/recourse/compose/midi', (req, res) => {
+  try {
+    const { mode, brief } = composeBriefFromQuery(req.query as Record<string, unknown>);
+    const track = mode === 'arr' ? composeArrangement(brief) : compose(brief);
+    const bytes = toMidiBytes(track);
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Content-Type', 'audio/midi');
+    res.setHeader('Content-Disposition', `attachment; filename="recourse-${track.style}-${track.seed}.mid"`);
+    res.send(Buffer.from(bytes));
   } catch (err: any) {
     res.status(500).json({ success: false, error: err?.message ?? String(err) });
   }
@@ -9625,6 +10313,31 @@ function registerAllSchedulerJobs(): void {
   });
 
   register({
+    id: 'telemetry',
+    name: 'Environment Telemetry (machine + git)',
+    group: 'system',
+    cadenceMs: Math.max(15_000, Number(process.env.TELEMETRY_MS) || 60_000),
+    enabledByDefault: true,
+    run: async () => {
+      const snap = productRouter.recordTelemetry();
+      return { allowHeavy: snap.workWindow.allowHeavy, dirty: snap.git.dirtyCount, reason: snap.workWindow.reason };
+    },
+  });
+
+  register({
+    id: 'memory_consolidation',
+    name: 'Tiered Memory Consolidation (episodic -> semantic)',
+    group: 'system',
+    cadenceMs: Math.max(60_000, Number(process.env.MEMORY_CONSOLIDATION_MS) || 15 * 60 * 1000),
+    enabledByDefault: true,
+    run: async () => {
+      const created = consolidateSemanticMemory({ minClusterSize: 2 });
+      const status = memoryStoreStatus();
+      return { driver: status.kind, episodes: status.episodes, facts: status.facts, created: created.length };
+    },
+  });
+
+  register({
     id: 'keywire',
     name: 'Keywire Fleet Command (summary + services)',
     group: 'fleet',
@@ -9649,6 +10362,18 @@ function registerAllSchedulerJobs(): void {
       renderIssueDocs();
       renderIssueIndex();
       return { files: daily.files, issues: computeIssueProgress().length };
+    },
+  });
+
+  register({
+    id: 'self-reporter',
+    name: 'Self Reporter (first-person dispatch)',
+    group: 'reporting',
+    cadenceMs: REPORTER_MS,
+    enabledByDefault: true,
+    run: async () => {
+      const r = await generateSelfReporterArticle();
+      return { written: r.written, fingerprint: r.article.fingerprint, headline: r.article.headline, reason: r.reason };
     },
   });
 }

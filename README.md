@@ -33,6 +33,54 @@ been partially de-theatred. Current ground rules:
 - The recursive learner scores genes with real property-based tests
   (fast-check), folds real system outcomes into its state, and persists to a
   JSON ledger that replays bit-for-bit.
+- Tiered memory is durable: episodic runs and consolidated semantic facts are
+  stored in SQLite (WAL via `better-sqlite3`), not lost on restart. Semantic
+  consolidation is idempotent (a fingerprint cluster already represented is
+  never re-emitted) and runs on a scheduler cadence. A generalist gene (wins
+  across unrelated problems) can be auto-promoted to an exportable SKILL.md —
+  but only after its backing tool re-passes the sandbox suite and the oxlint
+  gate. A gene with no verified backing tool is reported `skipped`, never
+  promoted on a promise.
+- Deterministic replay: ledger ids are sequence-based (no wall-clock or
+  `Math.random`), the trend discovery ledger is a hash chain, and
+  `POST /api/recourse/replay` re-derives a stream from its records and compares
+  the result to live state. `stream: "goals"` recomputes progress from raw
+  attempts/claims and reports drift if the live counters disagree;
+  `stream: "trend"` recomputes the chain; `stream: "selfhosted"` re-runs every
+  stored suite. A mismatch is reported, never hidden.
+- Synergy engine completeness: real relational predicates (`relationExtract`)
+  from `@rel` annotations and translation-engine term pairs un-fail-close SME
+  alignment; directional stats (linear Granger F-test + histogram transfer
+  entropy + differencing) are available, with `ok:false` rather than noise under
+  sample minimums; a deterministic CBR operator ladder (null → reinstantiate)
+  plus oracle-metric and human-signoff proofs extend the resolver; and the model
+  drafter is injectable, fence-stripped, size-guarded, and only trusted after
+  sandbox execution.
+- Self-attested benchmark: every external benchmark run is appended to a
+  hash-chained ledger (`data/benchmark-ledger.jsonl`) carrying a registry
+  attestation of the exact live sources scored, with per-run deltas. Ranked
+  leaderboard at `GET /api/recourse/benchmark/leaderboard`; chain validity at
+  `/benchmark/ledger`.
+- Audio actuator: composed tracks render offline to real stereo PCM WAV
+  (`/compose/wav`, per-part stems via `?stem=`), download as Standard MIDI
+  (`/compose/midi`), play to a hardware MIDI device from the browser (Web MIDI),
+  and are A/B-rated for the learner in the new **A/B RATING LOOP** tab.
+- Expanded senses: a stateless transcription sidecar (faster-whisper) turns
+  audio/video into text — honestly reporting `ok:false` when the ASR backend is
+  absent; environment telemetry (machine load/memory via `os`, git state via the
+  real `git` binary) feeds a conservative work-window decision so heavy
+  autonomous jobs are not launched on a saturated host. Routes:
+  `/api/recourse/audio/*`, `/api/recourse/telemetry`.
+- Budgeted action wallet: a durable, hash-chained spend ledger with per-token
+  budgets. The sandbox `spend` grant is enforced against a real balance, and the
+  autopilot's auto-merge is gated on a funded `merge` budget (checked in
+  `checkAndMerge`, wired through the autopilot cron). Routes:
+  `/api/recourse/wallet*`.
+- Productized API: an OpenAPI 3.1 document at `/api/openapi.json`, a discoverable
+  operation index at `/api/recourse/routes`, and a typed, dependency-free SDK
+  (`src/lib/recourseSdk.ts`, `createRecourseSdk({ baseUrl, secret })`). The
+  telemetry/audio/wallet routes now live in their own
+  `src/routes/product.ts` router, continuing the decomposition of `server.ts`.
 - The dreaming engine and the subagent swarm are driven by the configured local
   model (e.g. Qwen3.5-4B). Dream REM cycles ask the model for a hypothesis with
   real code + tests; those thoughts only promote after the code passes the
@@ -53,11 +101,20 @@ been partially de-theatred. Current ground rules:
   (`registerComponentTemplatePlugin` in `src/lib/templatePlugin.ts`). Code
   templates declare a `selfHost` descriptor, so a build that passes its real
   test suite + the oxlint gate can be **self-hosted**: its code is written to
-  `.selfhosted/tools/<name>.mjs`, dynamically imported by the running server,
-  and callable through `/api/recourse/selfhosted/<name>/execute`. At boot every
-  self-hosted module is re-verified for real (fresh import + stored suite
-  re-run). This is the dogfood loop — Recourse runs modules it built from its
-  own templates (see the "SELF-HOSTED TOOLS" tab in the Structural Forge).
+  `.selfhosted/tools/<name>.mjs` and callable through
+  `/api/recourse/selfhosted/<name>/execute`. At boot every self-hosted module is
+  re-verified for real (fresh import + stored suite re-run).
+- Self-hosted tools are executed inside a **real capability sandbox**
+  (QuickJS compiled to WebAssembly, `quickjs-emscripten`), not by direct import.
+  The stored source is compiled into a self-contained guest program; host
+  capabilities (fs/net/secrets/spend) are **default-deny** and every check is
+  recorded. `GET /api/recourse/selfhosted/sandbox` reports whether the runtime
+  is live. The stored suite is re-run a second time *inside* the sandbox as an
+  independent signal (recorded per tool as `lastSandboxVerified`).
+- Stateful tools keep their state across calls because the sandbox retains one
+  guest context per tool+program. This is the dogfood loop — Recourse runs
+  modules it built from its own templates inside its own sandbox (see the
+  "SELF-HOSTED TOOLS" tab in the Structural Forge).
 - A template plugin can be added as a single standalone module — see
   `src/lib/templatePlugins/bloomFilter.ts` for the pattern used by a
   third-party-style add-on.
@@ -67,10 +124,19 @@ Honest limits of self-hosting:
 - Only templates that declare a `selfHost` descriptor can self-host; others
   still register as sandbox-only genes, and self-hosted tools only expose the
   plugin-declared method whitelist (unknown methods are rejected).
-- Stateful self-hosted tools (e.g. the LRU cache) keep one module-level
-  instance across calls until the server restarts.
+- The sandbox is the default execution path, but the old direct import remains
+  as an explicitly *labelled* fallback for entries the sandbox cannot represent
+  (legacy stateful entries missing recorded constructor params, or tools that
+  need Node-only globals). A grant denial or a tool error never falls back —
+  only genuine unavailability/setup limits do, and the response carries the
+  `mode` that actually ran.
+- Generated guest code cannot see Node globals (`process`, `require`) or touch
+  the host fs/net/env/ledger without a grant; the fs driver is additionally
+  confined to its own on-disk root.
 - Self-hosted modules are self-contained logic — they do not yet generate UI
   views.
+- The sandbox has no snapshot/pause-resume yet, and Python tools still run in
+  the separate sidecars rather than in-sandbox Pyodide.
 
 Known remaining theater (not yet replaced):
 
@@ -78,6 +144,23 @@ Known remaining theater (not yet replaced):
   cannot fact-check clinical literature.
 - The recursive-math "five formulas" panels describe abstract math in physical
   language; they are derived numerics, not physical measurements.
+
+## Agent surfaces (MCP + A2A)
+
+- **MCP server** (`mcp-server.ts`, stdio): the full recursive loop is exposed as
+  tools. Read tools reflect live state; write tools route through the guarded
+  REST endpoints and require `RECOURSE_API_SECRET` (fail-closed). Beyond the
+  original status/registry/skills tools it now includes `recourse.run_forge`,
+  `recourse.execute_selfhosted`, `recourse.sandbox_status`,
+  `recourse.memory_tiered`, `recourse.recall_memory`, `recourse.inspect_learner`,
+  `recourse.consolidate_memory`, `recourse.promote_skills`, `recourse.revert`,
+  and `recourse.problems`.
+- **A2A endpoint**: an Agent Card is served at `GET /.well-known/agent.json`,
+  and `POST /api/a2a` speaks JSON-RPC 2.0 (`message/send`, `tasks/get`). A text
+  part names a skill (e.g. `recourse.status`); the result comes back as a task
+  artifact. Mutating skills require the same mutation authorization as REST and
+  return HTTP 401 otherwise — never a fabricated success. The handler is pure
+  over injected operations and unit-tested (`tests/a2a.test.ts`).
 
 ## Python sidecars (optional)
 
@@ -134,6 +217,30 @@ client `src/lib/vizSidecarClient.ts`; proxy routes under `/api/recourse/viz/*`.
 Honest scope: these are fixed teaching scenarios (each hardcodes its own
 data/formula) — they are not yet parameterized "visualize Recourse's data"
 endpoints. That is a separate, future capability.
+
+### Ghidra reverse-engineering sidecar (`python/ghidra_service`, port 8510)
+
+Real NSA [Ghidra](https://github.com/NationalSecurityAgency/ghidra) headless
+analysis: a binary is imported into a throwaway project, auto-analyzed, and
+exported by the bundled decompiler post-script. `GET /health`,
+`GET /ghidra/formats`, `POST /ghidra/analyze {data_base64, filename?}`,
+`POST /ghidra/entropy {data_base64}`. Configured via `GHIDRA_SIDECAR_URL`;
+client `src/lib/ghidraSidecarClient.ts`; routes under `/api/recourse/ghidra/*`.
+Findings (risky imports, RWX sections, packer hints, oversized functions) are
+deterministic heuristics over the real output — never a fabricated disassembly.
+When Ghidra/JDK are absent the sidecar reports `available:false` and analysis
+returns `ok:false`. The **GHIDRA RE** tab drives it.
+
+The learning hook `POST /ghidra/learn` folds a real analysis into the recursive
+learner (per-artifact reward), durable vector memory, the provenance chain, and
+the self-repair loop (high-risk artifacts become failing `anomaly` signals +
+repair rows). See `docs/ghidra-integration.md` for setup and secure-build tips.
+
+```bash
+cd python/ghidra_service && pip install -r requirements.txt
+set GHIDRA_HOME=C:\ghidra_11.2.1_PUBLIC
+uvicorn main:app --host 127.0.0.1 --port 8510
+```
 
 ```bash
 # one terminal per service

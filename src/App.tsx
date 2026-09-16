@@ -16,6 +16,7 @@ import {
   ToolRegistryView,
   VerifierMatrixView,
   HourlyReportView,
+  SelfReporterView,
   AiMutatorModal,
   SelfRepairView,
   ExternalBenchmarkView,
@@ -30,12 +31,14 @@ import {
   ProviderView,
   MusicTherapyView,
   MusicView,
+  RatingPairPlayer,
   IntakeAndGrowthView,
   CorpusView,
   SkillsView,
   WebDownloadView,
   SettingsView,
   DataVizView,
+  GhidraView,
   GamepadVisualizer
 } from './components';
 import {
@@ -95,6 +98,8 @@ import {
    Settings,
    Gamepad2,
    BarChart3,
+  Binary,
+  Newspaper,
   Music
 } from 'lucide-react';
 
@@ -243,6 +248,7 @@ type TabKey =
   | 'provider'
   | 'music-therapy'
   | 'music'
+  | 'rating'
   | 'recursive-math'
   | 'recursive-learner'
   | 'decision'
@@ -256,12 +262,14 @@ type TabKey =
   | 'registry'
   | 'verifier'
    | 'reports'
+  | 'reporter'
   | 'intake-growth'
   | 'corpus'
   | 'skills'
   | 'web'
   | 'visualizer'
   | 'dataviz'
+  | 'ghidra'
   | 'gamepad'
   | 'settings';
 
@@ -313,6 +321,16 @@ const TABS: Array<{
     badge: () => (
       <span className="px-1.5 py-0.2 bg-emerald-950 text-emerald-300 text-[10px] rounded border border-emerald-800 font-bold">
         PROGRESSIONS
+      </span>
+    ),
+  },
+  {
+    key: 'rating',
+    label: 'A/B RATING LOOP',
+    icon: <Activity className="w-4 h-4 text-amber-400" />,
+    badge: () => (
+      <span className="px-1.5 py-0.2 bg-amber-950 text-amber-300 text-[10px] rounded border border-amber-800 font-bold">
+        AUDIO
       </span>
     ),
   },
@@ -446,6 +464,16 @@ const TABS: Array<{
     ),
   },
   {
+    key: 'ghidra',
+    label: 'GHIDRA RE',
+    icon: <Binary className="w-4 h-4 text-emerald-400" />,
+    badge: () => (
+      <span className="px-1.5 py-0.2 bg-emerald-950 text-emerald-300 text-[10px] rounded border border-emerald-800 font-bold">
+        NSA
+      </span>
+    ),
+  },
+  {
     key: 'gamepad',
     label: 'GAMEPAD',
     icon: <Gamepad2 className="w-4 h-4 text-emerald-400" />,
@@ -488,6 +516,16 @@ const TABS: Array<{
     badge: (_, count) => (
       <span className="px-1.5 py-0.2 bg-slate-950 text-[10px] rounded border border-slate-800">
         {count || 0}
+      </span>
+    ),
+  },
+  {
+    key: 'reporter',
+    label: 'SELF REPORTER',
+    icon: <Newspaper className="w-4 h-4 text-cyan-400" />,
+    badge: () => (
+      <span className="px-1.5 py-0.2 bg-cyan-950 text-cyan-300 text-[10px] rounded border border-cyan-800 font-bold">
+        AUTO
       </span>
     ),
   },
@@ -1107,6 +1145,10 @@ export default function App() {
               <MusicView />
             )}
 
+            {activeTab === 'rating' && (
+              <RatingPairPlayer onNotify={showToast} />
+            )}
+
             {activeTab === 'recursive-math' && (
               <RecursiveLoopView onNotify={showToast} />
             )}
@@ -1193,6 +1235,10 @@ export default function App() {
               />
             )}
 
+            {activeTab === 'reporter' && (
+              <SelfReporterView />
+            )}
+
             {activeTab === 'intake-growth' && (
               <IntakeAndGrowthView />
             )}
@@ -1221,6 +1267,9 @@ export default function App() {
             )}
             {activeTab === 'dataviz' && (
               <DataVizView />
+            )}
+            {activeTab === 'ghidra' && (
+              <GhidraView />
             )}
             {activeTab === 'settings' && (
               <SettingsView />
