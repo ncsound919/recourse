@@ -27,6 +27,7 @@
     "node_modules",
     "dist",
     ".next",
+    "skills-out",
     "bisim and abm",
     "deteministic researcher",
     "recourse-fix-bundle"
