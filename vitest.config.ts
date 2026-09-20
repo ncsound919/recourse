@@ -7,7 +7,16 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    exclude: ['**/node_modules/**', '**/dist/**', '**/recourse-fix-bundle/**'],
+    exclude: [
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/recourse-fix-bundle/**',
+      // Generated self-hosted tool artifacts (raw `assert` scripts, not vitest
+      // suites) written by the forge/learner loops. They are runtime output,
+      // not the test suite, and were producing 13 phantom collection failures.
+      '**/skills-out/**',
+      '**/.selfhosted/**',
+    ],
     // Real service probes in science/orchestrator tests need room under
     // full-suite parallel load (vitest default 5s was flaky).
     testTimeout: 30000,

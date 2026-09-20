@@ -25,6 +25,7 @@
 //
 // The seed mirrors the episode rng seed, so replays stay bit-identical.
 
+import { createRequire } from 'node:module';
 import { mulberry32 } from './engine';
 
 /* ------------------------- module bootstrap ------------------------ */
@@ -32,12 +33,26 @@ import { mulberry32 } from './engine';
 let fcModule: any = null;
 let fcAttempted = false;
 
+/** Resolve a CommonJS `require` in both CJS (bundled server) and ESM (tsx/dev).
+ *  Without this, `typeof require === 'function'` is false under tsx and every
+ *  optional dependency silently degrades — which made the property gate a
+ *  no-op in the exact runtime the dev server uses. */
+function resolveRequire(): NodeRequire | null {
+  if (typeof require === 'function') return require;
+  try {
+    const metaUrl = typeof import.meta !== 'undefined' && import.meta.url ? import.meta.url : undefined;
+    return metaUrl ? createRequire(metaUrl) : null;
+  } catch {
+    return null;
+  }
+}
+
 function getFc(): any | null {
   if (fcAttempted) return fcModule;
   fcAttempted = true;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    fcModule = typeof require === 'function' ? require('fast-check') : null;
+    const req = resolveRequire();
+    fcModule = req ? req('fast-check') : null;
   } catch {
     fcModule = null;
   }
@@ -48,8 +63,8 @@ function getFc(): any | null {
 
 function sandboxEval(source: string): (input: unknown) => unknown {
   const tryCompile = (code: string) => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const vm: any = typeof require === 'function' ? require('node:vm') : null;
+    const req = resolveRequire();
+    const vm: any = req ? req('node:vm') : null;
     if (vm && vm.Script) {
       const script = new vm.Script(`(${code})`);
       return script.runInContext(vm.createContext({}), { timeout: 500 });
@@ -62,8 +77,9 @@ function sandboxEval(source: string): (input: unknown) => unknown {
     if (err instanceof SyntaxError) {
       // TypeScript genes are transpiled with esbuild (same honest path as the
       // execution sandbox) before the property harness evaluates them.
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { prepareExecutableCode } = require('../lib/executionSandbox');
+      const req = resolveRequire();
+      if (!req) throw err;
+      const { prepareExecutableCode } = req('../lib/executionSandbox');
       return tryCompile(prepareExecutableCode(source));
     }
     throw err;
@@ -179,7 +195,12 @@ export function propertyScore(
     ];
 
     const results: PropertyResult[] = properties.map((p) => {
-      const out = fc.check(fc.property(arbitrary, p.predicate), { seed, numRuns: runsPerProperty });
+      // `endOnFailure: true` stops at the first counterexample instead of
+      // shrinking it. The InputPurity predicate deliberately mutates its
+      // sample, and fast-check's shrinker can loop forever on a mutating
+      // predicate (observed: a synchronous hang). Shrinking does not change
+      // pass/fail or the score, so stopping early is strictly safer here.
+      const out = fc.check(fc.property(arbitrary, p.predicate), { seed, numRuns: runsPerProperty, endOnFailure: true });
       return {
         name: p.name,
         passed: !out.failed,

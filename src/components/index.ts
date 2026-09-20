@@ -32,6 +32,8 @@ export { RecourseVisualizer3D } from './RecourseVisualizer3D';
 export { DataVizView } from './DataVizView';
 export { GhidraView } from './GhidraView';
 export { SettingsView } from './SettingsView';
+export { VoiceCloneView } from './VoiceCloneView';
+export { FleetVoiceView } from './FleetVoiceView';
 
 export { GamepadIndicator } from './GamepadIndicator';
 export { GamepadVisualizer } from './GamepadVisualizer';

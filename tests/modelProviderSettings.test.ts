@@ -16,8 +16,8 @@ beforeEach(() => {
   for (const k of ENV) prev[k] = process.env[k];
   process.env.MODEL_BASE_URL = 'https://api.example.test/v1';
   process.env.MODEL_NAME = 'api-model';
-  process.env.LOCAL_MODEL_BASE_URL = 'http://localhost:11434/v1';
-  process.env.LOCAL_MODEL_NAME = 'qwen-local';
+  process.env.LOCAL_MODEL_BASE_URL = 'http://127.0.0.1:11434/v1';
+  process.env.LOCAL_MODEL_NAME = 'minicpm5-2b';
 });
 afterEach(() => {
   for (const k of ENV) {
@@ -36,8 +36,8 @@ describe('model provider profile switching', () => {
     expect(api.model).toBe('api-model');
     expect(api.label).toBe('Phoenix Grove');
     const local = ps.find((p) => p.id === 'local')!;
-    expect(local.baseUrl).toBe('http://localhost:11434/v1');
-    expect(local.model).toBe('qwen-local');
+    expect(local.baseUrl).toBe('http://127.0.0.1:11434/v1');
+    expect(local.model).toBe('minicpm5-2b');
     expect(local.label).toBe('Local (configured)');
   });
 
@@ -46,11 +46,11 @@ describe('model provider profile switching', () => {
     expect(providerStatus().baseUrl).toBe('https://api.example.test/v1');
     expect(providerStatus().model).toBe('api-model');
 
-    // switch to local Ollama
+    // switch to the local Spark profile
     expect(setActiveProviderProfile('local')).toBe('local');
     expect(activeProviderProfile()).toBe('local');
-    expect(providerStatus().baseUrl).toBe('http://localhost:11434/v1');
-    expect(providerStatus().model).toBe('qwen-local');
+    expect(providerStatus().baseUrl).toBe('http://127.0.0.1:11434/v1');
+    expect(providerStatus().model).toBe('minicpm5-2b');
 
     // back to api
     setActiveProviderProfile('api');

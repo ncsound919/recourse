@@ -18,7 +18,7 @@ function ctx(): ReadoutContext {
       pendingApprovalsCount: 0,
       lastTickTime: Date.now(),
       aiStudioModel: 'qwen3.8-4b-distill:q4_k_m',
-      providerStatus: { kind: 'x', baseUrl: 'http://localhost:11434/v1', model: 'qwen', online: true },
+      providerStatus: { kind: 'x', baseUrl: 'http://127.0.0.1:11434/v1', model: 'minicpm5-2b', online: true },
       selfRepair: { isAutoHealingEnabled: true, totalHealedCount: 2, activeAnomaliesCount: 0, meanTimeToRepairMs: 120, repairSuccessRate: 1 },
       hyperParams: {} as any,
       domainCoverage: {

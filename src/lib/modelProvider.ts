@@ -3,9 +3,9 @@
  *
  * Phoenix Grove (https://api.pgsgrove.com/v1, model deepseek-v4-flash-0731)
  * is the remote generation target. The 'local' profile points at a local
- * OpenAI-compatible endpoint (e.g. colibri serving OLMoE at
- * http://127.0.0.1:8000/v1) and is used, local-first with API fallback, for
- * non-agentic generation — see pickGenerationProfile. With no
+ * OpenAI-compatible endpoint (the llama.cpp `llama-server` serving the MiniCPM5
+ * model at http://127.0.0.1:11434/v1) and is used, local-first with API
+ * fallback, for non-agentic generation — see pickGenerationProfile. With no
  * LOCAL_MODEL_BASE_URL set it reports offline honestly.
  *
  * Honesty contract: when the endpoint is unreachable this module reports
@@ -24,14 +24,44 @@ export interface ProviderConfig {
   thinking: boolean;
 }
 
+export type ChatRole = 'system' | 'user' | 'assistant' | 'tool';
+
+/** A model-requested function call (OpenAI-compatible shape). */
+export interface ToolCall {
+  id: string;
+  type: 'function';
+  function: { name: string; arguments: string };
+}
+
+/** An OpenAI-compatible function tool the model may call. */
+export interface OpenAITool {
+  type: 'function';
+  function: {
+    name: string;
+    description?: string;
+    parameters?: Record<string, unknown>;
+  };
+}
+
+export type ToolChoice = 'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } };
+
 export interface ChatMessage {
-  role: 'system' | 'user' | 'assistant';
+  role: ChatRole;
   content: string;
+  /** Assistant turns that invoke tools carry the requested calls here. */
+  tool_calls?: ToolCall[];
+  /** Set on `role: 'tool'` messages; matches the assistant's tool_call id. */
+  tool_call_id?: string;
+  /** Optional function name on a tool message. */
+  name?: string;
 }
 
 export interface ChatCompleteOptions {
   temperature?: number;
   json?: boolean;
+  /** Function tools the model may call. When present, `json` is ignored. */
+  tools?: OpenAITool[];
+  toolChoice?: ToolChoice;
 }
 
 export interface ChatCompleteResult {
@@ -43,6 +73,12 @@ export interface ChatCompleteResult {
   latencyMs: number;
   /** Real token counts when the provider reported them; estimated otherwise. */
   usage?: ModelUsageTokens;
+  /** Tool calls the model requested on this turn (empty/absent when none). */
+  toolCalls?: ToolCall[];
+  /** Provider finish_reason, e.g. 'stop' | 'tool_calls' | 'length'. */
+  finishReason?: string;
+  /** Separate reasoning text some servers emit (e.g. llama-server). */
+  reasoning?: string;
 }
 
 export interface ModelUsageTokens {
@@ -173,7 +209,7 @@ export type ChatRoute = 'local' | 'api' | 'auto';
  *  does NOT call chatComplete — it goes through the harness LLM / LiteLLM — so
  *  this policy never changes agentic routing.
  *
- *  'auto' (default) prefers the local colibri model when one is configured,
+ *  'auto' (default) prefers the local MiniCPM5 model when one is configured,
  *  and falls back to the API profile when local is offline or the prompt is too
  *  large for a CPU-streamed model. Force with RECOURSE_GENERATION_PROFILE. */
 export type GenerationProfilePreference = 'auto' | 'local' | 'api';
@@ -227,7 +263,7 @@ export function providerProfiles(): Array<{ id: ProviderProfileId; label: string
   const l = profileFor('local');
   return [
     { id: 'api', label: 'Phoenix Grove', baseUrl: a.baseUrl, model: a.model },
-    { id: 'local', label: localModelConfigured() ? 'Local (configured)' : 'Local (not configured)', baseUrl: l.baseUrl || 'http://127.0.0.1:8000/v1', model: l.model || 'no local model' },
+    { id: 'local', label: localModelConfigured() ? 'Local (configured)' : 'Local (not configured)', baseUrl: l.baseUrl || 'http://127.0.0.1:11434/v1', model: l.model || 'no local model' },
   ];
 }
 
@@ -272,15 +308,10 @@ async function chatCompleteFor(
   };
   if (typeof opts.temperature === 'number') body.temperature = opts.temperature;
 
-  let endpoint = `${cfg.baseUrl}/chat/completions`;
-  const isNativeOllama = cfg.baseUrl.includes(':11434') || (cfg.baseUrl.includes('localhost') && !cfg.baseUrl.includes('v1'));
-  if (isNativeOllama && cfg.baseUrl) {
-    const nativeBase = cfg.baseUrl.replace(/\/v1$/, '');
-    endpoint = `${nativeBase}/api/chat`;
-    body.options = {
-      num_ctx: cfg.numCtx,
-      think: cfg.thinking,
-    };
+  const endpoint = `${cfg.baseUrl}/chat/completions`;
+  if (opts.tools && opts.tools.length > 0) {
+    body.tools = opts.tools;
+    body.tool_choice = opts.toolChoice ?? 'auto';
   } else if (opts.json) {
     body.response_format = { type: 'json_object' };
   }
@@ -311,11 +342,32 @@ async function chatCompleteFor(
     }
 
     const data: any = await res.json();
-    const isNativeOllama = cfg.baseUrl.includes(':11434') || (cfg.baseUrl.includes('localhost') && !cfg.baseUrl.includes('v1'));
-    const content: string | null = isNativeOllama && cfg.baseUrl
-      ? (data?.message?.content ?? null)
-      : (data?.choices?.[0]?.message?.content ?? null);
-    if (typeof content !== 'string' || content.trim().length === 0) {
+    const choice = data?.choices?.[0];
+    const message = choice?.message ?? {};
+    const content: string | null = typeof message.content === 'string' ? message.content : null;
+    const toolCalls: ToolCall[] | undefined = Array.isArray(message.tool_calls) && message.tool_calls.length
+      ? message.tool_calls
+          .filter((t: any) => t && t.type === 'function' && t.function && typeof t.function.name === 'string')
+          .map((t: any) => ({
+            id: String(t.id ?? ''),
+            type: 'function' as const,
+            function: {
+              name: String(t.function.name),
+              arguments: typeof t.function.arguments === 'string'
+                ? t.function.arguments
+                : JSON.stringify(t.function.arguments ?? {}),
+            },
+          }))
+      : undefined;
+    const finishReason: string | undefined = typeof choice?.finish_reason === 'string' ? choice.finish_reason : undefined;
+    const reasoning: string | undefined =
+      typeof message.reasoning_content === 'string' && message.reasoning_content.trim()
+        ? message.reasoning_content
+        : undefined;
+
+    // A turn that requests tools legitimately has empty content; only content-less
+    // turns with no tool calls are an honest error.
+    if ((content === null || content.trim().length === 0) && !(toolCalls && toolCalls.length)) {
       onlineCache[profileId].error = 'model returned empty content';
       return {
         ok: false,
@@ -327,22 +379,15 @@ async function chatCompleteFor(
       };
     }
 
-    // Token accounting: prefer the provider's real counts (OpenAI `usage`, or
-    // Ollama's `prompt_eval_count`/`eval_count`), fall back to a length estimate
-    // clearly flagged as such.
-    let promptTokens = 0;
-    let completionTokens = 0;
+    // Token accounting: prefer the provider's real OpenAI `usage` counts, fall
+    // back to a length estimate clearly flagged as such.
+    let promptTokens = Number(data?.usage?.prompt_tokens) || 0;
+    let completionTokens = Number(data?.usage?.completion_tokens) || 0;
     let estimated = false;
-    if (isNativeOllama && cfg.baseUrl) {
-      promptTokens = Number(data?.prompt_eval_count) || 0;
-      completionTokens = Number(data?.eval_count) || 0;
-    } else {
-      promptTokens = Number(data?.usage?.prompt_tokens) || 0;
-      completionTokens = Number(data?.usage?.completion_tokens) || 0;
-    }
     if (promptTokens === 0 && completionTokens === 0) {
       promptTokens = messages.reduce((n, m) => n + estimateTokens(m.content), 0);
-      completionTokens = estimateTokens(content);
+      const completionText = content && content.trim() ? content : (toolCalls ? JSON.stringify(toolCalls) : '');
+      completionTokens = estimateTokens(completionText);
       estimated = true;
     }
     const usage: ModelUsageTokens = {
@@ -363,6 +408,9 @@ async function chatCompleteFor(
       error: undefined,
       latencyMs,
       usage,
+      toolCalls,
+      finishReason,
+      reasoning,
     };
   } catch (err: any) {
     const aborted = err?.name === 'AbortError';

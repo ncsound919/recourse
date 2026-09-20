@@ -1,7 +1,9 @@
 # Recourse — one-command local deploy.
 #   docker compose up --build
-# The server defaults to the local `ollama` service for generation. Point
-# MODEL_BASE_URL at a remote OpenAI-compatible endpoint to skip Ollama.
+# Generation uses the configured OpenAI-compatible provider. Set MODEL_BASE_URL
+# in .env (or the shell) to point at a reachable endpoint. For a model server
+# running on the host (e.g. llama-server on :11434), use
+# MODEL_BASE_URL="http://host.docker.internal:11434/v1".
 services:
   recourse:
     build: .
@@ -11,25 +13,13 @@ services:
     env_file:
       - .env
     environment:
-      # Inside the compose network the model server is reachable by name.
-      MODEL_BASE_URL: ${MODEL_BASE_URL:-http://ollama:11434/v1}
+      MODEL_BASE_URL: ${MODEL_BASE_URL:-https://api.pgsgrove.com/v1}
       PORT: "3050"
     volumes:
       - recourse-data:/app/data
       - recourse-selfhosted:/app/.selfhosted
-    depends_on:
-      - ollama
-    restart: unless-stopped
-
-  ollama:
-    image: ollama/ollama:latest
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama-models:/root/.ollama
     restart: unless-stopped
 
 volumes:
   recourse-data:
   recourse-selfhosted:
-  ollama-models:

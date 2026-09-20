@@ -10,7 +10,7 @@
  *    `EMBEDDING_BASE_URL || API_MODEL_BASE_URL`); if unset/unavailable it falls
  *    back to a deterministic lexical hash vector. Both are FIXED at DIM=768 so
  *    rows never mix dimensions. The chosen backend is reported in `status()` —
- *    never implied. No localhost/Ollama probe is ever made.
+ *    never implied. No localhost probe is ever made.
  *  - STORAGE: persists to a LanceDB directory when the native module loads;
  *    otherwise it transparently degrades to an in-memory cosine store (same
  *    interface) so the learner always works offline. The store type is

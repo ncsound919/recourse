@@ -280,11 +280,13 @@ describe.skipIf(!avail)('isolated-vm test suite execution', () => {
     expect(r.passed).toBe(true);
   });
 
-  it('leaves a single-arg assert.ok unrewritten, which aborts honestly', () => {
+  it('runs a single-arg assert.ok through the DSL shim (no longer aborts)', () => {
     const r = executeTestSuiteInIsolate(src, 'assert.ok(add(1,2) === 3)');
     expect(r.available).toBe(true);
+    // The shim binds assert.ok, so the body executes instead of aborting with
+    // "assert is not defined"; with no __assert records it is still not a pass.
     expect(r.passed).toBe(false);
-    expect(r.testDetails[0]).toContain('Test body aborted with uncaught error');
+    expect(r.testDetails.some((d) => d.includes('aborted'))).toBe(false);
   });
 
   it('aborts on an empty assert call', () => {

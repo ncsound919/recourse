@@ -10,10 +10,13 @@ has a real sandboxed test suite behind it.
 1. `npm install`
 2. Copy `.env.example` to `.env` and set `MODEL_BASE_URL` and `MODEL_NAME`.
 3. Start your model server. Prerequisites: Node.js 18+, and (for generative
-   features) any OpenAI-compatible model server — Ollama is the default target.
-   Set `MODEL_NAME` in `.env` to whichever model you have pulled (the default in
-   `.env.example` is `qwen3.8-4b-distill:q4_k_m`); leave
-   `MODEL_BASE_URL="http://localhost:11434/v1"` for a local Ollama.
+   features) any OpenAI-compatible model server. The default local target is
+   MiniCPM5-2B served by llama.cpp's `llama-server` — use `start-local.ps1`, which
+   enables tool-call reliability and CPU speed:
+   `llama-server -m MiniCPM5-2B-Q4_K_M.gguf --host 127.0.0.1 --port 11434 -c 8192 --alias minicpm5-2b --jinja --spec-type ngram-mod --spec-ngram-mod-n-match 24`.
+   Set `LOCAL_MODEL_BASE_URL="http://127.0.0.1:11434/v1"` and
+   `LOCAL_MODEL_NAME="minicpm5-2b"` in `.env`; leave `MODEL_BASE_URL` /
+   `MODEL_NAME` pointed at your remote API for the automatic fallback.
 4. `npm run dev` → http://localhost:3000
 
 ## What is real (and what is not)
@@ -82,7 +85,8 @@ been partially de-theatred. Current ground rules:
   telemetry/audio/wallet routes now live in their own
   `src/routes/product.ts` router, continuing the decomposition of `server.ts`.
 - The dreaming engine and the subagent swarm are driven by the configured local
-  model (e.g. Qwen3.5-4B). Dream REM cycles ask the model for a hypothesis with
+  model (the MiniCPM5 model served by llama-server), with the remote API as
+  fallback. Dream REM cycles ask the model for a hypothesis with
   real code + tests; those thoughts only promote after the code passes the
   sandbox. Subagent tasks are queued and worked by the same model — a task only
   completes when the produced code passes the verifier, at which point the tool
@@ -95,8 +99,49 @@ been partially de-theatred. Current ground rules:
 - A real open-source lint gate (oxlint) runs on code-domain candidates before
   promotion; `eval`/`debugger`/`const`-reassignment/unreachable code blocks
   promotion when the linter is installed.
-- A Local Model Manager (Ollama view) drives the real `ollama pull` CLI so you
-  can fetch a model such as `hf.co/Qwen/Qwen3.5-4B` from inside the app.
+- Model generation is local-first: the model registered with the local
+  OpenAI-compatible profile is preferred, with an automatic, honest fallback to
+  the remote API profile. The AI PROVIDER tab shows the live endpoint and lets
+  you switch profile.
+- Local-model hardening for tool/skill use (research-backed):
+  - the agent loop exposes only a **task-relevant tool shortlist** per turn
+    (`src/lib/toolSelect.ts`, `AGENT_TOOLS_MAX_PER_TURN`) plus an
+    `agent_search_tools` meta-tool, because accuracy degrades past ~15–20 tools;
+  - tool arguments are **alias-normalized and schema-validated**
+    (`src/lib/toolArgs.ts`), with one off-cap strict-JSON repair before a call is
+    counted malformed (`AGENT_TOOLS_REPAIR`);
+  - skills use **hybrid lexical+semantic retrieval** and optional LLM rerank
+    (`AGENT_SKILLS_RERANK`), and inject metadata for top matches with only the
+    best `SKILL.md` body (`AGENT_SKILLS_BODY_CHARS`);
+  - the recommended llama-server launch adds `--jinja` (native tool template +
+    schema-constrained args) and `--spec-type ngram-mod` (draftless CPU
+    speedup) — see `start-local.ps1`;
+- Model-native tool calling: the model can call Recourse tools through
+  OpenAI-compatible `tools`/`tool_calls`. The bounded agent loop
+  (`src/lib/toolCalling.ts`) exposes sandboxed self-hosted tools (`selfhosted_*`),
+  read-only host operations (`system_*`), **one or more MCP servers**
+  (`mcp_<server>__*`, configured via `RECOURSE_MCP_SERVERS`), the on-disk skill
+  tools (`skills_*`), **live REST operations** (`route_*`, auto-registered from
+  the OpenAPI index), and **signed peer skills** (`federation_*`). Each run
+  retrieves a small relevant shortlist, normalizes/validates arguments, and
+  records every call to provenance (`agent_tool_called`). Mutating tools are
+  gated per-tool: read tools run freely, state changes require
+  `RECOURSE_API_SECRET`. Routes: `GET/POST /api/recourse/agent/tools`. The
+  subagent swarm uses the same loop; `scripts/eval-tool-calling.ts` is the local
+  regression harness.
+- On-disk skill libraries are usable by the model: `skills_list` / `skills_read` /
+  `skills_file` discover and read any `SKILL.md` from the configured roots
+  (Draymond agents/skills, ECC — 480+ skills), and `skills_run` executes a
+  skill's bundled script (python/node/ps1) in its directory with a timeout and
+  output caps, returning the real exit code/stdout/stderr. Read-only stays honest
+  when a skill is prose-only; `AGENT_SKILLS_EXEC="0"` disables execution.
+- Autonomous skill use: the self-improvement and research loops (dream, forge,
+  mutator, AI self-evolver, math conductor, biotech claims, synergy drafter)
+  search the catalog for skills relevant to each task, inject the matching
+  `SKILL.md`, and — where safe — let the model call the skills tools itself
+  before answering (`src/lib/skillContext.ts`). Strict-JSON paths fall back to a
+  plain JSON call if the tool loop cannot produce usable output. Tune or disable
+  with `AGENT_SKILLS_AUTONOMY*`.
 - Templates are registered through a plugin API
   (`registerComponentTemplatePlugin` in `src/lib/templatePlugin.ts`). Code
   templates declare a `selfHost` descriptor, so a build that passes its real
@@ -313,6 +358,12 @@ peer, not just a tool source.
 - **OpenHub** proxies Recourse's status, synergy, registry, forge, learner and
   provenance surface under `/api/recourse/*` and folds recalls into skill
   matching.
+- **Fleet voice** — `GET /api/recourse/fleet/voice` (src/lib/fleetVoice.ts,
+  src/routes/fleetVoice.ts) turns the Axiom bridge state and OpenHub's audit
+  snapshot into deterministic spoken briefs, and the FLEET VOICE tab plays them.
+  `useFleetVoiceMonitor` diffs consecutive snapshots so real transitions (bridge
+  reachability, project-loop lifecycle, audit grade/findings) are narrated. An
+  absent audit or an unreadable loop is spoken as such, never guessed.
 
 ## Security testing bridge (hackingtool)
 

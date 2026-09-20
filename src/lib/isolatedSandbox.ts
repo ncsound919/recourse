@@ -22,6 +22,7 @@
 
 import { createRequire } from 'node:module';
 import { prepareExecutableCode } from './executionSandbox';
+import { ASSERT_SHIM } from './assertShim';
 
 // createRequire needs a real URL/path. In the esbuild CJS bundle `import.meta`
 // is empty (undefined.url) — fall back to __filename (CJS) or cwd so the module
@@ -315,6 +316,7 @@ export function executeTestSuiteInIsolate(
     };
     let __payload__;
     try {
+      ${ASSERT_SHIM}
       ${cleaned}
       ${body.join('\n')}
       __payload__ = { ok: true, pass: __pass, fail: __fail, details: __details, out: __out, err: __err };

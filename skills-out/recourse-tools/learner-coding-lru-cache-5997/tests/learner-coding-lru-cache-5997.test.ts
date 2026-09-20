@@ -1,0 +1,10 @@
+assert new learner_coding_lru_cache_5997(20) !== null;
+const c = new learner_coding_lru_cache_5997(2);
+c.set('k1', 100);
+c.set('k2', 200);
+assert c.get('k1') === 100;
+c.set('k3', 300);
+assert c.get('k2') === undefined;
+assert c.get('k1') === 100;
+assert c.get('k3') === 300;
+assert c.getTelemetry().hits === 3;

@@ -1,9 +1,9 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { scanSkillRoot, scanSkillLibraries, parseSkillDoc } from '../src/skills/scanner';
-import { summarize, skillDigest, searchSkills } from '../src/skills/index';
+import { summarize, skillDigest, searchSkills, skillRootsFromEnv, defaultSkillRoots } from '../src/skills/index';
 import type { SkillRoot } from '../src/skills/types';
 
 describe('skill scanner (real files)', () => {
@@ -79,6 +79,35 @@ describe('skill scanner (real files)', () => {
     const res = await scanSkillRoot(missing);
     expect(res.skills).toHaveLength(0);
     expect(res.errors.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('skill roots config', () => {
+  afterEach(() => { vi.unstubAllEnvs(); });
+
+  it('parses a RECOURSE_SKILL_ROOTS JSON override, rejecting junk', () => {
+    expect(skillRootsFromEnv('[{"id":"a","root":"/x"},{"id":"b","root":"/y"}]')).toEqual([
+      { id: 'a', root: '/x' },
+      { id: 'b', root: '/y' },
+    ]);
+    expect(skillRootsFromEnv('not json')).toBeNull();
+    expect(skillRootsFromEnv('')).toBeNull();
+    expect(skillRootsFromEnv('[]')).toBeNull();
+    expect(skillRootsFromEnv('[{"id":"","root":"/y"}]')).toBeNull();
+  });
+
+  it('honors the env override and otherwise returns fresh copies of the defaults', () => {
+    vi.stubEnv('RECOURSE_SKILL_ROOTS', '[{"id":"only","root":"/only"}]');
+    const overridden = defaultSkillRoots();
+    expect(overridden).toEqual([{ id: 'only', root: '/only' }]);
+
+    vi.unstubAllEnvs();
+    const roots = defaultSkillRoots();
+    expect(roots.map((r) => r.id)).toEqual(
+      expect.arrayContaining(['fleet-skills', 'ecc', 'hermes', 'deterministic-brain', 'deepseek-harness', 'supabase']),
+    );
+    roots[0].root = 'mutated';
+    expect(defaultSkillRoots()[0].root).not.toBe('mutated');
   });
 });
 

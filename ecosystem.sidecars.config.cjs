@@ -70,5 +70,13 @@ module.exports = {
       'app',
       'C:\\Users\\User\\Downloads\\recourse\\python\\ghidra_service\\ghidra-pm2'
     ),
+    svc(
+      'tts-sidecar',
+      'C:\\Users\\User\\Downloads\\recourse\\python\\tts_service',
+      8910,
+      'main',
+      'app',
+      'C:\\Users\\User\\Downloads\\recourse\\python\\tts_service\\tts-pm2'
+    ),
   ],
 };

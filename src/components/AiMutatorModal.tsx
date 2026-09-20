@@ -114,7 +114,7 @@ export const AiMutatorModal: React.FC<AiMutatorModalProps> = ({
 
           <div className="p-3 bg-slate-950 rounded-lg border border-slate-800 text-slate-400 text-[11px] flex items-center justify-between">
             <span>Gate Policy: <strong className="text-indigo-400">{activePolicy}</strong></span>
-            <span>Server Model: <strong className="text-amber-400">configured MODEL_NAME (OpenAI-compatible/Ollama)</strong></span>
+            <span>Server Model: <strong className="text-amber-400">configured MODEL_NAME (OpenAI-compatible)</strong></span>
           </div>
 
           <div className="pt-2 flex items-center justify-end space-x-3">

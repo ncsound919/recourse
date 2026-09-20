@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 
 /** Model provider settings — toggle the generative model between the local
- *  Ollama model and the remote LLM API at runtime. Backed by
+ *  MiniCPM5 model (llama-server) and the remote LLM API at runtime. Backed by
  *  GET/POST /api/recourse/settings/provider. */
 
 interface Profile {
@@ -141,8 +141,8 @@ export function SettingsView() {
         <div>
           <div className="text-emerald-300 font-semibold text-base">Settings — Model Provider</div>
           <div className="text-slate-400 text-xs">
-            Choose which model endpoint drives the generative features (dream, swarm, mutation, chat): the local Ollama
-            model or the remote LLM API. Applies immediately; persisted across restarts.
+            Choose which model endpoint drives the generative features (dream, swarm, mutation, chat): the local MiniCPM5
+            model (llama-server) or the remote LLM API. Applies immediately; persisted across restarts.
           </div>
         </div>
         <button onClick={load} className="px-3 py-1.5 rounded border border-slate-700 hover:border-emerald-600 text-slate-300">

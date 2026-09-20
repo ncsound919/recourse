@@ -1,5 +1,7 @@
 // src/lib/voice.ts — Intelligent Event Vocalization & Acoustic Sonification Engine
 
+import { cloneReady, speakCloned } from './voiceClone';
+
 let voiceEnabled = false;
 
 // Attempt to load initial state from localStorage
@@ -26,10 +28,33 @@ export function setVoiceEnabled(enabled: boolean): void {
   }
 }
 
+/**
+ * Speak `text` in the configured voice.
+ *
+ * When a cloned voice profile is active this synthesizes real audio through the
+ * TTS sidecar (`voiceClone.ts`) — the Web Speech API cannot host a custom voice
+ * or expose its output for conversion, so cloning REPLACES it rather than
+ * wrapping it. Web Speech remains the fallback when cloning is off or a
+ * synthesis call fails, so narration is never silently dropped.
+ */
 export function speak(text: string, force = false): void {
-  if (typeof window === 'undefined' || !window.speechSynthesis) return;
+  if (typeof window === 'undefined') return;
 
   if (!voiceEnabled && !force) return;
+
+  if (cloneReady()) {
+    speakCloned(text).catch((err) => {
+      console.warn('Cloned speech failed; falling back to Web Speech:', err);
+      speakWithWebSpeech(text);
+    });
+    return;
+  }
+
+  speakWithWebSpeech(text);
+}
+
+function speakWithWebSpeech(text: string): void {
+  if (typeof window === 'undefined' || !window.speechSynthesis) return;
 
   // Cancel any ongoing speaking to avoid delayed stacking
   try {

@@ -97,6 +97,29 @@ function ensureGitRepo(workdir: string): void {
   ]);
 }
 
+/**
+ * Align the worktree's `npm test` script with the benchmark's verifier.
+ *
+ * Axiom and settlement are gated on the repo's `npm test`; the per-task
+ * verifier may be a single suite. Without this, an internal-gated harness must
+ * make the ENTIRE repo green for every task (over-produces on narrow tasks, or
+ * stalls when it can't), while an ungated harness is judged only by the task
+ * verifier. Applied BEFORE the baseline snapshot so it is not counted as churn.
+ */
+export function overrideTestScript(workdir: string, testCommand: string): void {
+  const pkgPath = path.join(workdir, 'package.json');
+  try {
+    const pkg = fs.existsSync(pkgPath)
+      ? JSON.parse(fs.readFileSync(pkgPath, 'utf-8').replace(/^\uFEFF/, ''))
+      : {};
+    pkg.scripts = { ...(pkg.scripts ?? {}), test: testCommand };
+    fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf-8');
+  } catch {
+    // No package.json (or unreadable): the scorer still runs the explicit test
+    // command, so nothing else is required.
+  }
+}
+
 export async function runPipelineBenchmark(
   id: string,
   target: BenchmarkTarget,
@@ -107,6 +130,9 @@ export async function runPipelineBenchmark(
 
   const startedAt = Date.now();
   const workdir = prepareWorktree(target.repoDir, target.worktreeRoot);
+  // Make `npm test` equal the task's verifier so internal-gated harnesses
+  // (axiom, settlement) and the scorer agree on the success criterion.
+  if (target.testCommand) overrideTestScript(workdir, target.testCommand);
   const status = await pipeline.status();
   const before = snapshotDir(workdir);
 
@@ -134,6 +160,7 @@ export async function runPipelineBenchmark(
   const diff = diffSnapshots(before, after);
   const score = await scorePipelineRun(workdir, diff, {
     runOk: run.ok,
+    durationMs: run.durationMs,
     ...(target.testCommand ? { testCommand: target.testCommand } : {}),
     ...(target.scoreTimeoutMs ? { timeoutMs: target.scoreTimeoutMs } : {}),
     ...(target.env ? { env: target.env } : {}),

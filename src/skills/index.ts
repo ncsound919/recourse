@@ -73,12 +73,39 @@ export interface SkillContent {
 }
 
 export const DEFAULT_SKILL_ROOTS: SkillRoot[] = [
-  {
-    id: 'fleet-skills',
-    root: 'C:\\Users\\User\\Downloads\\Uplift\\Draymond-Orchestrator\\agents\\skills',
-  },
-  {
-    id: 'ecc',
-    root: 'C:\\Users\\User\\Downloads\\Uplift\\Draymond-Orchestrator\\agents\\everything-claude-code-main',
-  },
+  { id: 'fleet-skills', root: 'C:\\Users\\User\\Downloads\\Uplift\\Draymond-Orchestrator\\agents\\skills' },
+  { id: 'ecc', root: 'C:\\Users\\User\\Downloads\\Uplift\\Draymond-Orchestrator\\agents\\everything-claude-code-main' },
+  { id: 'hermes', root: 'C:\\Users\\User\\Downloads\\Uplift\\Draymond-Orchestrator\\agents\\hermes-agent-main\\skills' },
+  { id: 'deterministic-brain', root: 'C:\\Users\\User\\Downloads\\Uplift\\Draymond-Orchestrator\\agents\\deterministic-brain\\skills' },
+  { id: 'paperclip', root: 'C:\\Users\\User\\Downloads\\Uplift\\04_Integrations\\paperclip\\.agents\\skills' },
+  { id: 'paperclip-tools', root: 'C:\\Users\\User\\Downloads\\Uplift\\04_Integrations\\paperclip\\skills' },
+  { id: 'deepseek-harness', root: 'C:\\Users\\User\\Downloads\\bare-harnesses\\deepseek-harness\\.agents\\skills' },
+  { id: 'omnigent', root: 'C:\\Users\\User\\Downloads\\Uplift\\potential\\omnigent-main\\.claude\\skills' },
+  { id: 'browser-use', root: 'C:\\Users\\User\\Downloads\\Uplift\\04_Integrations\\integrations\\browser-use\\skills' },
+  { id: 'axiom-opencode', root: 'C:\\Users\\User\\Downloads\\Uplift\\Deepseek Harness\\Axiom Agent\\.opencode\\skills' },
+  { id: 'ownmem', root: 'C:\\Users\\User\\Downloads\\Uplift\\04_Integrations\\github-awesome\\ownmem\\skills' },
+  { id: 'opencode', root: 'C:\\Users\\User\\Downloads\\bare-harnesses\\opencode\\.opencode\\skills' },
+  { id: 'supabase', root: 'C:\\Users\\User\\Downloads\\Uplift\\.agents\\skills' },
 ];
+
+/** Parse a `RECOURSE_SKILL_ROOTS` override: a JSON array of `{ id, root }`.
+ *  Returns null when unset/invalid so callers fall back to the defaults. */
+export function skillRootsFromEnv(raw: string | undefined = process.env.RECOURSE_SKILL_ROOTS): SkillRoot[] | null {
+  if (!raw || !raw.trim()) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    const out = parsed
+      .filter((r) => r && typeof r.id === 'string' && typeof r.root === 'string' && r.id.trim() && r.root.trim())
+      .map((r) => ({ id: String(r.id).trim(), root: String(r.root).trim() }));
+    return out.length ? out : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The configured skill roots: `RECOURSE_SKILL_ROOTS` when set, else the
+ *  built-in library list. Always a fresh array of fresh objects. */
+export function defaultSkillRoots(): SkillRoot[] {
+  return (skillRootsFromEnv() ?? DEFAULT_SKILL_ROOTS).map((r) => ({ ...r }));
+}

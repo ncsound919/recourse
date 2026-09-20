@@ -21,7 +21,7 @@ export type RemediationKind = 'redeploy' | 'restart';
 
 export interface RemediationRequest {
   issueId: string;
-  /** docker-compose service name (e.g. 'ollama', 'kg-sidecar'). */
+  /** docker-compose service name (e.g. 'kg-sidecar'). */
   service: string;
   cwd: string;
   kind?: RemediationKind;

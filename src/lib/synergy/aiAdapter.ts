@@ -8,7 +8,7 @@
  * nothing the model returns is trusted until the isolated sandbox passes it.
  */
 import { resolveTransfer, admit } from './resolver.js';
-import { chatCompleteRoute } from '../modelProvider.js';
+import { skillAwareChat } from '../skillContext.js';
 import type { ChatMessage } from '../modelProvider.js';
 import type { TransferCandidate, TransferResult, AdmissionDecision } from './types.js';
 
@@ -68,8 +68,8 @@ export async function draftAdaptation(req: DraftRequest, drafter: Drafter): Prom
   }
 }
 
-/** Default provider call: the Auto route (local-first, API fallback). */
-const defaultChat: ChatFn = (messages) => chatCompleteRoute('auto', messages);
+/** Default provider call: skill-aware, local-first with API fallback. */
+const defaultChat: ChatFn = (messages) => skillAwareChat(messages);
 
 export function createModelDrafter(chat: ChatFn = defaultChat): Drafter {
   return async (req) => {

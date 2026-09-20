@@ -39,7 +39,9 @@ import {
   SettingsView,
   DataVizView,
   GhidraView,
-  GamepadVisualizer
+  GamepadVisualizer,
+  VoiceCloneView,
+  FleetVoiceView
 } from './components';
 import {
   SystemStatus,
@@ -59,6 +61,7 @@ import {
   INITIAL_HOURLY_REPORTS,
 } from './lib/mockData';
 import { useSystemVoiceMonitor } from './hooks/useSystemVoiceMonitor';
+import { useFleetVoiceMonitor } from './hooks/useFleetVoiceMonitor';
 import { useGamepad } from './hooks/useGamepad';
 import { useGamepadSnapshot } from './hooks/useGamepadSnapshot';
 import { GamepadIndicator } from './components/GamepadIndicator';
@@ -100,7 +103,9 @@ import {
    BarChart3,
   Binary,
   Newspaper,
-  Music
+  Music,
+  Mic,
+  Network
 } from 'lucide-react';
 
 // ================================================================
@@ -271,6 +276,8 @@ type TabKey =
   | 'dataviz'
   | 'ghidra'
   | 'gamepad'
+  | 'voice-clone'
+  | 'fleet-voice'
   | 'settings';
 
 const TABS: Array<{
@@ -529,6 +536,26 @@ const TABS: Array<{
       </span>
     ),
   },
+  {
+    key: 'voice-clone',
+    label: 'VOICE CLONE',
+    icon: <Mic className="w-4 h-4 text-rose-400" />,
+    badge: () => (
+      <span className="px-1.5 py-0.2 bg-rose-950 text-rose-300 text-[10px] rounded border border-rose-800 font-bold">
+        TTS
+      </span>
+    ),
+  },
+  {
+    key: 'fleet-voice',
+    label: 'FLEET VOICE',
+    icon: <Network className="w-4 h-4 text-cyan-400" />,
+    badge: () => (
+      <span className="px-1.5 py-0.2 bg-cyan-950 text-cyan-300 text-[10px] rounded border border-cyan-800 font-bold">
+        AXIOM / OPENHUB
+      </span>
+    ),
+  },
 ];
 
 export default function App() {
@@ -548,6 +575,9 @@ export default function App() {
 
   // Live status polling + event-driven voice narration monitor.
   useSystemVoiceMonitor(setStatus);
+  // Speak real Axiom/OpenHub transitions (bridge reachability, loop lifecycle,
+  // audit grade/findings) — see src/hooks/useFleetVoiceMonitor.ts.
+  useFleetVoiceMonitor();
 
   const { toastMessage, showToast } = useToast(4000);
 
@@ -1237,6 +1267,14 @@ export default function App() {
 
             {activeTab === 'reporter' && (
               <SelfReporterView />
+            )}
+
+            {activeTab === 'voice-clone' && (
+              <VoiceCloneView />
+            )}
+
+            {activeTab === 'fleet-voice' && (
+              <FleetVoiceView />
             )}
 
             {activeTab === 'intake-growth' && (

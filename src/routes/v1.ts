@@ -132,6 +132,12 @@ export function createV1Router(deps: V1RouterDeps): Router {
     res.json({ success: true, received: true, outcome: result });
   });
 
+  // --- Bot chat shim pass-through ----------------------------------------
+  // /v1/chat/completions is served by the OpenAI-compatible shim registered at
+  // the app level (server.ts, near the provider/chat route). Skip the rest of
+  // THIS router (the API-key gate below) and return to the app so that shim runs.
+  router.use('/chat/completions', (_req, _res, next) => next('router'));
+
   // --- Authenticated + metered -------------------------------------------
   router.use(auth);
   router.use(quota);

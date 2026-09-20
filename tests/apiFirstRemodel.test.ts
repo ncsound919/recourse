@@ -9,7 +9,7 @@ afterEach(() => {
 });
 
 describe('API-first self-improvement remodel', () => {
-  it('forgeConfig defaults to the API provider, never localhost:11434', () => {
+  it('forgeConfig defaults to the API provider, never a localhost endpoint', () => {
     delete process.env.FORGE_MODEL_BASE_URL;
     delete process.env.API_MODEL_BASE_URL;
     delete process.env.LOCAL_MODEL_BASE_URL;
@@ -17,8 +17,7 @@ describe('API-first self-improvement remodel', () => {
     const cfg = forgeConfig();
     expect(cfg.baseUrl).toBe('https://api.pgsgrove.com/v1');
     expect(cfg.model).toBe('deepseek-v4-flash-0731');
-    expect(cfg.apiKey).not.toBe('ollama');
-    expect(cfg.baseUrl).not.toContain('11434');
+    expect(cfg.baseUrl).not.toContain('127.0.0.1');
   });
 
   it('forgeConfig prefers FORGE_* then API_MODEL_*', () => {

@@ -16,6 +16,7 @@
 
 import { transformSync } from 'esbuild';
 import { executeTestSuiteInIsolate, executeToolInIsolate, isIsolateAvailable } from './isolatedSandbox';
+import { ASSERT_SHIM } from './assertShim';
 
 export interface ExecutionResult {
   success: boolean;
@@ -403,6 +404,7 @@ export function executeTestSuite(
     runner = new Function('customConsole', '__assert', `
       "use strict";
       const console = customConsole;
+      ${ASSERT_SHIM}
       ${cleanedSource}
 
       ${body.join('\n')}

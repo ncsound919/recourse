@@ -64,6 +64,24 @@ describe('nightly cycle', () => {
     expect(run.reportMarkdown).toContain('verified improvement');
   });
 
+  it('runs the open-ended step between dream and forge', async () => {
+    const store = openNightlyStore(freshFile());
+    const order: string[] = [];
+    const run = await runNightlyCycle({
+      store,
+      metrics: async () => ({ registryTools: 1 }),
+      steps: {
+        dream: async () => { order.push('dream'); return { ok: true, detail: 'd' }; },
+        openended: async () => { order.push('openended'); return { ok: true, detail: 'oe' }; },
+        forge: async () => { order.push('forge'); return { ok: true, detail: 'f' }; },
+        benchmark: async () => { order.push('benchmark'); return { ok: true, detail: 'b' }; },
+      },
+      now: () => Date.UTC(2026, 8, 18),
+    });
+    expect(order).toEqual(['dream', 'openended', 'forge', 'benchmark']);
+    expect(run.steps.map((s) => s.id)).toContain('openended');
+  });
+
   it('is idempotent per night and re-runs when forced', async () => {
     const store = openNightlyStore(freshFile());
     const dream = vi.fn(async () => ({ ok: true, detail: 'x' }));

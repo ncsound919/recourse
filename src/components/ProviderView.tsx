@@ -31,7 +31,7 @@ export const ProviderView: React.FC = () => {
     const text = prompt;
     setPrompt('');
     try {
-      const j = await fetch('/api/ollama/chat', {
+      const j = await fetch('/api/recourse/provider/chat', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ prompt: text }),
@@ -54,8 +54,8 @@ export const ProviderView: React.FC = () => {
           <h2 className="text-sm font-bold text-white font-mono">AI PROVIDER — CONFIGURED MODEL ENDPOINT</h2>
         </div>
         <p className="text-[11px] text-slate-500 font-mono mt-1">
-          All self-improvement generation (dream, forge, swarm, mutator) routes through the configured API provider. The
-          local (Ollama) profile is inert and reports offline unless LOCAL_MODEL_BASE_URL is explicitly set. Offline is
+          All self-improvement generation (dream, forge, swarm, mutator) routes through the configured provider. The
+          local (MiniCPM5 / llama-server) profile is used local-first with an automatic API fallback. Offline is
           reported as offline — never fabricated.
         </p>
       </div>
@@ -91,7 +91,7 @@ export const ProviderView: React.FC = () => {
           </h3>
           <div className="flex-1 bg-slate-950 border border-slate-800 rounded-xl p-3 overflow-y-auto space-y-2 font-mono text-xs">
             {history.length === 0 ? (
-              <div className="h-full flex items-center justify-center text-slate-600 text-center">Prompt the configured provider. Runs through /api/ollama/chat, which routes to the API profile.</div>
+              <div className="h-full flex items-center justify-center text-slate-600 text-center">Prompt the configured provider. Runs through /api/recourse/provider/chat, which uses the local-first generation policy.</div>
             ) : history.map((m, i) => (
               <div key={i} className={`p-2.5 rounded-lg border ${m.role === 'user' ? 'bg-indigo-950/20 border-indigo-900/50 text-indigo-200' : 'bg-slate-900 border-slate-800 text-slate-300'}`}>
                 <div className="text-[10px] text-slate-500 mb-1 font-bold uppercase">{m.role === 'user' ? 'You' : (cur?.model ?? 'provider')}</div>
@@ -126,8 +126,8 @@ export const ProviderView: React.FC = () => {
           ))}
         </div>
         <p className="text-[10px] font-mono text-slate-600 mt-3">
-          Local profile is inert by design (no local model on this machine). Re-enable only by setting LOCAL_MODEL_BASE_URL /
-          LOCAL_MODEL_NAME / LOCAL_MODEL_API_KEY and switching the provider mode.
+          Local profile points at the MiniCPM5 model served by llama-server (LOCAL_MODEL_BASE_URL / LOCAL_MODEL_NAME /
+          LOCAL_MODEL_API_KEY). It is used local-first, with the API profile as fallback.
         </p>
       </div>
     </div>

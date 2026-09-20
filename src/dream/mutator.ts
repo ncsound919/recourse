@@ -1,10 +1,11 @@
 // src/dream/mutator.ts - AI Architectural Mutator & Sandbox Verifier.
-// Pairs the configured open-source model provider (OpenAI-compatible/Ollama)
+// Pairs the configured open-source model provider (OpenAI-compatible)
 // with a deterministic fallback generator and isolated invariant testing.
 // The engine that actually produced a candidate is always recorded honestly.
 
 import crypto from 'crypto';
-import { chatComplete, extractJsonBlock } from '../lib/modelProvider';
+import { extractJsonBlock } from '../lib/modelProvider';
+import { skillAwareChat } from '../lib/skillContext';
 import { lintSource } from '../lib/lintGate';
 import {
   avoidGuidance,
@@ -409,10 +410,10 @@ It MUST NOT access DOM/window/process, write to disk, or call non-deterministic 
 Return ONLY valid JSON: {"description": "...", "source": "<the full javascript source>", "testVectors": ["...json strings..."]}`;
 
   // Dream codegen is a NON-AGENTIC generation path, so it uses the shared
-  // generation policy: local-first (e.g. colibri OLMoE) with an automatic
+  // generation policy: local-first (the MiniCPM5 model) with an automatic
   // fallback to the API profile when local is offline. Set
   // RECOURSE_GENERATION_PROFILE=api to force the remote model here.
-  const result = await chatComplete([
+  const result = await skillAwareChat([
     { role: 'system', content: systemInstruction },
     { role: 'user', content: `Architectural Instructions: ${instructions}\nDomain: ${domain}` },
   ], { temperature: 0.2, json: true });

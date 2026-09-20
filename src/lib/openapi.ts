@@ -46,6 +46,8 @@ export function buildOpenApiSpec(baseUrl: string): OpenApiSpec {
       { name: 'wallet', description: 'Budgeted action wallet' },
       { name: 'telemetry', description: 'Machine + git sensors' },
       { name: 'audio', description: 'Transcription + offline render' },
+      { name: 'voice', description: 'Reference-voice profiles + zero-shot synthesis' },
+      { name: 'fleet', description: 'Axiom / OpenHub peer integration' },
       { name: 'synergy', description: 'Cross-domain transfer + replay' },
       { name: 'agent', description: 'MCP/A2A agent surfaces' },
     ],
@@ -98,7 +100,7 @@ export function buildOpenApiSpec(baseUrl: string): OpenApiSpec {
         get: op({ summary: 'Benchmark ledger + chain validity', tags: ['benchmark'] }),
       },
       '/api/recourse/benchmark/run': {
-        post: op({ summary: 'Run the external benchmark and attest it', tags: ['benchmark'] }),
+        post: op({ summary: 'Run the external benchmark and attest it', tags: ['benchmark'], mutating: true }),
       },
       '/api/recourse/wallet': {
         get: op({ summary: 'Wallet balances + chain validity', tags: ['wallet'] }),
@@ -113,12 +115,70 @@ export function buildOpenApiSpec(baseUrl: string): OpenApiSpec {
         get: op({ summary: 'Transcription sidecar status', tags: ['audio'] }),
       },
       '/api/recourse/audio/transcribe': {
-        post: op({ summary: 'Transcribe audio/video (url or base64)', tags: ['audio'] }),
+        post: op({ summary: 'Transcribe audio/video (url or base64)', tags: ['audio'], mutating: true }),
+      },
+      '/api/recourse/voice/status': {
+        get: op({ summary: 'Voice-clone sidecar health + saved profiles', tags: ['voice'] }),
+      },
+      '/api/recourse/voice/profiles': {
+        get: op({ summary: 'List saved reference-voice profiles', tags: ['voice'] }),
+        post: op({
+          summary: 'Save a reference-voice profile (base64 WAV clip)',
+          tags: ['voice'],
+          mutating: true,
+          parameters: [
+            { name: 'name', in: 'body', required: true, type: 'string' },
+            { name: 'referenceBase64', in: 'body', required: true, type: 'string', description: 'mono PCM WAV, base64' },
+            { name: 'filename', in: 'body', type: 'string' },
+            { name: 'language', in: 'body', type: 'string' },
+            { name: 'referenceText', in: 'body', type: 'string', description: 'clip transcript (required by the f5-tts engine)' },
+            { name: 'durationSec', in: 'body', type: 'number' },
+            { name: 'sampleRate', in: 'body', type: 'number' },
+          ],
+          responses: {
+            '200': { description: 'OK (profile + advisory validation verdict)' },
+            '400': { description: 'invalid name, base64, or non-WAV clip' },
+            '413': { description: 'clip or transcript too large' },
+          },
+        }),
+      },
+      '/api/recourse/voice/profiles/{id}': {
+        delete: op({
+          summary: 'Delete a reference-voice profile',
+          tags: ['voice'],
+          mutating: true,
+          parameters: [{ name: 'id', in: 'path', required: true, type: 'string' }],
+          responses: {
+            '200': { description: 'OK' },
+            '404': { description: 'unknown profile' },
+          },
+        }),
+      },
+      '/api/recourse/voice/speak': {
+        post: op({
+          summary: 'Synthesize speech in a saved reference voice',
+          tags: ['voice'],
+          mutating: true,
+          parameters: [
+            { name: 'text', in: 'body', required: true, type: 'string' },
+            { name: 'profileId', in: 'body', required: true, type: 'string' },
+            { name: 'engine', in: 'body', type: 'string', description: 'xtts | f5tts' },
+            { name: 'language', in: 'body', type: 'string' },
+            { name: 'speed', in: 'body', type: 'number', description: 'clamped to 0.5 - 2.0' },
+          ],
+          responses: {
+            '200': { description: 'OK (base64 WAV audio)' },
+            '404': { description: 'unknown profile or missing reference clip' },
+            '413': { description: 'text too long' },
+            '503': { description: 'sidecar offline or no zero-shot TTS backend installed' },
+          },
+        }),
       },
       '/api/recourse/replay': {
         post: op({
           summary: 'Deterministically replay a subsystem stream',
           tags: ['synergy'],
+          mutating: true,
           parameters: [{ name: 'stream', in: 'body', type: 'string', description: 'trend | goals | selfhosted' }],
         }),
       },
@@ -129,6 +189,9 @@ export function buildOpenApiSpec(baseUrl: string): OpenApiSpec {
         get: op({
           summary: 'Render a composed track to WAV',
           tags: ['audio'],
+          // Heavy render: flagged mutating so the agent surface gates it (the
+          // browser UI calls the route directly and is unaffected).
+          mutating: true,
           parameters: [
             { name: 'style', in: 'query', type: 'string' },
             { name: 'seed', in: 'query', type: 'number' },
@@ -137,10 +200,10 @@ export function buildOpenApiSpec(baseUrl: string): OpenApiSpec {
         }),
       },
       '/api/recourse/compose/midi': {
-        get: op({ summary: 'Download a composed track as Standard MIDI', tags: ['audio'] }),
+        get: op({ summary: 'Download a composed track as Standard MIDI', tags: ['audio'], mutating: true }),
       },
       '/api/recourse/compose/stems': {
-        get: op({ summary: 'Render per-part stems', tags: ['audio'] }),
+        get: op({ summary: 'Render per-part stems', tags: ['audio'], mutating: true }),
       },
       '/api/recourse/compose/rate': {
         post: op({ summary: 'Rate a composed track (feeds the learner)', tags: ['audio'], mutating: true }),
@@ -152,7 +215,16 @@ export function buildOpenApiSpec(baseUrl: string): OpenApiSpec {
         post: op({ summary: 'Export a verified tool as a SKILL.md folder', tags: ['agent'], mutating: true }),
       },
       '/api/a2a': {
-        post: op({ summary: 'A2A JSON-RPC (message/send, tasks/get)', tags: ['agent'] }),
+        post: op({ summary: 'A2A JSON-RPC (message/send, tasks/get)', tags: ['agent'], mutating: true }),
+      },
+      '/api/recourse/fleet/voice': {
+        get: op({
+          summary: 'Spoken Axiom/OpenHub briefs + live bridge/audit state',
+          tags: ['fleet'],
+          responses: {
+            '200': { description: 'OK (axiom state, openhub audit, prose briefs)' },
+          },
+        }),
       },
       '/.well-known/agent.json': {
         get: op({ summary: 'A2A agent card', tags: ['agent'] }),

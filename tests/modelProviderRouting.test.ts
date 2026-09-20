@@ -28,14 +28,14 @@ describe('pickGenerationProfile — local-first for non-agentic generation', () 
   });
 
   it('prefers local when configured and the prompt fits', async () => {
-    vi.stubEnv('LOCAL_MODEL_BASE_URL', 'http://127.0.0.1:8000/v1');
+    vi.stubEnv('LOCAL_MODEL_BASE_URL', 'http://127.0.0.1:11434/v1');
     vi.stubEnv('RECOURSE_GENERATION_PROFILE', 'auto');
     const m = await freshProvider();
     expect(m.pickGenerationProfile(msg('short prompt'))).toBe('local');
   });
 
   it('honors explicit local/api preferences', async () => {
-    vi.stubEnv('LOCAL_MODEL_BASE_URL', 'http://127.0.0.1:8000/v1');
+    vi.stubEnv('LOCAL_MODEL_BASE_URL', 'http://127.0.0.1:11434/v1');
     let m = await freshProvider();
     vi.stubEnv('RECOURSE_GENERATION_PROFILE', 'api');
     m = await freshProvider();
@@ -53,7 +53,7 @@ describe('pickGenerationProfile — local-first for non-agentic generation', () 
   });
 
   it('sends oversized prompts to api in auto mode (CPU prefill guard)', async () => {
-    vi.stubEnv('LOCAL_MODEL_BASE_URL', 'http://127.0.0.1:8000/v1');
+    vi.stubEnv('LOCAL_MODEL_BASE_URL', 'http://127.0.0.1:11434/v1');
     vi.stubEnv('RECOURSE_GENERATION_PROFILE', 'auto');
     vi.stubEnv('LOCAL_AUTO_MAX_CHARS', '50');
     const m = await freshProvider();
@@ -64,7 +64,7 @@ describe('pickGenerationProfile — local-first for non-agentic generation', () 
 
 describe('pickProfileForRoute', () => {
   it('forces api / local and delegates auto to the generation policy', async () => {
-    vi.stubEnv('LOCAL_MODEL_BASE_URL', 'http://127.0.0.1:8000/v1');
+    vi.stubEnv('LOCAL_MODEL_BASE_URL', 'http://127.0.0.1:11434/v1');
     vi.stubEnv('RECOURSE_GENERATION_PROFILE', 'auto');
     const m = await freshProvider();
     expect(m.pickProfileForRoute('api', msg('hi'))).toBe('api');
@@ -75,8 +75,8 @@ describe('pickProfileForRoute', () => {
 
 describe('chatComplete — local-first with honest API fallback', () => {
   it('answers from local when it is online', async () => {
-    vi.stubEnv('LOCAL_MODEL_BASE_URL', 'http://127.0.0.1:8000/v1');
-    vi.stubEnv('LOCAL_MODEL_NAME', 'olmoe');
+    vi.stubEnv('LOCAL_MODEL_BASE_URL', 'http://127.0.0.1:11434/v1');
+    vi.stubEnv('LOCAL_MODEL_NAME', 'local-model');
     vi.stubEnv('LOCAL_MODEL_API_KEY', 'local');
     vi.stubEnv('API_MODEL_BASE_URL', 'http://api.test/v1');
     vi.stubEnv('API_MODEL_NAME', 'api-model');
@@ -84,26 +84,26 @@ describe('chatComplete — local-first with honest API fallback', () => {
     const calls: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       calls.push(String(url));
-      if (String(url).endsWith('/models')) return jsonResponse({ data: [{ id: 'olmoe' }] });
+      if (String(url).endsWith('/models')) return jsonResponse({ data: [{ id: 'local-model' }] });
       return jsonResponse({ choices: [{ message: { content: 'local-answer' } }] });
     }));
     const m = await freshProvider();
     const r = await m.chatComplete(msg('hello'));
     expect(r.ok).toBe(true);
-    expect(r.model).toBe('olmoe');
+    expect(r.model).toBe('local-model');
     expect(r.content).toBe('local-answer');
     expect(calls.some((u) => u.includes('api.test'))).toBe(false); // never touched the API
   });
 
   it('falls back to the API profile when local is offline, reporting the API model', async () => {
-    vi.stubEnv('LOCAL_MODEL_BASE_URL', 'http://127.0.0.1:8000/v1');
-    vi.stubEnv('LOCAL_MODEL_NAME', 'olmoe');
+    vi.stubEnv('LOCAL_MODEL_BASE_URL', 'http://127.0.0.1:11434/v1');
+    vi.stubEnv('LOCAL_MODEL_NAME', 'local-model');
     vi.stubEnv('API_MODEL_BASE_URL', 'http://api.test/v1');
     vi.stubEnv('API_MODEL_NAME', 'api-model');
     vi.stubEnv('RECOURSE_GENERATION_PROFILE', 'auto');
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       const u = String(url);
-      if (u.includes('127.0.0.1:8000')) throw new Error('ECONNREFUSED'); // local down
+      if (u.includes('127.0.0.1:11434')) throw new Error('ECONNREFUSED'); // local down
       if (u.endsWith('/models')) return jsonResponse({ data: [{ id: 'api-model' }] });
       return jsonResponse({ choices: [{ message: { content: 'api-answer' } }] });
     }));

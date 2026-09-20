@@ -23,6 +23,7 @@
 import type { ToolDomain } from '../types';
 import { executeTestSuite } from './executionSandbox';
 import { integrateAxiomTool, axiomReachable } from './axiomBridge.js';
+import { skillAwareChat } from './skillContext.js';
 
 export interface ForgeSpec {
   id: string;
@@ -444,8 +445,9 @@ export function forgeSpecById(id: string): ForgeSpec | undefined {
 // FORGE_MODEL_BASE_URL / FORGE_MODEL_NAME / FORGE_MODEL_API_KEY /
 // FORGE_MODEL_TIMEOUT_MS override the global provider so the forge can pin a
 // different model. Fallback chain: FORGE_* -> API_MODEL_* (Phoenix Grove) ->
-// MODEL_* -> the API default. The local profile is inert (reports offline
-// unless LOCAL_MODEL_BASE_URL is set) — the operator runs no local model.
+// MODEL_* -> the API default. When FORGE_MODEL_BASE_URL points at a loopback
+// endpoint it uses the local profile (the MiniCPM5 model via llama-server),
+// reporting offline honestly unless LOCAL_MODEL_BASE_URL is configured.
 export function forgeConfig() {
   const base = (
     process.env.FORGE_MODEL_BASE_URL ||
@@ -497,18 +499,19 @@ async function forgeChat(system: string, user: string, temperature = 0.1): Promi
 }> {
   const cfg = forgeConfig();
   // Explicit FORGE_MODEL_BASE_URL wins (profile matched by base URL). Otherwise
-  // the forge joins the shared generation policy: local-first (colibri) with an
+  // the forge joins the shared generation policy: local-first (MiniCPM5) with an
   // automatic API fallback.
   const explicitForge = Boolean(process.env.FORGE_MODEL_BASE_URL)
     && cfg.baseUrl === (process.env.FORGE_MODEL_BASE_URL || '').replace(/\/+$/, '');
-  const { chatComplete, chatCompleteProfile } = await import('./modelProvider.js');
+  const forgeTargetsLocal = /:\/\/(127\.0\.0\.1|localhost|\[::1\]|0\.0\.0\.0|host\.docker\.internal)(:|\/)/i.test(cfg.baseUrl);
+  const { chatCompleteProfile } = await import('./modelProvider.js');
   const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
     { role: 'system', content: system },
     { role: 'user', content: user },
   ];
   const res = explicitForge
-    ? await chatCompleteProfile((process.env.FORGE_MODEL_BASE_URL || '').includes(':11434') ? 'local' : 'api', messages, { temperature })
-    : await chatComplete(messages, { temperature });
+    ? await chatCompleteProfile(forgeTargetsLocal ? 'local' : 'api', messages, { temperature })
+    : await skillAwareChat(messages, { temperature }, user);
   if (!res.ok || res.content === null) {
     return {
       ok: false,

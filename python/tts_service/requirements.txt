@@ -1,0 +1,9 @@
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pydantic>=2.6
+numpy>=1.24
+# Zero-shot TTS backend (optional but required for real cloning). Pick one:
+#   coqui-tts  -> XTTS-v2, reference clip only (default)
+#   f5-tts     -> F5-TTS, reference clip + its transcript
+coqui-tts>=0.25.1
+# f5-tts>=0.9.0

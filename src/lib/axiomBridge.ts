@@ -81,8 +81,9 @@ export async function integrateAxiomTool(
   name: string,
   domain: ToolDomain,
   prompt: string,
-  refSuite: string
-): Promise<{ ok: boolean; selfHosted?: any; error?: string }> {
+  refSuite: string,
+  opts: { selfHost?: boolean } = {},
+): Promise<{ ok: boolean; selfHosted?: any; sourceCode?: string; error?: string }> {
   // 1. Build via Axiom
   const buildRes = await fetch(`${AXIOM_URL}/api/axiom/build`, {
     method: 'POST',
@@ -100,6 +101,12 @@ export async function integrateAxiomTool(
     return { ok: false, error: `Verification failed: ${suiteResult.testDetails.join('; ')}` };
   }
 
+  // Callers that only want a verified source (e.g. the open-ended solver, which
+  // runs its own gates before deciding to promote) can skip the self-host write.
+  if (opts.selfHost === false) {
+    return { ok: true, sourceCode: build.sourceCode };
+  }
+
   // 3. Write self-hosted tool
   const writeRes = writeStatelessSelfHostedTool({
     name,
@@ -113,7 +120,7 @@ export async function integrateAxiomTool(
 
   // 4. Final verify-entry check
   await verifySelfHostedEntry(writeRes.entry);
-  return { ok: true, selfHosted: writeRes.entry };
+  return { ok: true, selfHosted: writeRes.entry, sourceCode: build.sourceCode };
 }
 
 // ---------------------------------------------------------------------------
@@ -244,6 +251,24 @@ export async function axiomLoopStatus(id: string, timeoutMs = 15_000): Promise<A
     if (!res.ok) {
       return { ok: false, status: res.status, error: typeof data.error === 'string' ? data.error : `Axiom HTTP ${res.status}` };
     }
+    return { ok: true, state: data };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** The most recently started project loop (Axiom keeps it server-side). */
+export async function axiomProjectLatest(timeoutMs = 15_000): Promise<AxiomLoopStatusResult> {
+  try {
+    const res = await fetch(`${AXIOM_URL}/api/project/latest`, {
+      headers: axiomHeaders(),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    const data = await res.json().catch(() => ({})) as Record<string, unknown>;
+    if (!res.ok) {
+      return { ok: false, status: res.status, error: typeof data.error === 'string' ? data.error : `Axiom HTTP ${res.status}` };
+    }
+    if (!data || typeof data !== 'object' || !data.id) return { ok: false, error: 'no project loops yet' };
     return { ok: true, state: data };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };

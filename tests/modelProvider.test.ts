@@ -147,13 +147,13 @@ describe('configuration + profile selection', () => {
     let profiles = m.providerProfiles();
     expect(profiles.map((p) => p.id)).toEqual(['api', 'local']);
     expect(profiles[0]).toMatchObject({ label: 'Phoenix Grove', baseUrl: 'http://api.test/v1', model: 'api-model' });
-    expect(profiles[1]).toMatchObject({ label: 'Local (not configured)', baseUrl: 'http://127.0.0.1:8000/v1', model: 'no local model' });
+    expect(profiles[1]).toMatchObject({ label: 'Local (not configured)', baseUrl: 'http://127.0.0.1:11434/v1', model: 'no local model' });
 
     vi.stubEnv('LOCAL_MODEL_BASE_URL', 'http://local.test/v1');
-    vi.stubEnv('LOCAL_MODEL_NAME', 'olmoe');
+    vi.stubEnv('LOCAL_MODEL_NAME', 'minicpm5-2b');
     m = await load();
     profiles = m.providerProfiles();
-    expect(profiles[1]).toMatchObject({ label: 'Local (configured)', baseUrl: 'http://local.test/v1', model: 'olmoe' });
+    expect(profiles[1]).toMatchObject({ label: 'Local (configured)', baseUrl: 'http://local.test/v1', model: 'minicpm5-2b' });
   });
 });
 
@@ -253,28 +253,6 @@ describe('chatComplete — success paths', () => {
     expect(chatBody.temperature).toBeUndefined();
     expect(chatBody.response_format).toBeUndefined();
   });
-
-  it('uses the native Ollama /api/chat shape (num_ctx + think)', async () => {
-    vi.stubEnv('LOCAL_MODEL_BASE_URL', 'http://127.0.0.1:11434');
-    vi.stubEnv('LOCAL_MODEL_NAME', 'olmo');
-    vi.stubEnv('LOCAL_MODEL_NUM_CTX', '2048');
-    vi.stubEnv('LOCAL_MODEL_THINKING', '1');
-    vi.stubEnv('RECOURSE_GENERATION_PROFILE', 'local');
-    let chatUrl = '';
-    let chatBody: any;
-    installFetch(async (url, init) => {
-      if (url.endsWith('/models')) return ok({ data: [] });
-      chatUrl = url;
-      chatBody = JSON.parse(String(init?.body));
-      return ok({ message: { content: 'native answer' } });
-    });
-    const m = await load();
-    const r = await m.chatCompleteProfile('local', msg('hi'));
-    expect(r.ok).toBe(true);
-    expect(r.content).toBe('native answer');
-    expect(chatUrl).toBe('http://127.0.0.1:11434/api/chat');
-    expect(chatBody.options).toEqual({ num_ctx: 2048, think: true });
-  });
 });
 
 describe('chatComplete — failure paths', () => {
@@ -349,7 +327,7 @@ describe('chatComplete — failure paths', () => {
 describe('chatComplete routing + fallback', () => {
   it('falls back to the api profile when local is offline', async () => {
     vi.stubEnv('LOCAL_MODEL_BASE_URL', 'http://local.test/v1');
-    vi.stubEnv('LOCAL_MODEL_NAME', 'olmoe');
+    vi.stubEnv('LOCAL_MODEL_NAME', 'local-model');
     vi.stubEnv('API_MODEL_BASE_URL', 'http://api.test/v1');
     vi.stubEnv('API_MODEL_NAME', 'api-model');
     vi.stubEnv('RECOURSE_GENERATION_PROFILE', 'local');
@@ -395,14 +373,14 @@ describe('chatComplete routing + fallback', () => {
 
   it('chatCompleteRoute auto prefers the configured local profile', async () => {
     vi.stubEnv('LOCAL_MODEL_BASE_URL', 'http://local.test/v1');
-    vi.stubEnv('LOCAL_MODEL_NAME', 'olmoe');
+    vi.stubEnv('LOCAL_MODEL_NAME', 'local-model');
     installFetch(async (url) => {
       if (url.endsWith('/models')) return ok({ data: [] });
       return ok({ choices: [{ message: { content: 'local x' } }] });
     });
     const m = await load();
     const r = await m.chatCompleteRoute('auto', msg('hi'));
-    expect(r.model).toBe('olmoe');
+    expect(r.model).toBe('local-model');
   });
 });
 
@@ -435,19 +413,6 @@ describe('usage accounting + sink', () => {
     const r = await m.chatComplete(msg('a'.repeat(40)));
     expect(r.usage!.estimated).toBe(true);
     expect(r.usage!.totalTokens).toBe(20); // (40 prompt + 40 output) / 4
-  });
-
-  it('parses native Ollama eval counts', async () => {
-    vi.stubEnv('LOCAL_MODEL_BASE_URL', 'http://127.0.0.1:11434');
-    vi.stubEnv('LOCAL_MODEL_NAME', 'olmo');
-    vi.stubEnv('RECOURSE_GENERATION_PROFILE', 'local');
-    installFetch(async (url) => {
-      if (url.endsWith('/models')) return ok({ data: [] });
-      return ok({ message: { content: 'native answer' }, prompt_eval_count: 7, eval_count: 11 });
-    });
-    const m = await load();
-    const r = await m.chatCompleteProfile('local', msg('hi'));
-    expect(r.usage).toEqual({ promptTokens: 7, completionTokens: 11, totalTokens: 18, estimated: false });
   });
 
   it('a throwing sink never breaks generation', async () => {

@@ -43,6 +43,26 @@ export interface RecourseSdk {
   telemetry(): Promise<SdkCall<any>>;
   audioStatus(): Promise<SdkCall<any>>;
   transcribe(body: { url?: string; dataBase64?: string; filename?: string; language?: string; model?: string }): Promise<SdkCall<any>>;
+  voiceStatus(): Promise<SdkCall<any>>;
+  voiceProfiles(): Promise<SdkCall<any>>;
+  saveVoiceProfile(body: {
+    name: string;
+    referenceBase64: string;
+    filename?: string;
+    language?: string;
+    referenceText?: string;
+    durationSec?: number;
+    sampleRate?: number;
+  }): Promise<SdkCall<any>>;
+  deleteVoiceProfile(id: string): Promise<SdkCall<any>>;
+  speakInVoice(body: {
+    text: string;
+    profileId: string;
+    engine?: 'xtts' | 'f5tts';
+    language?: string;
+    speed?: number;
+  }): Promise<SdkCall<any>>;
+  fleetVoice(): Promise<SdkCall<any>>;
   exportableSkills(): Promise<SdkCall<any>>;
   exportSkill(toolName: string, outRoot?: string): Promise<SdkCall<any>>;
   a2a(payload: unknown): Promise<SdkCall<any>>;
@@ -62,7 +82,7 @@ export function createRecourseSdk(opts: RecourseSdkOptions = {}): RecourseSdk {
   const doFetch = opts.fetchImpl ?? fetch;
   const timeoutMs = opts.timeoutMs ?? 15000;
 
-  async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown, mutating = false): Promise<SdkCall<T>> {
+  async function request<T>(method: 'GET' | 'POST' | 'DELETE', path: string, body?: unknown, mutating = false): Promise<SdkCall<T>> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     const headers: Record<string, string> = {};
@@ -106,6 +126,12 @@ export function createRecourseSdk(opts: RecourseSdkOptions = {}): RecourseSdk {
     telemetry: () => request('GET', '/api/recourse/telemetry'),
     audioStatus: () => request('GET', '/api/recourse/audio/status'),
     transcribe: (body) => request('POST', '/api/recourse/audio/transcribe', body),
+    voiceStatus: () => request('GET', '/api/recourse/voice/status'),
+    voiceProfiles: () => request('GET', '/api/recourse/voice/profiles'),
+    saveVoiceProfile: (body) => request('POST', '/api/recourse/voice/profiles', body, true),
+    deleteVoiceProfile: (id) => request('DELETE', `/api/recourse/voice/profiles/${encodeURIComponent(id)}`, undefined, true),
+    speakInVoice: (body) => request('POST', '/api/recourse/voice/speak', body, true),
+    fleetVoice: () => request('GET', '/api/recourse/fleet/voice'),
     exportableSkills: () => request('GET', '/api/recourse/skills/exportable'),
     exportSkill: (toolName, outRoot) => request('POST', '/api/recourse/skills/export', { toolName, outRoot }, true),
     a2a: (payload) => request('POST', '/api/a2a', payload),

@@ -11,7 +11,8 @@ Thanks for helping. Recourse has one non-negotiable rule that shapes everything:
 
 1. `npm install`
 2. `cp .env.example .env` and set `MODEL_BASE_URL` / `MODEL_NAME` (any
-   OpenAI-compatible server; Ollama is the default).
+   OpenAI-compatible server), plus `LOCAL_MODEL_BASE_URL` / `LOCAL_MODEL_NAME`
+   for the local MiniCPM5 model.
 3. `npm run dev` → `http://localhost:3050`
 
 Optional sidecars (Python, stateless) live under `python/*`; each has its own

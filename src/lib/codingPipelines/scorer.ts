@@ -18,7 +18,30 @@ import { runShellCommand } from './subprocess.js';
 
 export type RegressionRisk = 'MINIMAL' | 'LOW' | 'MODERATE' | 'HIGH' | 'CRITICAL';
 
+/**
+ * Rubric v2. Correctness dominates; minimality, focus and speed are modifiers
+ * that can only SUBTRACT. v1 rewarded `files*4`, so a pipeline won by touching
+ * more files (Axiom 5-7 files beat 3-file runs despite being slower and
+ * higher-churn). v2 makes fewer-file, lower-churn, faster correct solutions
+ * score higher — calibration against RepoRank (scripts/harness-calibrate.ts)
+ * is the sanity check that the ordering matches an independent grader.
+ */
+export const SCORING_VERSION = 2;
+
+const RUBRIC = {
+  correctness: 70,
+  minimality: 15,
+  focus: 10,
+  speed: 5,
+  churnCap: () => Number(process.env.PIPELINE_CHURN_CAP || 200),
+  focusCap: () => Number(process.env.PIPELINE_FOCUS_CAP || 10),
+  speedCapMs: () => Number(process.env.PIPELINE_SPEED_CAP_MS || 300_000),
+};
+
+const r1 = (n: number): number => Math.round(n * 10) / 10;
+
 export interface PipelineScore {
+  scoringVersion: number;
   /** True when at least one concrete signal (tests or diff) was measured. */
   measured: boolean;
   testCommand?: string;
@@ -29,6 +52,7 @@ export interface PipelineScore {
   diff: SnapshotDiff;
   regressionRisk: RegressionRisk;
   score: number | null;
+  rubric: { correctness: number; minimality: number; focus: number; speed: number; total: number };
   reasons: string[];
 }
 
@@ -42,6 +66,8 @@ export interface ScoreOptions {
    * strength of tests passing against an unchanged worktree.
    */
   runOk?: boolean;
+  /** Wall-clock time the pipeline took (for the speed modifier). */
+  durationMs?: number;
 }
 
 /** Resolve a test command: explicit arg -> PIPELINE_TEST_CMD -> package.json. */
@@ -107,26 +133,34 @@ export async function scorePipelineRun(
 
   const churn = diff.linesAdded + diff.linesRemoved;
   const files = diff.changedFiles.length;
+  const durationMs = opts.durationMs ?? 0;
 
-  let score: number | null;
+  let rubric = { correctness: 0, minimality: 0, focus: 0, speed: 0, total: 0 };
+  let score: number;
+
   if (opts.runOk === false) {
     score = 0;
     reasons.push('pipeline run failed; no score for an unchanged worktree');
   } else if (testsPassed === false) {
     score = 0;
+    reasons.push('tests failed');
   } else if (files === 0) {
-    // Tests may pass simply because nothing was attempted. No diff => no
-    // demonstrated output, so cap the score rather than rewarding a no-op.
     reasons.push('no files changed');
-    score = testsPassed === true ? 30 : 20;
+    score = 0;
   } else {
-    const base = testsPassed === true ? 80 : 40;
-    const changeBonus = Math.min(20, files * 4);
-    const churnPenalty = churn > 400 ? 10 : 0;
-    score = Math.max(0, Math.min(100, base + changeBonus - churnPenalty));
+    const correctness = testsPassed === true ? RUBRIC.correctness : RUBRIC.correctness * 0.5;
+    const minimality = RUBRIC.minimality * (1 - Math.min(1, churn / RUBRIC.churnCap()));
+    const focus = RUBRIC.focus * (1 - Math.min(1, Math.max(0, files - 1) / RUBRIC.focusCap()));
+    const speed = durationMs > 0 ? RUBRIC.speed * (1 - Math.min(1, durationMs / RUBRIC.speedCapMs())) : RUBRIC.speed * 0.5;
+    const total = Math.max(0, Math.min(100, correctness + minimality + focus + speed));
+    rubric = { correctness: r1(correctness), minimality: r1(minimality), focus: r1(focus), speed: r1(speed), total: Math.round(total) };
+    score = Math.round(total);
+    reasons.push(`rubric: correct=${rubric.correctness} minimal=${rubric.minimality} focus=${rubric.focus} speed=${rubric.speed}`);
+    if (testsPassed === null) reasons.push('test signal unmeasured; correctness halved');
   }
 
   return {
+    scoringVersion: SCORING_VERSION,
     measured: testsPassed !== null || files > 0,
     ...(testCommand ? { testCommand } : {}),
     testsPassed,
@@ -136,6 +170,7 @@ export async function scorePipelineRun(
     diff,
     regressionRisk,
     score,
+    rubric,
     reasons,
   };
 }

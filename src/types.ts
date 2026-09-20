@@ -60,6 +60,8 @@ export type ProvenanceEventType =
   | 'self_learning_directive_applied'
   | 'selfhosted_tool_called'
   | 'selfhosted_tool_removed'
+  | 'agent_tool_called'
+  | 'agent_tools_run'
   | 'capability_adopted'
   | 'capability_reverted'
   | 'capability_served'
@@ -79,6 +81,8 @@ export type ProvenanceEventType =
   | 'selfuse_error'
   | 'benchmark_run'
   | 'benchmark_attested'
+  | 'open_ended_cycle'
+  | 'open_ended_patch'
   | 'global_lens_publish';
 
 export interface ProvenanceEvent {

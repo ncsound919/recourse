@@ -27,6 +27,7 @@
 import type { ToolDomain } from '../types';
 import { hashString } from './engine';
 import { scoreGeneWithProperties } from './property-harness';
+import { pruneLearnerBeliefs, type BeliefPruneReport, type PruneOptions } from '../lib/openEnded/gates.js';
 import { createGeneRegistryStore } from './mutator';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -312,6 +313,19 @@ export class RecursiveLearner {
       replayable: true,
     };
     return means;
+  }
+
+  /** Merge behavioral-duplicate gene beliefs (same capability under different
+   *  hex suffixes / casing / scaffold prefixes) and optionally retire beliefs
+   *  below an explicit noise floor. Pure merge in `openEnded/gates`; this
+   *  method applies it to the durable state and returns the before/after
+   *  report. Nothing is dropped unless it is provably a duplicate or clears the
+   *  supplied floor. */
+  async pruneBeliefs(opts: PruneOptions = {}): Promise<BeliefPruneReport> {
+    const state = await this.loadOrDefault();
+    const { state: next, report } = pruneLearnerBeliefs(state as unknown as Parameters<typeof pruneLearnerBeliefs>[0], opts);
+    await this.store.saveState(next as unknown as LearnerState);
+    return report;
   }
 
   /** Re-execute the entire ledger from genesis without persisting, and

@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createComposeRouter } from '../src/routes/compose';
-import { ComposerLearner, defaultLearnerFile } from '../src/lib/composer/index';
+import { ComposerLearner } from '../src/lib/composer/index';
 
 const servers: http.Server[] = [];
 const dirs: string[] = [];
@@ -19,7 +19,7 @@ afterEach(async () => {
 async function setup(denyWrites = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'recourse-compose-'));
   dirs.push(dir);
-  const learner = new ComposerLearner(defaultLearnerFile(path.join(dir, 'learner.json')));
+  const learner = new ComposerLearner(path.join(dir, 'learner.json'));
   const guard = (_req: express.Request, res: express.Response) => {
     if (!denyWrites) return true;
     res.status(401).json({ success: false, error: 'unauthorized' });

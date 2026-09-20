@@ -3,7 +3,6 @@ import express from 'express';
 import path from 'path';
 import crypto from 'crypto';
 import fs from 'fs';
-import { spawn } from 'node:child_process';
 import { createServer as createViteServer } from 'vite';
 import {
   ToolEntry,
@@ -218,6 +217,12 @@ import {
 } from './src/lib/isolatedSandbox.js';
 import { VectorMemory, openVectorMemory, MemoryKind } from './src/lib/vectorMemory.js';
 import { buildFleetMemoryEntry } from './src/lib/fleetMemory.js';
+// Open-Ended Capability Engine — problem minting, curriculum, novelty/property
+// gates, patch-mode editing, and dedup-aware fleet recursion.
+import { OpenEndedArchive } from './src/lib/openEnded/archive.js';
+import { runOpenEndedCycle, type OpenEndedCycleResult } from './src/lib/openEnded/engine.js';
+import { FleetRecursionLedger, summarizeFleetRecursion } from './src/lib/openEnded/fleetRecursion.js';
+import { runPatchAttempt } from './src/lib/openEnded/patchMode.js';
 
 // Intake / benchmark / readout subsystem
 import { SignalStore, DEFAULT_TOPIC_QUERIES, DEFAULT_RSS_FEEDS } from './src/intake/store.js';
@@ -242,7 +247,7 @@ import type {
 
 // Skill library accessor (catalog, search, read sibling skill repositories)
 import { scanSkillLibraries } from './src/skills/scanner.js';
-import { summarize as summarizeSkills, skillDigest, searchSkills, DEFAULT_SKILL_ROOTS } from './src/skills/index.js';
+import { summarize as summarizeSkills, skillDigest, searchSkills, defaultSkillRoots } from './src/skills/index.js';
 import type { SkillRoot, SkillDef, SkillSnapshot, SkillSummary } from './src/skills/types.js';
 // Skill exporter/importer (Phase 4 distribution — registry tools <-> SKILL.md)
 import {
@@ -304,6 +309,19 @@ import { createIntelRouter } from './src/routes/intel.js';
 import { createReporterRouter } from './src/routes/reporter.js';
 import { createSelfhostedRouter } from './src/routes/selfhosted.js';
 import { createComposeRouter } from './src/routes/compose.js';
+import { createRatingRouter } from './src/routes/rating.js';
+import { RatingStore, defaultRatingLedger } from './src/lib/rating/store.js';
+import { createVoiceRouter } from './src/routes/voice.js';
+import { createFleetVoiceRouter } from './src/routes/fleetVoice.js';
+import { createAgentToolsRouter } from './src/routes/agentTools.js';
+import { createAgentToolRegistry } from './src/lib/agentTools.js';
+import type { SystemTool } from './src/lib/agentTools.js';
+import { createMcpServerRegistry } from './src/lib/mcpToolProvider.js';
+import { createRouteToolProvider } from './src/lib/routeTools.js';
+import { createFederationToolProvider } from './src/lib/federationTools.js';
+import { createSkillToolProvider } from './src/lib/skillTools.js';
+import { configureSkillAwareness, skillAwareChat, makeSkillBodyReader } from './src/lib/skillContext.js';
+import { runToolCallingAgent } from './src/lib/toolCalling.js';
 import { loadBusinessProfile, listBusinessSlugs } from './src/autopilot/businessProfile.js';
 import type { BusinessProfileT } from './src/autopilot/businessProfile.js';
 import { publishToGlobalLens } from './src/lib/globalLensBridge.js';
@@ -328,6 +346,17 @@ const productRouter = createProductRouter({
   wallet,
   repoRoot: () => devRepoRoot(),
   requireMutationAuth,
+});
+// Voice-clone profiles + zero-shot synthesis (see src/routes/voice.ts). Follows
+// the config-gated guard so local dashboards keep working unauthenticated while
+// a configured secret still protects the mutating profile writes.
+const voiceRouter = createVoiceRouter({ requireMutationAuth: requireMutationAuthIfConfigured });
+// Spoken Axiom/OpenHub summaries (read-only). The real probes are injected here
+// so the router stays pure/testable and the monolith owns the live state.
+const fleetVoiceRouter = createFleetVoiceRouter({
+  axiomStatus: axiomBridgeStatus,
+  axiomLatest: () => axiomProjectLatest(),
+  audit: () => loadAuditSnapshot() ?? null,
 });
 
 // Wave 2 safety layers: the shared policy engine (the approval store is created
@@ -523,6 +552,16 @@ async function runNightlyPass(force: boolean) {
         saveStateToDisk();
         return { ok: true, detail: `dream tick (${mirrored} gene(s) mirrored)`, data: { mirrored } };
       },
+      openended: async () => {
+        const result = await runOpenEndedEngineCycle();
+        const skipped = 'skipped' in result && result.skipped;
+        const r = result as OpenEndedCycleResult;
+        return {
+          ok: true,
+          detail: skipped ? 'open-ended cycle skipped' : `open-ended: minted ${r.minted}, solved=${r.solved}`,
+          data: result,
+        };
+      },
       forge: async () => {
         const result = await runForgeCycle();
         const skipped = 'skipped' in result && result.skipped;
@@ -635,8 +674,8 @@ process.on('unhandledRejection', (reason) => {
   process.exit(1);
 });
 
-// Dream-engine model generator: asks the configured local model (e.g. the
-// HF Qwen3.5-4B build, served via Ollama) to propose a falsifiable hypothesis
+// Dream-engine model generator: asks the configured local model (the Spark
+// model served by llama-server) to propose a falsifiable hypothesis
 // in a random domain WITH plain-JS implementation and real assert tests. The
 // Dreaming Engine runs those tests before the thought can ever promote.
 const DREAM_DOMAINS: ToolDomain[] = ['math', 'coding', 'biotech', 'systemic', 'neuro_symbolic', 'cyber_defense', 'quantum_sim'];
@@ -646,7 +685,7 @@ async function dreamModelGenerator(input?: { domain?: ToolDomain; recentHypothes
   if (!online) return null;
   const recent = (input?.recentHypotheses || []).slice(0, 3);
   const domain = input?.domain || DREAM_DOMAINS[Math.floor(Math.random() * DREAM_DOMAINS.length)];
-  const result = await chatComplete([
+  const result = await skillAwareChat([
     {
       role: 'system',
       content: `You are the dream layer of an autonomous code-discovery system. Propose ONE falsifiable hypothesis in domain "${domain}" for a small, genuinely implementable micro-tool.
@@ -795,7 +834,7 @@ let capabilityServed: Partial<Record<CapabilityId, number>> = {};
 let systemSnapshots: SystemSnapshot[] = [];
 let systemBaseline: SystemSnapshot | null = null;
 
-// Model provider mode persisted across restarts ('local' Ollama | 'api' LLM).
+// Model provider mode persisted across restarts ('local' Spark | 'api' LLM).
 let providerMode: ProviderProfileId = 'api';
 
 // Builder Brain (meta-loop that improves the generator) persisted state.
@@ -852,7 +891,10 @@ export interface DevLoopEntry {
 let devLoopLog: DevLoopEntry[] = [];
 let devAutopilotOn = false;
 let devTimer: NodeJS.Timeout | null = null;
-const DEV_AUTOPILOT_MS = 60_000;
+// Dev (audit/repair) autopilot cadence. Env-overridable and floored at 60s so a
+// CPU-bound box doesn't register a minute-cadence job that node-cron reports as
+// "missed execution" whenever the event loop is briefly busy. Default 5 min.
+const DEV_AUTOPILOT_MS = Math.max(60_000, Number(process.env.DEV_AUTOPILOT_MS) || 5 * 60 * 1000);
 installDefaultFleetDrivers();
 
 // Stuck-aware self-repair: watched issues + escalation ledger (persisted).
@@ -1276,7 +1318,7 @@ let corpusDispatched = 0;
 let corpusRefilledHashes: string[] = [];
 
 // Skill library state: configured roots + durable catalog of discovered skills.
-let skillRoots: SkillRoot[] = DEFAULT_SKILL_ROOTS.map((r) => ({ ...r }));
+let skillRoots: SkillRoot[] = defaultSkillRoots();
 let skillCatalog: SkillDef[] = [];
 let skillLastScan: number | null = null;
 let skillFound = 0;
@@ -1350,7 +1392,14 @@ function loadStateFromDisk() {
       if (Array.isArray(data.corpusLastErrors)) corpusLastErrors = data.corpusLastErrors;
       if (typeof data.corpusDispatched === 'number') corpusDispatched = data.corpusDispatched;
       if (Array.isArray(data.corpusRefilledHashes)) corpusRefilledHashes = data.corpusRefilledHashes;
-      if (Array.isArray(data.skillRoots) && data.skillRoots.length) skillRoots = data.skillRoots;
+      if (Array.isArray(data.skillRoots) && data.skillRoots.length) {
+        skillRoots = data.skillRoots;
+        // Merge in new default skill libraries (e.g. newly added roots) without
+        // duplicating or dropping user-configured roots.
+        for (const d of defaultSkillRoots()) {
+          if (!skillRoots.some((r: any) => r && r.id === d.id)) skillRoots.push({ ...d });
+        }
+      }
       if (Array.isArray(data.skillCatalog)) skillCatalog = data.skillCatalog;
       if (typeof data.skillLastScan === 'number') skillLastScan = data.skillLastScan;
       if (typeof data.skillFound === 'number') skillFound = data.skillFound;
@@ -1729,7 +1778,7 @@ function executeSelfRepair(
 }
 
 // API Routes
-import { axiomBridgeStatus, integrateAxiomTool, dispatchAxiomRepair, axiomReachable } from './src/lib/axiomBridge.js';
+import { axiomBridgeStatus, integrateAxiomTool, dispatchAxiomRepair, axiomReachable, axiomProjectLatest } from './src/lib/axiomBridge.js';
 // (hackingtool security routes extracted to src/routes/security.ts)
 
 app.get('/api/recourse/axiom/status', async (_req, res) => {
@@ -3274,53 +3323,14 @@ app.use(
   }),
 );
 
-// ---------------------------------------------------------------------------
 // =========================================================================
-// OPEN-SOURCE LOCAL MODEL API (OpenAI-compatible / Ollama)
+// MODEL PROVIDER CHAT (OpenAI-compatible)
 // =========================================================================
 
-// Real status: online only if the endpoint answers. Offline is reported as
-// offline - there is no "emulated" mode and no canned model metadata.
-app.post('/api/ollama/status', async (req, res) => {
-  const cfg = currentProviderStatus();
-  const online = await modelCheckOnline(false);
-  if (online) {
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 2000);
-      // Native Ollama serves its model list at the ROOT (/api/tags), not under
-      // the OpenAI shim (/v1/api/tags). Strip a trailing /v1 so live state
-      // resolves for both local Ollama and remote /v1 proxies that still speak
-      // native tags.
-      const tagsBase = cfg.baseUrl.replace(/\/v1\/?$/, '');
-      const r = await fetch(`${tagsBase}/api/tags`, { signal: controller.signal });
-      clearTimeout(timer);
-      if (r.ok) {
-        const data: any = await r.json();
-        return res.json({
-          success: true,
-          status: 'online',
-          endpoint: cfg.baseUrl,
-          model: cfg.model,
-          models: (data.models || []).map((m: any) => ({ name: m.name, size: m.size || null, family: m.family || null, parameter_size: m.details?.parameter_size || null, quantization_level: m.details?.quantization_level || null })),
-          hardware: null
-        });
-      }
-    } catch {}
-    return res.json({ success: true, status: 'online', endpoint: cfg.baseUrl, model: cfg.model, models: [], hardware: null });
-  }
-  res.json({
-    success: true,
-    status: 'offline',
-    endpoint: cfg.baseUrl,
-    model: cfg.model,
-    models: [],
-    hardware: null,
-    message: 'No model provider reachable at ' + cfg.baseUrl + '. Configure API_MODEL_BASE_URL / API_MODEL_NAME (or LOCAL_MODEL_* for an explicitly-configured local endpoint).'
-  });
-});
-
-app.post('/api/ollama/chat', async (req, res) => {
+// Non-agentic chat against the configured provider: the local Spark model
+// (llama-server) first, with an automatic API fallback. Online only if the
+// endpoint answers; offline/error are reported honestly, never fabricated.
+app.post('/api/recourse/provider/chat', async (req, res) => {
   const { model, prompt, system = '' } = req.body;
   const effectiveModel = model || currentProviderStatus().model;
   const started = Date.now();
@@ -3328,115 +3338,92 @@ app.post('/api/ollama/chat', async (req, res) => {
     return res.status(400).json({ success: false, status: 'error', error: 'prompt is required' });
   }
   const result = await chatComplete([
-    { role: 'system', content: system || ('You are a helpful assistant running locally via ' + effectiveModel + '.') },
+    { role: 'system', content: system || ('You are a helpful assistant running on ' + effectiveModel + '.') },
     { role: 'user', content: prompt }
   ], { temperature: 0.6 });
   const elapsed = Date.now() - started;
-    res.json({
-      success: true,
-      status: result.status,
-      model: effectiveModel,
-      response: result.content || '',
-      error: result.error || undefined,
-      metrics: {
-        totalDurationMs: result.latencyMs || elapsed,
-        loadDurationMs: 0,
-        promptEvalCount: 0,
-        evalCount: result.content ? Math.max(1, Math.round(result.content.length / 4)) : 0,
-        tokensPerSec: result.content ? Math.round((result.content.length / 4) / ((elapsed / 1000) || 1)) : 0
-      }
-    });
+  const completionTokens = result.usage?.completionTokens ?? (result.content ? Math.max(1, Math.round(result.content.length / 4)) : 0);
+  res.json({
+    success: true,
+    status: result.status,
+    model: result.model || effectiveModel,
+    response: result.content || '',
+    error: result.error || undefined,
+    metrics: {
+      totalDurationMs: result.latencyMs || elapsed,
+      promptEvalCount: result.usage?.promptTokens ?? 0,
+      evalCount: completionTokens,
+      tokensPerSec: completionTokens ? Math.round(completionTokens / ((elapsed / 1000) || 1)) : 0
+    }
   });
-
-// =========================================================================
-// LOCAL MODEL MANAGER (real `ollama` CLI integration)
-// =========================================================================
-
-const OLLAMA_BIN_CANDIDATES = [
-  process.env.OLLAMA_BIN,
-  path.join(process.env.USERPROFILE || '', 'AppData', 'Local', 'Programs', 'Ollama', 'ollama.exe'),
-  'ollama',
-].filter(Boolean) as string[];
-
-function resolveOllamaBin(): string | null {
-  for (const c of OLLAMA_BIN_CANDIDATES) {
-    try {
-      if (c === 'ollama' || fs.existsSync(c)) return c;
-    } catch { /* ignore */ }
-  }
-  return null;
-}
-
-let pullingModel: string | null = null;
-const pullLog: string[] = [];
-
-function managerStatus() {
-  return {
-    binFound: resolveOllamaBin() !== null,
-    pulling: pullingModel,
-    pullLogTail: pullLog.slice(-40),
-    model: currentProviderStatus().model,
-    baseUrl: currentProviderStatus().baseUrl,
-    online: currentProviderStatus().online,
-  };
-}
-
-app.get('/api/ollama/manage', (req, res) => {
-  if (process.env.OLLAMA_MANAGER_ENABLED !== '1') {
-    return res.json({
-      success: false,
-      disabled: true,
-      note: 'Local model manager disabled (OLLAMA_MANAGER_ENABLED not set). Generation runs through the API provider.',
-    });
-  }
-  res.json({ success: true, status: managerStatus() });
 });
 
-app.post('/api/ollama/manage', (req, res) => {
-  if (process.env.OLLAMA_MANAGER_ENABLED !== '1') {
-    return res.json({
-      success: false,
-      disabled: true,
-      note: 'Local model manager disabled (OLLAMA_MANAGER_ENABLED not set). Generation runs through the API provider.',
-    });
+// OpenAI-compatible chat shim for external bot clients (Open-Chat). Wraps the
+// same provider chain as /api/recourse/provider/chat (local model first, then
+// the API fallback) so Open-Chat's generic HTTP protocol works unchanged.
+// JSON by default; SSE when `stream:true`. Honest on failure — never fabricates.
+app.post('/v1/chat/completions', async (req, res) => {
+  // Bearer gate (RECOURSE_CHAT_TOKEN). This endpoint is reachable through the
+  // public Cloudflare tunnel, so it must not be an open model proxy. Mirrors
+  // OpenHub's fail-closed pattern: unset token => endpoint refuses.
+  const expected = (process.env.RECOURSE_CHAT_TOKEN || '').trim();
+  if (!expected) {
+    return res.status(401).json({ error: { message: 'Chat endpoint disabled: set RECOURSE_CHAT_TOKEN.', type: 'invalid_request_error' } });
   }
-  const { action, model } = req.body ?? {};
-  const bin = resolveOllamaBin();
-
-  if (!bin) {
-    return res.status(400).json({ success: false, error: 'ollama CLI not found. Set OLLAMA_BIN to its full path.' });
+  const authHeader = String(req.headers['authorization'] || '');
+  const bearer = /^Bearer\s+(.+)$/i.exec(authHeader.trim());
+  const got = bearer ? bearer[1].trim() : '';
+  let diff = got.length === expected.length ? 0 : 1;
+  for (let i = 0; i < got.length && got.length === expected.length; i++) diff |= got.charCodeAt(i) ^ expected.charCodeAt(i);
+  if (diff !== 0) {
+    return res.status(401).json({ error: { message: 'unauthorized', type: 'invalid_request_error' } });
   }
 
-  if (action === 'pull') {
-    const target = (model || currentProviderStatus().model).trim();
-    if (!target) return res.status(400).json({ success: false, error: 'model name is required' });
-    if (pullingModel) {
-      return res.json({ success: true, note: `Already pulling "${pullingModel}".`, status: managerStatus() });
+  const body = req.body || {};
+  const messages = Array.isArray(body.messages) ? body.messages : [];
+  const textOf = (m: any) => (typeof m?.content === 'string' ? m.content : JSON.stringify(m?.content ?? ''));
+  const system = messages.filter((m: any) => m?.role === 'system').map(textOf).join('\n').trim();
+  const user = messages.filter((m: any) => m?.role !== 'system').map(textOf).filter((s: string) => s && s.trim()).join('\n\n').trim();
+
+  if (!user) {
+    return res.status(400).json({ error: { message: 'messages must include a non-empty user message.', type: 'invalid_request_error' } });
+  }
+
+  const model = (typeof body.model === 'string' && body.model.trim())
+    ? body.model.trim()
+    : currentProviderStatus().model;
+  const created = Math.floor(Date.now() / 1000);
+  const id = `chatcmpl-recourse-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+  try {
+    const result = await chatComplete([
+      { role: 'system', content: system || ('You are a helpful assistant running on ' + model + '.') },
+      { role: 'user', content: user },
+    ], { temperature: 0.6 });
+    const content = result.content || '';
+
+    if (body.stream) {
+      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.flushHeaders?.();
+      const frame = (payload: unknown) => res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      frame({ id, object: 'chat.completion.chunk', created, model, choices: [{ index: 0, delta: { role: 'assistant', content }, finish_reason: null }] });
+      frame({ id, object: 'chat.completion.chunk', created, model, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] });
+      res.write('data: [DONE]\n\n');
+      return res.end();
     }
-    pullingModel = target;
-    pullLog.length = 0;
-    const child = spawn(bin, ['pull', target], { windowsHide: true });
-    child.stdout.on('data', (d) => { pullLog.push(String(d)); if (pullLog.length > 200) pullLog.splice(0, pullLog.length - 200); });
-    child.stderr.on('data', (d) => { pullLog.push(String(d)); if (pullLog.length > 200) pullLog.splice(0, pullLog.length - 200); });
-    child.on('close', () => { pullingModel = null; modelCheckOnline(true).catch(() => {}); });
-    res.json({ success: true, note: `Started pulling ${target}.`, status: managerStatus() });
-    return;
-  }
 
-  if (action === 'serve') {
-    const child = spawn(bin, ['serve'], { detached: true, stdio: 'ignore', windowsHide: true });
-    child.unref();
-    res.json({ success: true, note: 'Attempted to start `ollama serve`. Poll the model status endpoint to confirm.' });
-    return;
+    res.json({
+      id,
+      object: 'chat.completion',
+      created,
+      model: result.model || model,
+      choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }],
+    });
+  } catch (err: any) {
+    res.status(502).json({ error: { message: String(err?.message || err).slice(0, 300) || 'chat failed', type: 'upstream_error' } });
   }
-
-  if (action === 'stop-pull') {
-    pullingModel = null;
-    res.json({ success: true, note: 'Pull state cleared (the OS process may still finish in the background).', status: managerStatus() });
-    return;
-  }
-
-  res.status(400).json({ success: false, error: "unknown action - use 'pull', 'serve' or 'stop-pull'" });
 });
 
 // =========================================================================
@@ -4304,6 +4291,95 @@ app.use('/api/recourse', selfhostedRouter.router);
 // Boot auto-supervision after boot self-host verification settles.
 setTimeout(() => { try { selfhostedRouter.ensureLoops(); } catch { /* non-fatal */ } }, 400);
 
+// ---------------------------------------------------------------------------
+// MODEL-NATIVE TOOL CALLING (OpenAI-compatible `tools` via the local Spark model
+// or the API profile). Tools = sandboxed self-hosted artifacts + read-only host
+// operations (the same in-process A2A ops) + the Recourse MCP server's tool set.
+// ---------------------------------------------------------------------------
+/** Read-only host operations exposed as `system_*` tools. Reuses the in-process
+ *  A2A operations (which call the REST routes), skipping mutating ones so the
+ *  model's read surface never silently writes. */
+function buildAgentSystemTools(): SystemTool[] {
+  const schema: Record<string, Record<string, unknown>> = {
+    'recourse.recall_memory': {
+      type: 'object',
+      properties: {
+        q: { type: 'string', description: 'Semantic query text.' },
+        kind: { type: 'string', description: 'Optional memory kind (gene|lesson|hypothesis|signal|snapshot).' },
+        topK: { type: 'number', description: 'How many hits to return (default 5).' },
+      },
+      required: ['q'],
+    },
+    'recourse.skill_verify': {
+      type: 'object',
+      properties: { id: { type: 'string', description: 'Skill id to verify.' } },
+      required: ['id'],
+    },
+  };
+  try {
+    const ops = buildA2aOperations();
+    return Object.entries(ops)
+      .filter(([, op]) => op.skill.mutating !== true)
+      .map(([id, op]) => ({
+        name: id.replace(/^recourse\./, ''),
+        description: op.skill.description || op.skill.name,
+        parameters: schema[id] ?? { type: 'object', properties: {} },
+        invoke: (args: Record<string, unknown>) => op.run(args),
+      }));
+  } catch {
+    return [];
+  }
+}
+
+const mcpToolProvider = createMcpServerRegistry();
+/** Read a positive integer turn cap from env, clamped (bad values fall back). */
+function agentTurns(envName: string, fallback: number, cap = 8): number {
+  const n = Number(process.env[envName] ?? fallback);
+  return Number.isFinite(n) && n > 0 ? Math.min(n, cap) : fallback;
+}
+// On-disk skill libraries (fleet-skills / ECC): list + read SKILL.md and run
+// bundled scripts. The catalog is scanned lazily on first use if not yet loaded.
+const skillToolProvider = createSkillToolProvider({
+  ensureCatalog: async () => {
+    if (!skillCatalog.length) {
+      try { await runSkillScan(); } catch { /* honest: leaves the catalog empty */ }
+    }
+    return skillCatalog;
+  },
+  getRoots: () => skillRoots,
+});
+// Live REST operations (every bridge/sidecar route) become model tools.
+const routeToolProvider = createRouteToolProvider({
+  spec: buildOpenApiSpec(`http://127.0.0.1:${PORT}`),
+  baseUrl: `http://127.0.0.1:${PORT}`,
+  secret: process.env.RECOURSE_API_SECRET,
+});
+// Signed peer skills from federated sync become model tools.
+const federationToolProvider = createFederationToolProvider({ registry: skillRegistry });
+const agentToolRegistry = createAgentToolRegistry({
+  systemTools: buildAgentSystemTools(),
+  mcp: mcpToolProvider,
+  skills: skillToolProvider,
+  extra: [routeToolProvider, federationToolProvider],
+});
+// Make autonomous generation skill-aware: self-improvement/research loops
+// retrieve relevant skills and (where safe) call the skills tools.
+configureSkillAwareness({
+  getCatalog: () => skillCatalog,
+  provider: skillToolProvider,
+  readSkill: makeSkillBodyReader(() => skillRoots),
+});
+app.use('/api/recourse', createAgentToolsRouter({
+  registry: agentToolRegistry,
+  chat: chatComplete,
+  // Per-tool gating: read tools always; mutating tools only with the secret
+  // (open mode when no secret is configured).
+  isAuthorized: (req) => !process.env.RECOURSE_API_SECRET || hasValidMutationSecret(req),
+  mcpStatus: () => mcpToolProvider.statusDetailed(),
+  maxTurns: agentTurns('AGENT_TOOLS_MAX_TURNS', 4),
+  appendProvenanceEvent: (type, data) => appendProvenanceEvent(type as any, data),
+}));
+
 // Execute Self-Learning Directive to synthesize a template component
 app.post('/api/recourse/learn/synthesize-directive', async (req, res) => {
   try {
@@ -4544,8 +4620,8 @@ app.post('/api/recourse/verify', (req, res) => {
   res.json({ result: verifierResult });
 });
 
-// AI Self-Evolver using Gemini with Resilient Fallback
-// AI Self-Evolver via the configured open-source model provider (OpenAI-compatible / Ollama).
+// AI Self-Evolver via the configured open-source model provider
+// (OpenAI-compatible: local Spark model or remote API).
 // No canned fallbacks exist: if the model is offline the request reports
 // model_unavailable and NOTHING is added to the registry. A mutation only
 // reaches the registry after its source code passes the real sandbox verifier.
@@ -4580,7 +4656,7 @@ Return ONLY valid JSON with this exact shape:
 You are producing a candidate for domain: ${domainList}. Tool name will be: ${toolName}.
 Write honest tests that would fail if the function were wrong. Do not reference undeclared variables.`;
 
-    const result = await chatComplete([
+    const result = await skillAwareChat([
       { role: 'system', content: systemPrompt },
       { role: 'user', content: promptInstructions }
     ], { temperature: status.hyperParams?.mutationTemperature ?? 0.2, json: true });
@@ -5638,7 +5714,7 @@ app.post('/api/recourse/github/import', async (req, res) => {
 // =========================================================================
 //
 // The swarm does not fake completion. Queued tasks are worked by the
-// configured local model (e.g. Qwen3.5-4B via Ollama): each task produces a
+// configured local model (the Spark model via llama-server): each task produces a
 // code candidate + assert suite that must PASS the real sandbox verifier
 // before the task is marked completed and a tool is registered. Offline model
 // => tasks stay queued, honestly.
@@ -5674,17 +5750,45 @@ async function executeSwarmTask(task: SubAgentTask): Promise<boolean> {
 Return ONLY valid JSON: {"description": "one sentence", "sourceCode": "PLAIN JAVASCRIPT, no TS/imports, exported with 'export function' or 'export class'", "testSuiteCode": "lines starting with assert that call your real functions and fail if the implementation is wrong"}.
 Your code is run in an isolated sandbox against your own tests. No placeholders.`;
 
-  const result = await chatComplete([
+  // A subagent may call tools (inspect the registry/memory, run a self-hosted
+  // tool) before writing the candidate. The loop is bounded, executes tool calls
+  // through the same sandbox/guards as everything else, and only a final
+  // non-tool turn yields the JSON parsed below. Offline/error stays honest.
+  const agentRun = await runToolCallingAgent([
     { role: 'system', content: system },
     { role: 'user', content: `Task: ${task.title}\nDomain: ${task.domain}` },
-  ], { temperature: 0.3, json: true });
+  ], {
+    chat: chatComplete,
+    registry: agentToolRegistry,
+    maxTurns: agentTurns('AGENT_TOOLS_MAX_TURNS', 4),
+    temperature: 0.3,
+  });
+  const result = {
+    ok: agentRun.status === 'completed',
+    content: agentRun.content,
+    status: agentRun.status === 'offline' ? 'offline' : agentRun.status === 'error' ? 'error' : 'online',
+    model: agentRun.model || currentProviderStatus().model,
+    latencyMs: 0,
+    error: agentRun.error,
+  };
 
   let parsed: any = null;
-  if (result.ok && result.content) {
-    const block = extractJsonBlock(result.content);
-    if (block) {
-      try { parsed = JSON.parse(block); } catch { parsed = null; }
-    }
+  const parseSwarmJson = (content: string | null | undefined): any => {
+    if (!content) return null;
+    const block = extractJsonBlock(content);
+    if (!block) return null;
+    try { return JSON.parse(block); } catch { return null; }
+  };
+  if (result.ok && result.content) parsed = parseSwarmJson(result.content);
+  // Tool-augmented turns are not JSON-constrained, so if the bounded loop did
+  // not end on usable JSON, retry once with a strict JSON completion. This keeps
+  // the swarm's original save-then-requeue behaviour from regressing.
+  if (!parsed && result.status === 'online') {
+    const strict = await chatComplete([
+      { role: 'system', content: system },
+      { role: 'user', content: `Task: ${task.title}\nDomain: ${task.domain}` },
+    ], { temperature: 0.3, json: true });
+    if (strict.ok && strict.content) parsed = parseSwarmJson(strict.content);
   }
 
   const source = parsed && typeof parsed.sourceCode === 'string' ? parsed.sourceCode.trim() : '';
@@ -6522,7 +6626,7 @@ async function solveNextMathProblem(): Promise<MathAttempt | { skipped: boolean;
       (target.bound ? `Bound: test up to N=${target.bound}.\n` : '') +
       `Acceptance test to satisfy:\n${target.acceptanceTest}`;
 
-    const result = await chatComplete(
+    const result = await skillAwareChat(
       [{ role: 'system', content: system }, { role: 'user', content: user }],
       { temperature: 0.1, json: true },
     );
@@ -6603,7 +6707,7 @@ async function generateNextBiotechClaim(): Promise<LedgerBiotechClaim | { skippe
     const drug = drugs[Math.floor(Math.random() * drugs.length)];
     const leg = drug.leg;
     const system = `You are a precision oncology researcher. Given this drug: ${drug.id} (${drug.drugClass}), mechanism: ${drug.mechanism}, target: ${drug.targetProtein}, clinical indication: ${drug.clinicalIndication}. Propose a NOVEL mechanism hypothesis within the "${leg}" leg of cancer growth. The claim must include: (1) a novel mechanism different from the known mechanism, (2) a specific target/interaction not in the known mechanism, (3) evidence tier 1-5, (4) a literature citation. Return ONLY valid JSON: {"mechanism": "string", "evidence_tier": number, "source": "string"}.`;
-    const result = await chatComplete([
+    const result = await skillAwareChat([
       { role: 'system', content: system },
       { role: 'user', content: `Propose a novel mechanism hypothesis for ${drug.id} within the "${leg}" leg. Your mechanism must be DIFFERENT from its known mechanism: "${drug.mechanism}". Return JSON only.` },
     ], { temperature: 0.4, json: true });
@@ -7092,6 +7196,10 @@ app.get('/api/recourse/benchmark/leaderboard', (req, res) => {
 // Productized surfaces (telemetry / audio / wallet) are mounted from their own
 // router module — see src/routes/product.ts.
 app.use('/api/recourse', productRouter.router);
+// Voice-clone profiles + zero-shot synthesis (record a clip, speak in it).
+app.use('/api/recourse', voiceRouter);
+// Spoken Axiom/OpenHub briefs + transition feed.
+app.use('/api/recourse', fleetVoiceRouter);
 // Policy / approvals / deploy (Wave 2), namespaced to avoid route collisions.
 app.use('/api/recourse/ops', opsRouter);
 // Prometheus metrics exposition (Wave 2 observability).
@@ -7829,6 +7937,17 @@ const composeRouter = createComposeRouter({
 });
 app.use('/api/recourse', composeRouter);
 
+// Cross-app pairwise rating store (ChordStudio / SoundLab -> Elo standings).
+// Generic and separate from the composer learner: it ranks opaque external
+// variations by a client-computed paramHash, never re-generating the audio.
+const ratingStore = new RatingStore(defaultRatingLedger());
+app.use('/api/recourse', createRatingRouter({
+  store: ratingStore,
+  // Config-gated: open on a default unconfigured local run so the desktop UI
+  // can rate, enforced the moment RECOURSE_API_SECRET is set.
+  requireMutationAuth: requireMutationAuthIfConfigured,
+}));
+
 /**
  * Music sector descriptor (read-only). Makes the sector a discoverable surface
  * for the UI/MCP without mutating anything. Example:
@@ -8350,6 +8469,187 @@ function builderSnapshot() {
     beliefs: computeBuilderBeliefs(builderProfiles, builderJournal),
     journalSize: builderJournal.length,
     variantTrials: builderVariantTrials,
+  };
+}
+
+// =========================================================================
+// OPEN-ENDED CAPABILITY ENGINE
+// -------------------------------------------------------------------------
+// dream -> MINT a problem (with a sandbox-proven hidden reference) ->
+// CURRICULUM pick (learner beliefs) -> RECALL inspiration from durable memory
+// -> SOLVE with the model -> novelty + property + acceptance gates -> archive
+// -> learn back. Fills the gap where the forge only ever rebuilt a fixed list
+// of 26 hardcoded micro-functions and never learned a genuinely new target.
+// =========================================================================
+
+const OPEN_ENDED_FILE = process.env.RECOURSE_OPEN_ENDED_FILE || path.join(process.cwd(), 'data', 'open-ended', 'problems.json');
+const OPEN_ENDED_CYCLES_FILE = process.env.RECOURSE_OPEN_ENDED_CYCLES_FILE || path.join(process.cwd(), 'data', 'open-ended', 'cycles.jsonl');
+let openEndedArchive: OpenEndedArchive | null = null;
+let openEndedBusy = false;
+const openEndedCycleLog: OpenEndedCycleResult[] = [];
+const fleetRecursion = new FleetRecursionLedger();
+
+function getOpenEndedArchive(): OpenEndedArchive {
+  if (!openEndedArchive) openEndedArchive = new OpenEndedArchive(OPEN_ENDED_FILE, 4);
+  return openEndedArchive;
+}
+
+function appendOpenEndedCycle(result: OpenEndedCycleResult): void {
+  openEndedCycleLog.push(result);
+  if (openEndedCycleLog.length > 100) openEndedCycleLog.splice(0, openEndedCycleLog.length - 100);
+  try {
+    fs.mkdirSync(path.dirname(OPEN_ENDED_CYCLES_FILE), { recursive: true });
+    fs.appendFileSync(OPEN_ENDED_CYCLES_FILE, JSON.stringify({ at: Date.now(), ...result }) + '\n', 'utf-8');
+  } catch { /* best-effort cycle log */ }
+}
+
+/** Approximate fast-check input shapes for the property gate, from the
+ *  problem's required export name. Catches infinite loops / mutation for array
+ *  and numeric capabilities; returns null for constructor-style problems where
+ *  vector-shaped arbitraries do not apply. */
+function propertyVectorsForProblem(problem: { functionName: string; vectors?: unknown[] }): unknown[] | null {
+  // Prefer the minted problem's own sample calls: they have the correct
+  // parameter arity and shapes for any domain (arrays, strings, objects).
+  if (Array.isArray(problem.vectors) && problem.vectors.length) return problem.vectors;
+  const n = problem.functionName.toLowerCase();
+  if (/arr|list|array|chunk|merge|flatten|sort|dedupe|search|sieve|top|uniq/.test(n)) return [[[]], [[1, 2, 3]], [[5]]];
+  if (/cache|class|constructor/.test(n)) return null;
+  return [[0], [1], [2], [7]];
+}
+
+/** Build open-ended deps from real server state and run one engine cycle. */
+async function runOpenEndedEngineCycle(): Promise<OpenEndedCycleResult | { skipped: boolean; reason: string }> {
+  if (openEndedBusy) return { skipped: true, reason: 'open-ended cycle already running' };
+  openEndedBusy = true;
+  try {
+    const archive = getOpenEndedArchive();
+    const learnerState = await learner.status().catch(() => null);
+    type BeliefRow = { domain: string; alpha: number; beta: number; attempts: number };
+    const beliefs: BeliefRow[] = learnerState
+      ? Object.values(learnerState.geneBeliefs as Record<string, BeliefRow>).map((b) => ({
+          domain: b.domain,
+          alpha: b.alpha,
+          beta: b.beta,
+          attempts: b.attempts,
+        }))
+      : [];
+    const knownDomains = ['coding', 'math', 'biotech', 'systemic', 'neuro_symbolic', 'cyber_defense', 'quantum_sim'];
+
+    // Durable-memory inspiration pool (best-effort; empty when memory is offline).
+    let memory: Array<{ id: string; text: string; payload?: unknown }> = [];
+    try {
+      const mem = await ensureVectorMemory();
+      const hits = await mem.recall('capability tool problem implementation solution', null, 40);
+      memory = hits
+        .filter((h) => typeof h.text === 'string' && h.text.length > 20)
+        .map((h) => ({ id: h.id, text: h.text, payload: h.meta }));
+    } catch { /* memory unavailable -> no inspiration */ }
+
+    const verifyInSandbox = (source: string, suite: string) => {
+      const run = executeTestSuite(source, suite);
+      return { passed: run.passed, testDetails: run.testDetails };
+    };
+
+    const result = await runOpenEndedCycle({
+      archive,
+      beliefs,
+      knownDomains,
+      minUnsolved: Math.max(0, Math.floor(Number(process.env.OPEN_ENDED_MIN_UNSOLVED) || 6)),
+      maxMintRounds: Math.max(1, Math.min(6, Math.floor(Number(process.env.OPEN_ENDED_MINT_ROUNDS) || 3))),
+      mint: {
+        context:
+          'verified, self-contained micro-capabilities across coding, mathematics, cyber-defense, ' +
+          'quantum simulation, neuro-symbolic reasoning and systemic domains',
+        count: Math.max(1, Math.min(4, Math.floor(Number(process.env.OPEN_ENDED_MINT_BATCH) || 2))),
+        draft: async (system, user) => {
+          const res = await chatComplete(
+            [
+              { role: 'system', content: system },
+              { role: 'user', content: user },
+            ],
+            { temperature: 0.4 },
+          );
+          if (!res.ok || res.content === null) throw new Error(res.error || 'model offline');
+          return res.content;
+        },
+        verify: verifyInSandbox,
+      },
+      solver: async (problem, inspirationHint) => {
+        const system =
+          'You write plain JavaScript micro-functions. Return ONLY source. No Markdown fences, no prose, ' +
+          `no imports, no TypeScript. Define and export exactly one function named ${problem.functionName}. ` +
+          'Match the contract exactly and handle edge cases (empty inputs, bounds) explicitly.';
+        const res = await chatComplete(
+          [
+            { role: 'system', content: system },
+            { role: 'user', content: `${problem.statement}\n\n${inspirationHint}\n\nReturn only the source.` },
+          ],
+          { temperature: 0.2 },
+        );
+        if (res.ok && res.content) {
+          const source = res.content.replace(/```(?:js|javascript)?/gi, '').replace(/```/g, '').trim();
+          if (source.length > 10) return { ok: true, source, detail: 'model' };
+        }
+        // Fallback: the deterministic Axiom builder. Build-only (the engine runs
+        // its own novelty + property + acceptance gates before promoting), so an
+        // Axiom solution that fails a gate never leaves an orphan self-hosted tool.
+        try {
+          if (await axiomReachable()) {
+            const ax = await integrateAxiomTool(
+              problem.functionName,
+              problem.domain as ToolDomain,
+              problem.statement,
+              problem.acceptanceTest,
+              { selfHost: false },
+            );
+            if (ax.ok && ax.sourceCode) return { ok: true, source: ax.sourceCode, detail: 'axiom' };
+            return { ok: false, detail: ax.error || 'Axiom produced no verified source' };
+          }
+        } catch (err: any) {
+          return { ok: false, detail: `axiom fallback error: ${err?.message ?? String(err)}` };
+        }
+        return { ok: false, detail: res.error || 'model offline and Axiom unreachable' };
+      },
+      verify: verifyInSandbox,
+      propertyVectorsFor: propertyVectorsForProblem,
+      maxSolveAttempts: Math.max(1, Math.min(4, Math.floor(Number(process.env.OPEN_ENDED_SOLVE_TRIES) || 2))),
+      memory,
+      noveltyPool: registry.map((t) => `${t.name} ${t.description ?? ''}`),
+    });
+
+    appendOpenEndedCycle(result);
+
+    // Learn back: fold the real outcome into the recursive learner.
+    if (result.picked) {
+      await learner
+        .learnRealTools([{ name: result.picked.title, domain: result.picked.domain, reward: result.solved ? 1 : 0 }])
+        .catch(() => ({}));
+    }
+    if (result.solved && result.source && result.picked) {
+      try {
+        const mem = await ensureVectorMemory();
+        await mem.remember(
+          'lesson',
+          `openended:${result.picked.id}`,
+          `Solved open-ended problem "${result.picked.title}" (${result.picked.domain}) against a minted acceptance test.`,
+          { problemId: result.picked.id, domain: result.picked.domain, source: result.source.slice(0, 4000) },
+        );
+      } catch { /* memory unavailable */ }
+    }
+    return result;
+  } catch (err: any) {
+    return { skipped: true, reason: err?.message ?? String(err) };
+  } finally {
+    openEndedBusy = false;
+  }
+}
+
+function openEndedSnapshot() {
+  return {
+    archive: getOpenEndedArchive().snapshot(),
+    busy: openEndedBusy,
+    recent: openEndedCycleLog.slice(-10),
+    file: OPEN_ENDED_FILE,
   };
 }
 
@@ -9566,6 +9866,181 @@ app.get('/api/recourse/qd', (_req, res) => {
   }
 });
 
+// =========================================================================
+// OPEN-ENDED CAPABILITY ENGINE ROUTES
+// =========================================================================
+app.get('/api/recourse/open-ended', (_req, res) => {
+  try {
+    res.json({ success: true, engine: openEndedSnapshot() });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/recourse/open-ended/run', async (req, res) => {
+  if (!requireMutationAuthIfConfigured(req, res)) return;
+  try {
+    const count = Math.max(1, Math.min(5, Math.floor(Number(req.body?.count ?? 1) || 1)));
+    const results: any[] = [];
+    for (let i = 0; i < count; i++) {
+      const r = await runOpenEndedEngineCycle();
+      results.push(r);
+      if ((r as any).skipped) break;
+    }
+    res.json({ success: true, results, engine: openEndedSnapshot() });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/recourse/open-ended/archive', (_req, res) => {
+  try {
+    const archive = getOpenEndedArchive();
+    res.json({
+      success: true,
+      snapshot: archive.snapshot(),
+      problems: archive.list().map((p) => ({
+        id: p.id,
+        domain: p.domain,
+        title: p.title,
+        statement: p.statement,
+        functionName: p.functionName,
+        solved: p.solved,
+        attempts: p.attempts,
+        cell: p.cell,
+      })),
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/** Gene-belief hygiene: merge behavioral duplicates (same capability under new
+ *  hex suffixes) and optionally retire dead noise below an explicit floor. */
+app.post('/api/recourse/open-ended/hygiene', async (req, res) => {
+  if (!requireMutationAuthIfConfigured(req, res)) return;
+  try {
+    const minWeight = Number(req.body?.minWeight);
+    const minMeanReward = Number(req.body?.minMeanReward);
+    const maxAgeEpisodes = Number(req.body?.maxAgeEpisodes);
+    const report = await learner.pruneBeliefs({
+      ...(Number.isFinite(minWeight) ? { minWeight } : {}),
+      ...(Number.isFinite(minMeanReward) ? { minMeanReward } : {}),
+      ...(Number.isFinite(maxAgeEpisodes) ? { maxAgeEpisodes } : {}),
+    });
+    saveStateToDisk();
+    res.json({ success: true, report });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/** Patch-mode editing: a model-proposed search/replace applied surgically to an
+ *  existing file, then verified by the same sandbox + lint + self-mod gate as
+ *  fleet patches. Preserves every byte the goal does not touch. */
+app.post('/api/recourse/open-ended/patch', async (req, res) => {
+  if (!requireMutationAuthIfConfigured(req, res)) return;
+  try {
+    const { driverId, file, goal, suite, apply } = req.body ?? {};
+    if (typeof driverId !== 'string' || !getFleetDriver(driverId)) {
+      return res.status(400).json({ success: false, error: 'a registered driverId is required' });
+    }
+    if (typeof file !== 'string' || !file) {
+      return res.status(400).json({ success: false, error: 'file is required' });
+    }
+    if (typeof goal !== 'string' || !goal) {
+      return res.status(400).json({ success: false, error: 'goal is required' });
+    }
+    const root = devRepoRoot();
+    const abs = path.resolve(root, file);
+    const rel = path.relative(root, abs);
+    if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel) || !fs.existsSync(abs)) {
+      return res.status(400).json({ success: false, error: 'file must be an existing file under the repo root' });
+    }
+    const original = fs.readFileSync(abs, 'utf-8');
+    const result = await runPatchAttempt({
+      file,
+      goal,
+      original,
+      draft: async (system, user) => {
+        const r = await chatComplete(
+          [
+            { role: 'system', content: system },
+            { role: 'user', content: user },
+          ],
+          { temperature: 0.1 },
+        );
+        if (!r.ok || r.content === null) throw new Error(r.error || 'model offline');
+        return r.content;
+      },
+      verify:
+        typeof suite === 'string' && suite.trim()
+          ? (output) => {
+              const run = executeTestSuite(output, suite);
+              return {
+                ok: run.passed,
+                detail: run.testDetails.filter((d) => d.startsWith('[FAIL')).slice(0, 2).join('; ') || 'acceptance passed',
+              };
+            }
+          : undefined,
+      apply:
+        apply === false
+          ? undefined
+          : async (patch) => {
+              const written = await verifyAndApplyPatch(
+                { driverId, file, source: patch.output, suite: typeof suite === 'string' ? suite : undefined, note: goal },
+                { root, guard: selfModGuard },
+              );
+              return {
+                applied: written.applied,
+                error: 'error' in written ? written.error : undefined,
+                revertToken: 'revertToken' in written ? written.revertToken : undefined,
+              };
+            },
+    });
+    appendProvenanceEvent('open_ended_patch', { file, ok: result.ok, applied: result.applied, attempts: result.attempts });
+    res.json({ success: result.ok, ...result });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/** Dedup-aware fleet recursion ledger (Axiom/OpenHub loop outcomes). */
+app.get('/api/recourse/open-ended/fleet', (_req, res) => {
+  try {
+    const entries = fleetRecursion.read();
+    res.json({
+      success: true,
+      chain: fleetRecursion.verifyChain(),
+      summary: summarizeFleetRecursion(entries),
+      entries: entries.slice(-50),
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/recourse/open-ended/fleet', (req, res) => {
+  if (!requireMutationAuthIfConfigured(req, res)) return;
+  try {
+    const { source, goal, status, iteration, summary, score } = req.body ?? {};
+    if (typeof goal !== 'string' || !goal) {
+      return res.status(400).json({ success: false, error: 'goal is required' });
+    }
+    const entry = fleetRecursion.append({
+      source: typeof source === 'string' ? source : 'fleet',
+      goal,
+      ...(typeof status === 'string' ? { status } : {}),
+      ...(Number.isFinite(Number(iteration)) ? { iteration: Number(iteration) } : {}),
+      ...(typeof summary === 'string' ? { summary } : {}),
+      ...(Number.isFinite(Number(score)) ? { score: Number(score) } : {}),
+    });
+    res.json({ success: true, entry });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Initialize Express + Vite Server
 async function startServer() {
   console.log(`[boot] t+${Math.round(process.uptime())}s startServer entered`);
@@ -9599,6 +10074,9 @@ async function startServer() {
     ensureIntakeAutopilot();
     // Restore the Capability Forge autopilot if it was active.
     ensureForgeAutopilot();
+    // Arm the Open-Ended Capability Engine job on non-safe boot so the loop
+    // (mint -> solve -> verify -> archive -> learn) runs unattended.
+    setJobEnabled('open-ended', true);
     // Backfill: the forge agenda was always empty because dream genes were never
     // wired into it. The DreamingEngine uses an InMemoryGeneRegistryStore that
     // resets on restart, so we must read the dream genes from the persisted JSON
@@ -9652,11 +10130,24 @@ async function startServer() {
   // connected science stack, so they arm unconditionally at boot. Operator can
   // still toggle each off from the dashboard / scheduler API.
   // Science conductor: SCOUT -> HYPOTHESIZE -> EXPERIMENT -> VERIFY -> RECORD.
-  ensureScienceAutopilot();
-  console.log(`[boot] t+${Math.round(process.uptime())}s science autopilot ensured`);
-  setJobEnabled('reports', true);
-  setJobEnabled('keywire', true);
-  console.log(`[boot] t+${Math.round(process.uptime())}s jobs enabled`);
+  // Throttle switches (operator). Heavy vs light loops are gated separately so
+  // the box can stay responsive without disabling useful light jobs:
+  //   RECOURSE_SCIENCE_LOOPS=0  -> skip the science conductor (model-heavy experiments)
+  //   RECOURSE_RESEARCH_JOBS=0  -> skip the reports + keywire poll jobs
+  // Defaults are unchanged (both ON) unless explicitly set to 0.
+  if (process.env.RECOURSE_SCIENCE_LOOPS !== '0') {
+    ensureScienceAutopilot();
+    console.log(`[boot] t+${Math.round(process.uptime())}s science autopilot ensured`);
+  } else {
+    console.log('[boot] science conductor SKIPPED (RECOURSE_SCIENCE_LOOPS=0)');
+  }
+  if (process.env.RECOURSE_RESEARCH_JOBS !== '0') {
+    setJobEnabled('reports', true);
+    setJobEnabled('keywire', true);
+    console.log(`[boot] t+${Math.round(process.uptime())}s reports/keywire jobs enabled`);
+  } else {
+    console.log('[boot] reports/keywire jobs SKIPPED (RECOURSE_RESEARCH_JOBS=0)');
+  }
   saveStateToDisk();
   console.log(`[boot] t+${Math.round(process.uptime())}s post-jobs save returned`);
 
@@ -9758,6 +10249,43 @@ function registerAllSchedulerJobs(): void {
       } finally {
         forgeBusy = false;
       }
+    },
+  });
+
+  register({
+    id: 'open-ended',
+    name: 'Open-Ended Capability Engine',
+    group: 'autonomy',
+    cadenceMs: Math.max(60_000, Number(process.env.OPEN_ENDED_MS) || 10 * 60 * 1000),
+    enabledByDefault: true,
+    safeBootGated: true,
+    run: async () => {
+      const r = await runOpenEndedEngineCycle();
+      if ('skipped' in r) return { skipped: r.reason };
+      return {
+        minted: r.minted,
+        solved: r.solved,
+        problem: r.picked?.title ?? null,
+        archive: r.archive.total,
+        unsolved: r.archive.unsolved,
+      };
+    },
+  });
+
+  register({
+    id: 'gene-hygiene',
+    name: 'Gene-Belief Hygiene (merge duplicates + retire dead noise)',
+    group: 'system',
+    cadenceMs: Math.max(60_000, Number(process.env.GENE_HYGIENE_MS) || 6 * 60 * 60 * 1000),
+    enabledByDefault: true,
+    run: async () => {
+      const report = await learner.pruneBeliefs({ minWeight: 0.001, minMeanReward: 0.001 });
+      return {
+        before: report.before,
+        after: report.after,
+        merged: report.duplicatesRemoved,
+        retired: report.droppedNoise.length,
+      };
     },
   });
 
@@ -10021,8 +10549,17 @@ setImmediate(() => {
     console.warn('[Recourse] background boot-reconcile failed:', err instanceof Error ? err.message : String(err));
   }
 });
+// Skill library: refresh the catalog in the background when persisted state
+// does not cover every configured root (e.g. new default libraries were added).
+setImmediate(() => {
+  const covered = skillCatalog.length > 0 && skillRoots.every((r) => skillCatalog.some((s) => s.rootId === r.id));
+  if (covered) return;
+  void runSkillScan()
+    .then((snap) => console.log(`[Recourse] skill scan complete: ${snap.skills.length} skills across ${snap.roots.length} roots`))
+    .catch((err: unknown) => console.warn('[Recourse] skill scan failed:', err instanceof Error ? err.message : String(err)));
+});
 initGoalLedger();
-// Reapply the persisted model provider mode ('local' Ollama vs 'api' LLM) so
+// Reapply the persisted model provider mode ('local' Spark vs 'api' LLM) so
 // generative features resume with the operator's chosen endpoint after restart.
 setActiveProviderProfile(providerMode);
 // Surface any dream-engine crystallized genes that live only in the dream store

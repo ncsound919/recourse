@@ -1,7 +1,7 @@
 /**
  * Model ensemble bandit (Phase 2 #9).
  *
- * UCB1 over (model, profile) arms. Cheap local (Ollama) models get explored for
+ * UCB1 over (model, profile) arms. Cheap local (MiniCPM5) models get explored for
  * cost, a funded API model gets exploited when it earns it — the "explore local,
  * exploit best" strategy the roadmap calls for. Pure and deterministic (no
  * randomness): ties break to the lowest-index arm, so given the same history the
