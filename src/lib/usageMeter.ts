@@ -102,6 +102,7 @@ export const DEFAULT_MODEL_PRICES: Record<string, ModelPrice> = {
   'deepseek-v4-flash': { inputCentsPerMTok: 14, outputCentsPerMTok: 28 },
   'deepseek-v4.1-flash': { inputCentsPerMTok: 14, outputCentsPerMTok: 28 },
   'minicpm5-2b': { inputCentsPerMTok: 0, outputCentsPerMTok: 0 },
+  'minicpm5-1b': { inputCentsPerMTok: 0, outputCentsPerMTok: 0 },
 };
 
 function configuredPriceTable(): Record<string, ModelPrice> {

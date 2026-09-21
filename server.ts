@@ -109,6 +109,14 @@ import {
 import { INITIAL_SWARM_STATUS, dispatchSubAgentTask, stepSubTeams, INITIAL_SUB_TEAM_STATES, SubTeamState } from './src/lib/subagentSwarm.js';
 import { createInitialLoopState, executeRecursiveStep, DEFAULT_LOOP_CONFIG } from './src/lib/recursiveMathEngine.js';
 import { createLearnerStore, RecursiveLearner } from './src/dream/learner.js';
+import type { GeneBelief } from './src/dream/learner-types.js';
+import {
+  deriveOpenHubBelief,
+  deriveOpenHubAuditSignals,
+  latestReportFromDocs,
+  mergeFleetBeliefs,
+  updateOpenHubHealth,
+} from './src/lib/fleetSignal.js';
 import { globalLegoEngine } from './src/lego/engine.js';
 import {   checkOnline as modelCheckOnline, providerStatus, providerStatuses, chatComplete, extractJsonBlock, setActiveProviderProfile, activeProviderProfile, providerProfiles, setModelUsageSink } from './src/lib/modelProvider.js';
 import type { ProviderProfileId } from './src/lib/modelProvider.js';
@@ -119,8 +127,12 @@ import {
   getComponentTemplate,
   buildComponentFromTemplate,
   getSelfRepairKnowledge,
+  selectTemplateForLearnerDirective,
   COMPONENT_TEMPLATES
 } from './src/lib/componentTemplates.js';
+import { nextGenerationTarget, generationTargets, generationPlanDigest } from './src/lib/learnerGenerationPlan.js';
+import { planAuditDepth } from './src/autopilot/auditDepth.js';
+import type { Directive } from './src/dream/learner-types.js';
 import {
   listSelfHostedEntries,
   writeSelfHostedTool,
@@ -565,10 +577,24 @@ async function runNightlyPass(force: boolean) {
       forge: async () => {
         const result = await runForgeCycle();
         const skipped = 'skipped' in result && result.skipped;
+        // Recursive learning drives tool generation: drive the learner-directed
+        // synthesize-directive route in-process so the nightly pass builds one
+        // component for the learner's highest-priority domain (real suite + lint
+        // gated). Best-effort and honest: a failure is reported, never faked.
+        let learnerSynth: { success?: boolean; message?: string; synthesizedTool?: { name?: string } } = {};
+        try {
+          const res = await internalApiCall('POST', '/api/recourse/learn/synthesize-directive', {}, true);
+          learnerSynth = (res.data ?? {}) as typeof learnerSynth;
+        } catch (err: any) {
+          learnerSynth = { success: false, message: err?.message || String(err) };
+        }
+        const synthNote = learnerSynth.success
+          ? `learner synthesized ${learnerSynth.synthesizedTool?.name ?? 'a component'}`
+          : `learner synth: ${learnerSynth.message ?? 'no target'}`;
         return {
           ok: true,
-          detail: skipped ? `forge skipped: ${(result as any).reason ?? 'n/a'}` : 'forge cycle completed',
-          data: result,
+          detail: skipped ? `forge skipped: ${(result as any).reason ?? 'n/a'}` : `forge cycle completed; ${synthNote}`,
+          data: { forge: result, learnerSynth },
         };
       },
       benchmark: async () => {
@@ -2033,6 +2059,36 @@ function ensureVectorMemory(): Promise<VectorMemory> {
   return memoryInit;
 }
 
+/** OpenHub's latest self-report (from fleet memory) as generation + audit input.
+ *  Honest: empty when memory is unavailable or no report exists — never a
+ *  fabricated signal. */
+async function openhubFleetSignal(): Promise<{
+  beliefs: GeneBelief[];
+  auditSignals: Array<{ uncertainty: number; meanReward: number; attempts: number }>;
+  degraded: boolean;
+  reportAt: string | null;
+  health: { alpha: number; beta: number; healthy: string[]; degraded: string[] } | null;
+}> {
+  const empty = { beliefs: [], auditSignals: [], degraded: false, reportAt: null, health: null };
+  try {
+    const mem = await ensureVectorMemory();
+    const hits = await mem.recall('openhub self report openhub-self-report fleet health', 'snapshot', 50);
+    const report = latestReportFromDocs(hits);
+    if (!report) return empty;
+    const belief = deriveOpenHubBelief(report);
+    const audit = deriveOpenHubAuditSignals(report);
+    return {
+      beliefs: belief ? [belief] : [],
+      auditSignals: audit ? [audit] : [],
+      degraded: belief ? belief.beta > belief.alpha : false,
+      reportAt: typeof report.at === 'string' ? report.at : null,
+      health: updateOpenHubHealth(report),
+    };
+  } catch {
+    return empty;
+  }
+}
+
 /** Index the current registry genes + recent snapshots into vector memory. */
 async function indexSystemMemory(): Promise<{ indexed: number; status: any }> {
   const mem = await ensureVectorMemory();
@@ -2299,6 +2355,27 @@ app.post('/api/recourse/fleet/memory', async (req, res) => {
     const mem = await ensureVectorMemory();
     await mem.remember(entry.kind!, entry.id!, entry.text!, entry.meta);
     res.json({ success: true, indexed: 1, id: entry.id, kind: entry.kind, source: entry.meta?.source, status: await mem.status() });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// Fleet signal read surface — what Recourse currently derives from the latest
+// external self-report (OpenHub). Read-only and honest: `available:false` when
+// no report has been ingested, so the loop-closing influence is inspectable.
+app.get('/api/recourse/fleet/signal', async (_req, res) => {
+  try {
+    const signal = await openhubFleetSignal();
+    res.json({
+      success: true,
+      available: signal.beliefs.length > 0,
+      source: 'openhub',
+      reportAt: signal.reportAt,
+      degraded: signal.degraded,
+      health: signal.health,
+      belief: signal.beliefs[0] ?? null,
+      auditSignals: signal.auditSignals,
+    });
   } catch (e: any) {
     res.status(500).json({ success: false, error: e.message });
   }
@@ -4385,7 +4462,31 @@ app.post('/api/recourse/learn/synthesize-directive', async (req, res) => {
   try {
     const { directiveId } = req.body;
     const learnerState = await learner.status();
-    let targetDirective = learnerState.directives.find(d => d.id === directiveId);
+
+    // Close the loop: fold OpenHub's latest self-report (fleet memory) into the
+    // learner's beliefs, and — when OpenHub reports itself degraded — rank the
+    // systemic domain first so generation targets the fleet's weak spot.
+    const fleet = await openhubFleetSignal();
+    const planningState = mergeFleetBeliefs(learnerState, fleet.beliefs);
+    const plan = nextGenerationTarget(planningState, {
+      priorityDomains: fleet.degraded ? (['systemic'] as const) : [],
+    });
+    let targetDirective = directiveId
+      ? planningState.directives.find(d => d.id === directiveId)
+      : (plan ? planningState.directives.find(d => d.targetDomain === plan.domain) : undefined);
+
+    if (!targetDirective && plan) {
+      // No directive exists for the target yet — synthesize one from the plan.
+      // Action/reason come from the learner's own beliefs; nothing is invented.
+      targetDirective = {
+        id: `plan_${plan.domain}_${plan.action}`,
+        kind: plan.action === 'amplify' ? 'amplify' : plan.action === 'refine' ? 'refine' : 'synthesize_template',
+        geneName: `${plan.domain}_template_archetype`,
+        reason: plan.reason,
+        episode: learnerState.episode,
+        targetDomain: plan.domain
+      };
+    }
     
     if (!targetDirective && learnerState.directives.length > 0) {
       targetDirective = learnerState.directives.find(d => d.kind === 'synthesize_template' || d.kind === 'amplify') || learnerState.directives[0];
@@ -4395,9 +4496,14 @@ app.post('/api/recourse/learn/synthesize-directive', async (req, res) => {
       return res.json({ success: false, message: 'No active learner directives available for template synthesis' });
     }
 
-    const targetDomain: ToolDomain = (targetDirective.targetDomain as ToolDomain) || 'coding';
-    const tplId = targetDirective.templateId || 'tpl_lru_cache';
-    const tpl = getComponentTemplate(tplId) || Object.values(COMPONENT_TEMPLATES)[0];
+    const targetDomain: ToolDomain = (targetDirective.targetDomain as ToolDomain) || plan?.domain || 'coding';
+    // Prefer any template the directive names; otherwise let the synthesize-
+    // aware selector choose for the action + domain (e.g. the WEAKEST template
+    // when the learner flagged a domain deficit, rather than a fixed one that
+    // may already be strong).
+    const tpl = (targetDirective.templateId ? getComponentTemplate(targetDirective.templateId) : undefined)
+      || selectTemplateForLearnerDirective(targetDirective.kind, targetDomain)
+      || Object.values(COMPONENT_TEMPLATES)[0];
 
     const compName = `learner_${targetDomain}_${tpl.id.replace('tpl_', '')}_${Date.now().toString().slice(-4)}`;
     const buildResult = buildComponentFromTemplate(tpl.id, {}, {
@@ -9021,6 +9127,41 @@ function devDossierInput(): DossierInput {
   };
 }
 
+/**
+ * Recursive-learning decisions surfaced to operators: the generation plan the
+ * forge will follow and the audit depth the audit team will use. Honest: a
+ * learner read failure returns { error }, never a fabricated plan.
+ */
+async function learnerPlanSummary(): Promise<Record<string, unknown>> {
+  try {
+    const state = await learner.status();
+    const targets = generationTargets(state);
+    const audit = planAuditDepth(state);
+    return {
+      episode: state.episode,
+      generationDigest: generationPlanDigest(targets),
+      nextGeneration: targets[0] ?? null,
+      generationPlan: targets.slice(0, 4).map((t) => ({
+        domain: t.domain,
+        action: t.action,
+        priority: t.priority,
+        uncertainty: t.uncertainty,
+        meanReward: t.meanReward,
+        reason: t.reason,
+      })),
+      deepestAudit: audit[0] ?? null,
+      auditDepthPlan: audit.slice(0, 4).map((p) => ({
+        domain: p.domain,
+        depth: p.depth,
+        auditors: p.auditors,
+        reason: p.reason,
+      })),
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 async function devSnapshot() {
   const dossier = computeHealthDossier(devDossierInput());
   const root = devRepoRoot();
@@ -9030,6 +9171,8 @@ async function devSnapshot() {
     auditors: await auditorStatuses(),
     autopilot: devAutopilotOn,
     root,
+    learner: await learnerPlanSummary(),
+    fleet: await openhubFleetSignal(),
     harness: {
       ciGate: HARNESS_CI_GATE,
       backupDir: fleetBackupDir(root),

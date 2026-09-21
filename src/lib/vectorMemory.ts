@@ -159,13 +159,33 @@ async function openLance(dir: string): Promise<MemoryStore | null> {
     if (!lanceModule) lanceModule = await import('@lancedb/lancedb');
     const db = await lanceModule.connect(dir);
     const tableName = 'memories';
+    // The vector column MUST be declared. Inferred `Array<number>` becomes a
+    // plain List, so `search()` fails ("No vector column found to match with the
+    // query vector dimension") and the whole store silently falls back to
+    // memory. Declaring `vec` as a fixed-size float vector is what makes LanceDB
+    // actually persist and be searchable.
+    const arrow = (rows: Array<Record<string, unknown>>): unknown =>
+      lanceModule.makeArrowTable(rows, { vectorColumns: { vec: new lanceModule.VectorColumnOptions() } });
+    const seed = (): Array<Record<string, unknown>> => [
+      { id: '__init__', kind: 'gene', text: '', vec: Array.from({ length: VEC_DIM }).fill(0), meta: '{}' },
+    ];
+
     let table;
     try {
       table = await db.openTable(tableName);
+      // Repair a table written by the old schema-inferring code (vec as a plain
+      // List): search cannot use it. Recreate with the explicit vector column.
+      // Rows are re-indexed from live state, so the incompatible table holds
+      // nothing that cannot be rebuilt.
+      try {
+        await table.search(lexicalEmbed('probe')).limit(1).toArray();
+      } catch {
+        try { await db.dropTable(tableName); } catch { /* best-effort */ }
+        table = await db.createTable(tableName, arrow(seed()));
+        await table.delete('id = \'__init__\'');
+      }
     } catch {
-      table = await db.createTable(tableName, [
-        { id: '__init__', kind: 'gene', text: '', vec: Array.from({ length: VEC_DIM }).fill(0), meta: '{}' },
-      ]);
+      table = await db.createTable(tableName, arrow(seed()));
       await table.delete('id = \'__init__\'');
     }
     return {
@@ -174,7 +194,7 @@ async function openLance(dir: string): Promise<MemoryStore | null> {
       // backends produce the same store state for the same call sequence.
       async remember(doc) {
         await table.delete(`id = ${sqlStr(doc.id)} AND kind = ${sqlStr(doc.kind)}`);
-        await table.add([{ id: doc.id, kind: doc.kind, text: doc.text, vec: doc.vec, meta: JSON.stringify(doc.meta ?? {}) }]);
+        await table.add(arrow([{ id: doc.id, kind: doc.kind, text: doc.text, vec: doc.vec, meta: JSON.stringify(doc.meta ?? {}) }]));
       },
       async remove(id) {
         await table.delete(`id = ${sqlStr(id)}`);

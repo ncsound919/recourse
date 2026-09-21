@@ -11,11 +11,11 @@ has a real sandboxed test suite behind it.
 2. Copy `.env.example` to `.env` and set `MODEL_BASE_URL` and `MODEL_NAME`.
 3. Start your model server. Prerequisites: Node.js 18+, and (for generative
    features) any OpenAI-compatible model server. The default local target is
-   MiniCPM5-2B served by llama.cpp's `llama-server` — use `start-local.ps1`, which
-   enables tool-call reliability and CPU speed:
-   `llama-server -m MiniCPM5-2B-Q4_K_M.gguf --host 127.0.0.1 --port 11434 -c 8192 --alias minicpm5-2b --jinja --spec-type ngram-mod --spec-ngram-mod-n-match 24`.
-   Set `LOCAL_MODEL_BASE_URL="http://127.0.0.1:11434/v1"` and
-   `LOCAL_MODEL_NAME="minicpm5-2b"` in `.env`; leave `MODEL_BASE_URL` /
+MiniCPM5-1B served by llama.cpp's `llama-server` — use `start-local.ps1`, which
+enables tool-call reliability and CPU speed:
+`llama-server -m MiniCPM5-1B-Q4_K_M.gguf --host 127.0.0.1 --port 11434 -c 8192 --alias minicpm5-1b --jinja --spec-type ngram-mod --spec-ngram-mod-n-match 24`.
+Set `LOCAL_MODEL_BASE_URL="http://127.0.0.1:11434/v1"` and
+`LOCAL_MODEL_NAME="minicpm5-1b"` in `.env`; leave `MODEL_BASE_URL` /
    `MODEL_NAME` pointed at your remote API for the automatic fallback.
 4. `npm run dev` → http://localhost:3000
 

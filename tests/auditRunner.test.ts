@@ -159,6 +159,19 @@ describe('auditRunner runAudit adapter resolution', () => {
     );
   });
 
+  it('honors a learner-driven audit depth by running only that tier', async () => {
+    const statement = await runAudit({
+      profile: makeProfileWithRepo(),
+      adapters: { grader: graderOk, reporank: graderOk, deep: graderOk, codegang: graderOk },
+      depth: 2,
+    });
+    expect(statement.auditors.grader.included).toBe(true);
+    expect(statement.auditors.reporank.included).toBe(true);
+    expect(statement.auditors.deep.included).toBe(false);
+    expect(statement.auditors.deep.reason).toMatch(/excluded by audit depth 2/);
+    expect(statement.auditors.codegang.reason).toMatch(/excluded by audit depth 2/);
+  });
+
   it('includes a grader result when the mock adapter resolves an ai-generated grade', async () => {
     const statement = await runAudit({
       profile: makeProfileWithRepo(),

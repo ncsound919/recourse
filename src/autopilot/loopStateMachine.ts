@@ -20,6 +20,7 @@
 import path from 'node:path';
 import {
   PRState,
+  type AuditorIdT,
   type AuditStatementT,
   type BusinessScorecardT,
   type GapT,
@@ -37,6 +38,9 @@ import {
   type BusinessProfileT,
 } from './businessProfile';
 import { runAudit, type AuditAdapters } from './auditRunner';
+import { auditorsForDepth, depthFromSignals, planAuditDepth, type AuditDepth } from './auditDepth';
+import type { LearnerState } from '../dream/learner-types';
+import type { ToolDomain } from '../dream/types';
 import { loadLatestScorecard, projectScorecard, saveScorecard, slugify } from './scorecard';
 import { analyzeGaps } from './gapAnalyzer';
 import { generateUpgrade, type PlannedCode } from './upgradeGenerator';
@@ -67,6 +71,14 @@ export type LoopRunOptions = {
    * run of that test; when absent, Tier A code gaps stay honest placeholders.
    */
   planner?: (gap: GapT, profile: BusinessProfileT) => Promise<PlannedCode | null>;
+  /** Recursive learner; when present, its domain beliefs choose the audit depth. */
+  learner?: LearnerLike;
+  /** Pin the learner domain whose depth applies to this repo's audits. */
+  auditDomain?: ToolDomain;
+  /** Explicit audit depth; overrides the learner. */
+  auditDepth?: AuditDepth;
+  /** External fleet audit signals (e.g. OpenHub self-report health). */
+  externalAuditSignals?: Array<{ uncertainty: number; meanReward: number; attempts: number }>;
 };
 
 export type LoopOutcome = { state: LoopState; context: LoopContext };
@@ -79,6 +91,65 @@ function emptyContext(): LoopContext {
 
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/** Minimal learner surface the loop needs (satisfied by RecursiveLearner). */
+export type LearnerLike = {
+  status(): Promise<Pick<LearnerState, 'geneBeliefs' | 'directives'>> | Pick<LearnerState, 'geneBeliefs' | 'directives'>;
+};
+
+/**
+ * Resolve how deep the audit team should go, from the recursive learner's real
+ * domain beliefs. Priority:
+ *   1. an explicit `auditDepth` (operator override);
+ *   2. otherwise the learner's deepest-needed domain (`auditDomain` pins one,
+ *      default = across all domains).
+ * Always returns `undefined` — meaning "run the full team", the pre-existing
+ * behavior — when there is no learner, the learner is unavailable, or the
+ * chosen tier has no auditor the caller can actually run. So this can only ever
+ * ADD learner-driven scrutiny; it never turns a working full audit into an
+ * empty one.
+ */
+export async function resolveAuditDepth(opts: {
+  auditDepth?: AuditDepth;
+  auditDomain?: ToolDomain;
+  learner?: LearnerLike;
+  adapters?: AuditAdapters;
+  /** External fleet audit signals (e.g. OpenHub's self-report health). */
+  externalAuditSignals?: Array<{ uncertainty: number; meanReward: number; attempts: number }>;
+}): Promise<AuditDepth | undefined> {
+  if (opts.auditDepth) return opts.auditDepth;
+
+  let learnerDepth: AuditDepth | undefined;
+  if (opts.learner) {
+    try {
+      const state = await opts.learner.status();
+      const plan = planAuditDepth(state, opts.auditDomain ? { domains: [opts.auditDomain] } : {});
+      learnerDepth = plan[0]?.depth;
+    } catch {
+      learnerDepth = undefined;
+    }
+  }
+
+  // The audit is never shallower than the fleet's own reported health demands:
+  // an unhealthy external system raises the floor; a healthy one never lowers
+  // the learner's ask.
+  const fleetDepth = (opts.externalAuditSignals ?? []).reduce<AuditDepth | undefined>(
+    (max, s) => {
+      const d = depthFromSignals(s);
+      return max === undefined || d > max ? d : max;
+    },
+    undefined,
+  );
+
+  const chosen = [learnerDepth, fleetDepth].reduce<AuditDepth | undefined>(
+    (max, d) => (d === undefined ? max : max === undefined || d > max ? d : max),
+    undefined,
+  );
+  if (chosen === undefined) return undefined;
+
+  const available = Object.keys(opts.adapters ?? {}) as AuditorIdT[];
+  return auditorsForDepth(chosen, available).length > 0 ? chosen : undefined;
 }
 
 export async function runLoop(options: LoopRunOptions): Promise<LoopOutcome> {
@@ -111,10 +182,22 @@ export async function runLoop(options: LoopRunOptions): Promise<LoopOutcome> {
   const auditDir = options.auditDir ?? (options.dryRun ? undefined : DEFAULT_AUDIT_DIR);
   const now = options.now ?? new Date();
 
-  // 3. AUDIT.
+  // 3. AUDIT — depth derived from the recursive learner when available.
   let statement: AuditStatementT;
   try {
-    statement = await runAudit({ profile, adapters: options.adapters, auditDir });
+    const auditDepth = await resolveAuditDepth({
+      auditDepth: options.auditDepth,
+      auditDomain: options.auditDomain,
+      learner: options.learner,
+      adapters: options.adapters,
+      externalAuditSignals: options.externalAuditSignals,
+    });
+    statement = await runAudit({
+      profile,
+      adapters: options.adapters,
+      auditDir,
+      ...(auditDepth ? { depth: auditDepth } : {}),
+    });
   } catch (err) {
     return {
       state: { status: 'error', reason: `audit failed: ${errMsg(err)}` },
@@ -283,6 +366,14 @@ export type ResumeOptions = {
   checkpointStore?: import('./checkpoint').CheckpointStore;
   /** Wallet merge gate forwarded to the veto scheduler; blocks the merge when disallowed. */
   mergeGate?: { allowed: boolean; reason: string };
+  /** Recursive learner; when present, its domain beliefs choose the audit depth. */
+  learner?: LearnerLike;
+  /** Pin the learner domain whose depth applies to this repo's audits. */
+  auditDomain?: ToolDomain;
+  /** Explicit audit depth; overrides the learner. */
+  auditDepth?: AuditDepth;
+  /** External fleet audit signals (e.g. OpenHub self-report health). */
+  externalAuditSignals?: Array<{ uncertainty: number; meanReward: number; attempts: number }>;
 };
 
 export async function resumeAfterVeto(options: ResumeOptions): Promise<LoopOutcome> {
@@ -362,7 +453,19 @@ export async function resumeAfterVeto(options: ResumeOptions): Promise<LoopOutco
     // save would return the file we just wrote (pre === post, delta always 0),
     // which made the fitness loop inert. Loading first gives a real baseline.
     const pre = loadLatestScorecard(slug, auditDir);
-    const postStatement = await runAudit({ profile, adapters: options.adapters, auditDir });
+    const auditDepth = await resolveAuditDepth({
+      auditDepth: options.auditDepth,
+      auditDomain: options.auditDomain,
+      learner: options.learner,
+      adapters: options.adapters,
+      externalAuditSignals: options.externalAuditSignals,
+    });
+    const postStatement = await runAudit({
+      profile,
+      adapters: options.adapters,
+      auditDir,
+      ...(auditDepth ? { depth: auditDepth } : {}),
+    });
     const post = projectScorecard(postStatement, profile);
     saveScorecard(post, auditDir);
     context.scorecard = post;

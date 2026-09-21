@@ -49,8 +49,33 @@ import type { GitHubClient } from '../src/autopilot/loopTypes';
 import { readWallet, computeBalances, canAutoMerge } from '../src/lib/wallet';
 import { createCodePlanner } from '../src/autopilot/codePlanner';
 import { chatComplete } from '../src/lib/modelProvider';
+import { createLearnerStore, RecursiveLearner } from '../src/dream/learner.js';
+import { openVectorMemory } from '../src/lib/vectorMemory.js';
+import { deriveOpenHubAuditSignals, latestReportFromDocs } from '../src/lib/fleetSignal.js';
 
 const DEFAULT_AUDIT_DIR = 'data/business-profiles';
+
+// Recursive learner -> audit depth. Constructed lazily so importing this module
+// stays side-effect-free (nothing is read until a scheduled run actually starts).
+let learnerSingleton: RecursiveLearner | null = null;
+function getLearner(): RecursiveLearner {
+  if (!learnerSingleton) learnerSingleton = new RecursiveLearner(createLearnerStore());
+  return learnerSingleton;
+}
+
+/** OpenHub's latest self-report (fleet memory) → audit signals. Empty when
+ *  memory is unavailable or no report exists — the loop then keeps its default. */
+async function fleetAuditSignals(): Promise<Array<{ uncertainty: number; meanReward: number; attempts: number }>> {
+  try {
+    const mem = await openVectorMemory({ dir: process.env.RECOURSE_MEMORY_DIR || 'data/recourse-memory' });
+    const hits = await mem.recall('openhub self report openhub-self-report fleet health', 'snapshot', 50);
+    const report = latestReportFromDocs(hits);
+    const s = report ? deriveOpenHubAuditSignals(report) : null;
+    return s ? [s] : [];
+  } catch {
+    return [];
+  }
+}
 
 // Real planner for Tier A code gaps: produces source + an acceptance test that
 // the pre-merge gate runs in the sandbox. Returns null when the model is offline.
@@ -175,6 +200,10 @@ export async function runScheduledAudit(
         continue;
       }
 
+      // Close the loop: OpenHub's latest self-report sets a floor on how deep
+      // this audit goes — never shallower than the fleet's reported health.
+      const externalAuditSignals = await fleetAuditSignals();
+
       // H4/H5: advance any PR still in its veto window BEFORE opening a new one.
       // Only in a real (non-dry) run and only when auto-merge is on (a PR only
       // exists because the loop opened it under that mode; if the operator has
@@ -204,6 +233,8 @@ export async function runScheduledAudit(
                 auditDir,
                 now: new Date(),
                 mergeGate,
+                learner: getLearner(),
+                externalAuditSignals,
               })) as LoopOutcomeLike;
               console.log(formatOutcome(slug, res));
               if (res.state.status === 'error') exitCode = 1;
@@ -223,7 +254,7 @@ export async function runScheduledAudit(
         }
       }
 
-      const outcome = (await runLoop({ profile, dryRun, planner: codePlanner })) as LoopOutcomeLike;
+      const outcome = (await runLoop({ profile, dryRun, planner: codePlanner, learner: getLearner(), externalAuditSignals })) as LoopOutcomeLike;
       console.log(formatOutcome(slug, outcome));
       // State-machine errors are returned, not thrown — surface them as exit 1
       // so cron wrappers can detect a failed pass.

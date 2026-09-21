@@ -15,6 +15,7 @@ import {
   type BusinessProfileT,
   type RepoBindingT,
 } from './businessProfile';
+import { auditorsForDepth, type AuditDepth } from './auditDepth';
 
 export interface AuditorServiceConfig {
   url: string;
@@ -40,6 +41,10 @@ export interface RunAuditOptions {
   adapters?: AuditAdapters;
   auditDir?: string;
   env?: Record<string, string>;
+  /** Explicit auditor subset (overrides `depth`). */
+  auditorIds?: readonly AuditorIdT[];
+  /** Learner-driven audit depth: run only that tier of the audit team. */
+  depth?: AuditDepth;
 }
 
 type EnvLike = Readonly<Record<string, string | undefined>>;
@@ -258,16 +263,26 @@ export async function runAudit(options: RunAuditOptions): Promise<AuditStatement
   const env: EnvLike = options.env ? { ...process.env, ...options.env } : process.env;
   const adapters = (options.adapters ?? {}) as Partial<Record<AuditorIdT, AuditAdapter>>;
 
+  // Audit depth (learner-driven) selects a tier of the team; with neither
+  // option set the full team runs exactly as before, so default behavior is
+  // unchanged.
+  const wanted = options.auditorIds
+    ?? (options.depth ? auditorsForDepth(options.depth) : AUDITOR_IDS);
+  const wantedSet = new Set<AuditorIdT>(wanted);
+  const notRun = (name: AuditorIdT): string =>
+    options.depth ? `excluded by audit depth ${options.depth}` : `${name} adapter not provided`;
+
   const results: Record<AuditorIdT, AuditorSectionT> = {
-    grader: { included: false, reason: 'grader adapter not provided' },
-    reporank: { included: false, reason: 'reporank adapter not provided' },
-    deep: { included: false, reason: 'deep adapter not provided' },
-    codegang: { included: false, reason: 'codegang adapter not provided' },
-    olympics: { included: false, reason: 'olympics adapter not provided' },
+    grader: { included: false, reason: wantedSet.has('grader') ? 'grader adapter not provided' : notRun('grader') },
+    reporank: { included: false, reason: wantedSet.has('reporank') ? 'reporank adapter not provided' : notRun('reporank') },
+    deep: { included: false, reason: wantedSet.has('deep') ? 'deep adapter not provided' : notRun('deep') },
+    codegang: { included: false, reason: wantedSet.has('codegang') ? 'codegang adapter not provided' : notRun('codegang') },
+    olympics: { included: false, reason: wantedSet.has('olympics') ? 'olympics adapter not provided' : notRun('olympics') },
   };
 
   const jobs: { name: AuditorIdT; adapter: AuditAdapter; config: AuditorServiceConfig }[] = [];
   for (const name of AUDITOR_IDS) {
+    if (!wantedSet.has(name)) continue;
     const adapter = adapters[name];
     if (typeof adapter === 'function') {
       jobs.push({ name, adapter, config: adapterConfig(name, binding, env) });

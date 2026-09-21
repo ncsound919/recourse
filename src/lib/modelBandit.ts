@@ -32,7 +32,6 @@ export class ModelBandit {
   private priorCount: number;
   private totalReward = 0;
   private totalPlays = 0;
-
   constructor(opts: { priorCount?: number; armIds?: string[] } = {}) {
     // Optimistic prior: each known arm is "played" priorCount times with full
     // reward, so untried arms are explored early.
@@ -88,4 +87,38 @@ export class ModelBandit {
   }
 
   get totalPlayCount(): number { return this.totalPlays; }
+
+  /** Serializable state so a durable store can persist learned arm statistics. */
+  toState(): BanditState {
+    return {
+      version: 1,
+      priorCount: this.priorCount,
+      totalPlays: this.totalPlays,
+      arms: [...this.arms.entries()].map(([id, a]) => ({ id, plays: a.plays, rewardSum: a.rewardSum })),
+    };
+  }
+
+  /** Reconstruct a bandit from persisted state. A malformed/absent state yields
+   *  an empty bandit (never throws). Play counts and reward sums are restored
+   *  exactly, so UCB is identical to the pre-restart instance. */
+  static fromState(state: BanditState | null | undefined): ModelBandit {
+    if (!state || state.version !== 1 || !Array.isArray(state.arms)) return new ModelBandit();
+    const b = new ModelBandit({ priorCount: Math.max(0, Number(state.priorCount) || 0) });
+    for (const a of state.arms) {
+      if (!a || typeof a.id !== 'string') continue;
+      const plays = Math.max(0, Number(a.plays) || 0);
+      const rewardSum = Math.max(0, Number(a.rewardSum) || 0);
+      b.arms.set(a.id, { plays, rewardSum });
+      b.totalPlays += plays;
+      b.totalReward += rewardSum;
+    }
+    return b;
+  }
+}
+
+export interface BanditState {
+  version: 1;
+  priorCount: number;
+  totalPlays: number;
+  arms: Array<{ id: string; plays: number; rewardSum: number }>;
 }

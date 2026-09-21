@@ -33,6 +33,7 @@ import binascii
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -206,6 +207,35 @@ def _norm(name: str) -> str:
     return name.strip().lower().lstrip("_")
 
 
+def _symbol_matches(frag: str, imported: str) -> bool:
+    """True when a real import matches a fragment without matching it as a
+    substring of a longer, unrelated symbol (e.g. 'gets' inside 'widgets').
+
+    Win32 mangling suffixes (A/W/Ex/32/64) are tolerated so 'shellexecute'
+    still matches 'ShellExecuteW' and 'virtualalloc' matches 'VirtualAllocEx'.
+    Safe variants ('strcpy_s', 'gets_s') are deliberately NOT matched.
+    """
+    if imported == frag:
+        return True
+    if imported.startswith(frag):
+        return imported[len(frag):] in {"a", "w", "ex", "32", "64"}
+    return False
+
+
+def _string_matches(marker: str, text: str) -> bool:
+    """Substring match for markers with non-word edges, whole-word otherwise.
+
+    Prevents the 'unknown compression method' -> 'mpress' false positive
+    (the substring sits inside 'compression') while still catching real
+    packer strings such as 'UPX' or 'PyInstaller'.
+    """
+    if not marker:
+        return False
+    if marker[0].isalnum() and marker[-1].isalnum():
+        return re.search(r"\b" + re.escape(marker) + r"\b", text) is not None
+    return marker in text
+
+
 def derive_findings(analysis: dict[str, Any]) -> dict[str, Any]:
     """Compute deterministic risk indicators from real Ghidra output.
 
@@ -224,7 +254,7 @@ def derive_findings(analysis: dict[str, Any]) -> dict[str, Any]:
     matched_imports: list[str] = []
     for frag, note in SUSPICIOUS_IMPORTS.items():
         for imported in imports:
-            if frag in imported or imported in frag:
+            if _symbol_matches(frag, imported):
                 matched_imports.append(f"{frag}: {note}")
                 indicators.append({
                     "kind": "suspicious_import",
@@ -248,7 +278,7 @@ def derive_findings(analysis: dict[str, Any]) -> dict[str, Any]:
     # Packer / interpreter strings.
     low_strings = [str(s.get("value", "")).lower() for s in (analysis.get("strings", []) or [])]
     for marker in PACKER_STRINGS:
-        hit = next((s for s in low_strings if marker in s), None)
+        hit = next((s for s in low_strings if _string_matches(marker, s)), None)
         if hit:
             indicators.append({
                 "kind": "packer_or_runtime_hint",
@@ -325,24 +355,40 @@ def run_analysis(raw: bytes, filename: str, timeout_sec: int) -> dict[str, Any]:
         "-deleteProject",
     ]
     started = time.time()
+    log_path = workdir / "ghidra.log"
+    # Stream the analyzer's output to a FILE, never a pipe. On Windows the
+    # launcher is a .bat that spawns java; killing only the wrapper orphans the
+    # JVM, and an orphaned grandchild holding the inherited pipe keeps
+    # subprocess.run(capture_output=True) blocked forever (and leaks the JVM).
     try:
-        proc = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout_sec + 120,
-            env={**os.environ, "GHIDRA_HEADLESS_MAXMEM": os.environ.get("GHIDRA_HEADLESS_MAXMEM", "2G")},
-        )
-    except subprocess.TimeoutExpired:
-        shutil.rmtree(workdir, ignore_errors=True)
-        return {"ok": False, "available": True, "error": f"Ghidra headless timed out after {timeout_sec + 120}s"}
+        with open(log_path, "w", encoding="utf-8", errors="replace") as logf:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=logf,
+                stderr=subprocess.STDOUT,
+                env={**os.environ, "GHIDRA_HEADLESS_MAXMEM": os.environ.get("GHIDRA_HEADLESS_MAXMEM", "2G")},
+            )
+            try:
+                proc.wait(timeout=timeout_sec + 120)
+            except subprocess.TimeoutExpired:
+                # Kill the WHOLE tree (taskkill /T), not just the wrapper.
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                               capture_output=True)
+                try:
+                    proc.wait(timeout=15)
+                except subprocess.TimeoutExpired:
+                    pass
+                shutil.rmtree(workdir, ignore_errors=True)
+                return {"ok": False, "available": True, "timed_out": True,
+                        "error": f"Ghidra headless timed out after {timeout_sec + 120}s (process tree killed)"}
     except Exception as exc:  # noqa: BLE001
         shutil.rmtree(workdir, ignore_errors=True)
         return {"ok": False, "available": True, "error": f"failed to launch Ghidra headless: {exc}"}
 
     elapsed_ms = int((time.time() - started) * 1000)
     if not out_json.is_file():
-        tail = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip().splitlines()[-12:]
+        tail = log_path.read_text(encoding="utf-8", errors="replace").strip().splitlines()[-12:] \
+            if log_path.is_file() else []
         shutil.rmtree(workdir, ignore_errors=True)
         return {
             "ok": False,

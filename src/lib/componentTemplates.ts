@@ -1200,7 +1200,11 @@ export function synthesizeTemplateRepair(
 
 /**
  * Connects Self-Learning Directives to Component Templates:
- * Maps an 'amplify' or 'refine' directive to the most appropriate template.
+ * Maps an 'amplify' / 'refine' / 'synthesize_template' directive to a template.
+ *  - amplify             -> the strongest template in the domain (propagate it)
+ *  - synthesize_template -> the weakest template in the domain (the deficit the
+ *                           learner flagged needs reinforcing/replacing)
+ *  - anything else       -> the first template in the domain (stable default)
  */
 export function selectTemplateForLearnerDirective(
   directiveKind: string,
@@ -1209,9 +1213,11 @@ export function selectTemplateForLearnerDirective(
   const matches = Object.values(COMPONENT_TEMPLATES).filter(t => t.domain === domain);
   if (matches.length === 0) return Object.values(COMPONENT_TEMPLATES)[0];
 
-  // If amplifying, select highest benchmark score; if refining, pick most robust
   if (directiveKind === 'amplify') {
-    return matches.sort((a, b) => b.defaultScore - a.defaultScore)[0];
+    return [...matches].sort((a, b) => b.defaultScore - a.defaultScore)[0];
+  }
+  if (directiveKind === 'synthesize_template') {
+    return [...matches].sort((a, b) => a.defaultScore - b.defaultScore)[0];
   }
   return matches[0];
 }

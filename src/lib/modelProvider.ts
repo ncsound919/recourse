@@ -14,6 +14,8 @@
  * text. Callers must surface the offline state explicitly.
  */
 
+import { modelSelection, rewardForOutcome } from './modelSelection.js';
+
 export interface ProviderConfig {
   kind: string;
   baseUrl: string;
@@ -239,6 +241,12 @@ export function pickGenerationProfile(messages: ChatMessage[]): ProviderProfileI
   if (!localModelConfigured()) return 'api';
   const chars = messages.reduce((n, m) => n + (m.content ? m.content.length : 0), 0);
   if (chars > localAutoMaxChars()) return 'api';
+  // Learned routing (Phase 2 #9): once enough real outcomes have accrued, let
+  // the bandit choose among the configured profiles. A cold bandit returns null
+  // and we keep the local-first default below — so nothing changes until the
+  // system has actually observed which profile works on this box.
+  const learned = modelSelection().choose(['local', 'api']);
+  if (learned) return learned;
   // Always try local; chatComplete falls back to api if it turns out to be
   // offline. (Do NOT gate on a cached offline probe here — that would pin
   // generation to api forever after a single transient probe failure.)
@@ -280,7 +288,7 @@ function readConfig(profileId: ProviderProfileId = activeProvider): ProviderConf
   };
 }
 
-async function chatCompleteFor(
+async function chatCompleteForRaw(
   profileId: ProviderProfileId,
   messages: ChatMessage[],
   opts: ChatCompleteOptions = {},
@@ -429,6 +437,25 @@ async function chatCompleteFor(
   }
 }
 
+/** Record the real outcome of a generation call so routing learns over time.
+ *  Never lets a learning failure break generation. */
+async function chatCompleteFor(
+  profileId: ProviderProfileId,
+  messages: ChatMessage[],
+  opts: ChatCompleteOptions = {},
+): Promise<ChatCompleteResult> {
+  const result = await chatCompleteForRaw(profileId, messages, opts);
+  try {
+    modelSelection().record(
+      profileId,
+      rewardForOutcome({ ok: result.ok, status: result.status, latencyMs: result.latencyMs }),
+    );
+  } catch {
+    /* learning must never break a model call */
+  }
+  return result;
+}
+
 async function rawFetch(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -491,6 +518,17 @@ export function providerStatus(profileId?: ProviderProfileId): ProviderStatus {
 /** Status for both profiles — used by UI to show local+api independently. */
 export function providerStatuses(): Record<ProviderProfileId, ProviderStatus> {
   return { local: providerStatus('local'), api: providerStatus('api') };
+}
+
+/** Learned model-routing state for operators/UI. Honest: an unwarmed bandit
+ *  reports `warmed: false` and the static heuristic is still in force. */
+export function modelSelectionSnapshot(): {
+  warmed: boolean;
+  plays: number;
+  arms: Array<{ id: string; plays: number; mean: number; ucb: number }>;
+} {
+  const s = modelSelection();
+  return { warmed: s.warmed(), plays: s.playCount, arms: s.snapshot() };
 }
 
 /** Chat completion for a NON-AGENTIC generation call. Routes by the generation
