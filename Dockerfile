@@ -7,14 +7,14 @@
 # compiled production node_modules from the build stage rather than running
 # `npm ci` again on a `-slim` base (which lacks the toolchain and is the usual
 # source of flaky native-build failures).
-FROM node:20-bookworm AS build
+FROM node:25-bookworm AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
 RUN npm run build && npm prune --omit=dev
 
-FROM node:20-bookworm-slim AS runtime
+FROM node:25-bookworm-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3050
