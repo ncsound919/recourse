@@ -41,7 +41,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
       # Build only (never push). Layer cache keeps rebuilds fast and stable.
       - name: Build image
         uses: docker/build-push-action@v6
