@@ -38,7 +38,7 @@
  *     run inside `db.transaction(...)`.
  */
 
-import { existsSync, openSync, readSync, closeSync, readFileSync, rmSync, renameSync } from "node:fs";
+import { existsSync, openSync, readSync, closeSync, readFileSync, rmSync, renameSync, statSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 
@@ -58,6 +58,8 @@ export interface StateStore {
   /** Flush a pending debounced save immediately (used on shutdown). */
   flush(): void;
   stateFile(): string;
+  /** Compact the SQLite file (checkpoint + VACUUM). Returns bytes reclaimed. */
+  vacuum(): { before: number; after: number };
   /** Close the underlying SQLite connection (checkpoints + releases the file). */
   close(): void;
 }
@@ -210,6 +212,25 @@ export function createStateStore(opts: StateStoreOptions): StateStore {
         timer = null;
         write();
       }
+    },
+    vacuum() {
+      // Flush, fold the WAL into the main file, then VACUUM so the freed pages
+      // are reclaimed. `before` is measured after the checkpoint (the WAL can
+      // hold most of the bytes, which would make a pre-checkpoint size useless).
+      write();
+      let before = 0;
+      let after = 0;
+      try {
+        db.pragma('wal_checkpoint(TRUNCATE)');
+        before = statSync(stateFile).size;
+        db.exec('VACUUM');
+        db.pragma('wal_checkpoint(TRUNCATE)');
+        after = statSync(stateFile).size;
+      } catch (err) {
+        console.warn('[Recourse Engine] VACUUM failed:', err);
+        after = before;
+      }
+      return { before, after };
     },
     close() {
       if (timer) {

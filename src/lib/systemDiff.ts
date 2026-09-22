@@ -38,6 +38,9 @@ export interface SystemSnapshot {
   ts: number;
   gen: number;
   tools: ToolStateInSnapshot[];
+  /** Total tool count, kept when `tools` is stripped from a historical snapshot
+   *  by state hygiene (the full list is only needed for the baseline/latest). */
+  toolCount?: number;
   capabilities: CapabilityAdoptionState[];
   benchmarkSolved: number | null;
   selfhostedHealthy: number;

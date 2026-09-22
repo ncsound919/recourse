@@ -8,7 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { BENCHMARK_PROBLEMS } from '../benchmark/benchmark.js';
+import { allBenchmarkProblems } from '../benchmark/benchmark.js';
 import type { BenchmarkRun } from '../intake/types.js';
 
 export interface BenchmarkRecord {
@@ -37,9 +37,9 @@ export function sha256Hex(input: string): string {
   return crypto.createHash('sha256').update(input).digest('hex');
 }
 
-/** Stable hash of the fixed problem set (ids only — descriptions don't affect scoring). */
+/** Stable hash of the full scored problem set (ids only — descriptions don't affect scoring). */
 export function benchmarkSetHash(): string {
-  return sha256Hex(BENCHMARK_PROBLEMS.map((p) => p.id).join('|'));
+  return sha256Hex(allBenchmarkProblems().map((p) => p.id).join('|'));
 }
 
 function hashRecord(r: Omit<BenchmarkRecord, 'hash'>): string {
@@ -84,7 +84,7 @@ export function appendBenchmarkRun(
     solved: run.solved,
     total: run.total,
     solvedIds: [...run.solvedIds].sort(),
-    benchmarkHash: benchmarkSetHash(),
+    benchmarkHash: run.problemSetHash ?? benchmarkSetHash(),
     registryHash: opts.registryHash ?? '',
     deltaSolved: prev ? run.solved - prev.solved : null,
     prevHash,

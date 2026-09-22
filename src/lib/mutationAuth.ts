@@ -9,6 +9,7 @@
  */
 import crypto from 'node:crypto';
 import type { Request, Response } from 'express';
+import { resolveJevPublic } from './jevAccess.js';
 
 export const MUTATION_SECRET_ENV = 'RECOURSE_API_SECRET';
 
@@ -71,4 +72,28 @@ export function requireMutationAuthIfConfigured(req: Request, res: Response): bo
   const secret = process.env[MUTATION_SECRET_ENV];
   if (!secret || secret.trim() === '') return true;
   return requireMutationAuth(req, res);
+}
+
+/**
+ * Guard for READ routes that trigger PAID model calls (Jev advisories). Each
+ * hit can bill the provider, so by default these require RECOURSE_API_SECRET
+ * even on GET. The public/closed switch is Keywire-backed (a vault secret
+ * `RECOURSE_JEV_PUBLIC=1` flips them open "as needed"; see src/lib/jevAccess.ts);
+ * a static `RECOURSE_JEV_PUBLIC` env still wins when set. An unconfigured
+ * secret (plain local dev) stays open, matching `requireMutationAuthIfConfigured`.
+ */
+export async function requireJevAdvisoryAuth(req: Request, res: Response): Promise<boolean> {
+  const secret = process.env[MUTATION_SECRET_ENV];
+  if (!secret || secret.trim() === '') return true;
+  const publicValue = await resolveJevPublic();
+  if (publicValue === '1') return true;
+  const presented = presentedSecret(req);
+  if (!presented || !secretsEqual(presented, secret.trim())) {
+    res.status(401).json({
+      success: false,
+      error: `unauthorized: Jev advisory routes require ${MUTATION_SECRET_ENV} (set RECOURSE_JEV_PUBLIC=1 in Keywire or env to expose)`,
+    });
+    return false;
+  }
+  return true;
 }

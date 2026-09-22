@@ -95,6 +95,15 @@ import helmet from 'helmet';
 import { rateLimit } from 'express-rate-limit';
 import { evaluateGrowthDecision, DEFAULT_GROWTH_WEIGHTS } from './src/lib/decisionEngine.js';
 import { decisionSynergyInputs } from './src/lib/synergy/decisionBridge.js';
+import {
+  jevStatus,
+  jevEnabled,
+  decideSystemOne,
+  growthDecisionAdvisory,
+  buildChoiceAdvisory,
+  buildNoulAdvisory,
+} from './src/lib/jevClient.js';
+import { resolveJevPublic, setJevPublic, TOGGLE_KEY } from './src/lib/jevAccess.js';
 import { DreamingEngine } from './src/dream/engine.js';
 import { createDreamStore } from './src/dream/store.js';
 import {
@@ -104,7 +113,8 @@ import {
   getActiveModel,
   getActivePolicy,
   setActivePolicy,
-  normalizePromotionPolicy
+  normalizePromotionPolicy,
+  resolvePromotion
 } from './src/dream/mutator.js';
 import { INITIAL_SWARM_STATUS, dispatchSubAgentTask, stepSubTeams, INITIAL_SUB_TEAM_STATES, SubTeamState } from './src/lib/subagentSwarm.js';
 import { createInitialLoopState, executeRecursiveStep, DEFAULT_LOOP_CONFIG } from './src/lib/recursiveMathEngine.js';
@@ -148,7 +158,7 @@ import type { SelfHostedManifestEntry } from './src/lib/selfHosting.js';
 // Capability Forge: the closed, honest self-improvement loop. Materializes
 // verified model-built functions into live self-hosted tools and records every
 // attempt in a durable capability-delta ledger.
-import { FORGE_AGENDA, attemptForgeSpec } from './src/lib/capabilityForge.js';
+import { FORGE_AGENDA, attemptForgeSpec, benchmarkGapSpecs } from './src/lib/capabilityForge.js';
 import type { ForgeSpec, ForgeAttemptOutcome } from './src/lib/capabilityForge.js';
 import { BUILDER_SEED_PROFILES, chooseBuilderProfile, computeBuilderBeliefs, builderMutateDue, proposeBuilderProfile } from './src/lib/builderBrain.js';
 import type { BuilderProfile, BuilderOutcome } from './src/lib/builderBrain.js';
@@ -187,6 +197,17 @@ import {
   DEFAULT_STUCK_THRESHOLD,
 } from './src/lib/selfRepairLoop.js';
 import type { StuckSignal, StuckIssue } from './src/lib/selfRepairLoop.js';
+import {
+  openRepairVerification,
+  resolveRepairVerification,
+  repairVerificationStats,
+  type RepairVerification,
+} from './src/lib/repairVerification.js';
+import {
+  assessSourceSubstance,
+  domainHealth,
+  capabilityReadiness,
+} from './src/lib/honestyMetrics.js';
 
 // Genome-council client: Recourse -> deterministic-brain /genome-council/*.
 // Consult the council over a problem, read what it has learned, and record a
@@ -241,7 +262,7 @@ import { SignalStore, DEFAULT_TOPIC_QUERIES, DEFAULT_RSS_FEEDS } from './src/int
 import type { IntakeSnapshot, BenchmarkRun, ExternalSignal, SourcePollResult } from './src/intake/types.js';
 import { pollAllSources } from './src/intake/poll.js';
 import { groundSignal } from './src/intake/grounding.js';
-import { runBenchmark, BENCHMARK_PROBLEMS, registryAttestation } from './src/benchmark/benchmark.js';
+import { runBenchmark, allBenchmarkProblems, appendedBenchmarkProblems, restoreBenchmarkProblems, registryAttestation } from './src/benchmark/benchmark.js';
 import { appendBenchmarkRun, readBenchmarkLedger, verifyBenchmarkLedger, benchmarkLeaderboard } from './src/lib/benchmarkLedger.js';
 import { buildDevelopmentReadout } from './src/intake/readout.js';
 import type { ReadoutContext } from './src/intake/readout.js';
@@ -277,6 +298,7 @@ const PORT = Number(process.env.PORT || 3050);
 import { createStateStore } from './src/lib/stateStore.js';
 import { createKgRouter } from './src/routes/kg.js';
 import { createOncologyRouter } from './src/routes/oncology.js';
+import { createFieldbridgeRouter } from './src/routes/fieldbridge.js';
 import { createBioRouter } from './src/routes/bio.js';
 import { createBridgesRouter } from './src/routes/bridges.js';
 import { createToolsRouter } from './src/routes/tools.js';
@@ -287,7 +309,7 @@ import { createVizRouter } from './src/routes/viz.js';
 import { createGhidraRouter } from './src/routes/ghidra.js';
 import { buildLearnResult } from './src/lib/ghidraLearning.js';
 import type { GhidraLearnInput, GhidraLearnResult } from './src/lib/ghidraLearning.js';
-import { requireMutationAuth, requireMutationAuthIfConfigured, hasValidMutationSecret } from './src/lib/mutationAuth.js';
+import { requireMutationAuth, requireMutationAuthIfConfigured, hasValidMutationSecret, requireJevAdvisoryAuth } from './src/lib/mutationAuth.js';
 import { openWallet } from './src/lib/wallet.js';
 import { setSandboxSpendSink } from './src/lib/selfHostSandbox.js';
 import { createProductRouter } from './src/routes/product.js';
@@ -341,6 +363,7 @@ import { openNightlyStore, runNightlyCycle } from './src/lib/nightlyLoop.js';
 import type { Snapshot as UpgradeSnapshot } from './src/lib/upgradeReport.js';
 import { openApprovalStore } from './src/lib/approvals.js';
 import { createSelfModGuard, makeHarnessGate } from './src/lib/selfModification.js';
+import { resolveFleetRepo, createFleetRepairGuard, fleetSecret, fleetRepos } from './src/lib/fleetRepos.js';
 import { createSelfImprovementRouter } from './src/routes/selfImprovement.js';
 import { openPolicyEngine } from './src/lib/policy.js';
 import { attemptRemediation, resolveRemediationService, parseRemediationMap } from './src/lib/remediation.js';
@@ -858,6 +881,10 @@ function bumpForgeQuarantine(name: string): boolean {
 let capabilityAdoptions: Partial<Record<CapabilityId, AdoptionRecord>> = {};
 let capabilityServed: Partial<Record<CapabilityId, number>> = {};
 let systemSnapshots: SystemSnapshot[] = [];
+// P2.9: the distilled legacy digest (capability trend, registry/health trend,
+// learner trend, repair patterns, research topics, agenda themes). A
+// first-class artifact so old runs inform new work instead of being re-derived.
+let legacyDigest: Record<string, unknown> | null = null;
 let systemBaseline: SystemSnapshot | null = null;
 
 // Model provider mode persisted across restarts ('local' Spark | 'api' LLM).
@@ -1309,6 +1336,9 @@ let swarmStatus: SwarmStatus = { ...INITIAL_SWARM_STATUS };
 let swarmTeamStates: SubTeamState[] = [...INITIAL_SUB_TEAM_STATES];
 let lastGrowthDecision: GrowthDecisionReport | null = null;
 let anomalies: AnomalyReport[] = [];
+// Repair verification windows: a heal claim is pending until a later re-verify
+// confirms it (see src/lib/repairVerification.ts). Persisted with the state.
+let repairVerifications: RepairVerification[] = [];
 
 // Intake subsystem state (external learning): durable signal store + benchmark
 // history. Signals persist with the main state file via a save callback.
@@ -1396,6 +1426,7 @@ function loadStateFromDisk() {
       if (data.status) status = { ...status, ...data.status };
       if (data.intakeSignals) intakeSignals = data.intakeSignals;
       if (data.benchmarkHistory) benchmarkHistory = data.benchmarkHistory;
+      if (Array.isArray(data.benchmarkAppendedProblems)) restoreBenchmarkProblems(data.benchmarkAppendedProblems);
       if (data.lastGroundAt) lastGroundAt = data.lastGroundAt;
       if (data.lastGroundSummary) lastGroundSummary = data.lastGroundSummary;
       if (typeof data.intakeAutopilotOn === 'boolean') intakeAutopilotOn = data.intakeAutopilotOn;
@@ -1461,6 +1492,7 @@ function loadStateFromDisk() {
       if (data.capabilityAdoptions) capabilityAdoptions = data.capabilityAdoptions;
       if (data.capabilityServed) capabilityServed = data.capabilityServed;
       if (Array.isArray(data.systemSnapshots)) systemSnapshots = data.systemSnapshots;
+      if (data.legacyDigest && typeof data.legacyDigest === 'object') legacyDigest = data.legacyDigest as Record<string, unknown>;
       if (data.systemBaseline) systemBaseline = data.systemBaseline;
       if (data.autonomySettings && typeof data.autonomySettings === 'object') {
         if (typeof data.autonomySettings.safeBoot === 'boolean') {
@@ -1513,6 +1545,7 @@ function ensureStateStore(): ReturnType<typeof createStateStore> {
       provenanceEvents,
       reports,
       anomalies,
+      repairVerifications,
       growthWeights,
       gitHubBlueprints,
       swarmStatus,
@@ -1520,6 +1553,7 @@ function ensureStateStore(): ReturnType<typeof createStateStore> {
       status,
       intakeSignals,
       benchmarkHistory,
+      benchmarkAppendedProblems: appendedBenchmarkProblems(),
       lastGroundAt,
       lastGroundSummary,
       intakeAutopilotOn,
@@ -1564,6 +1598,7 @@ function ensureStateStore(): ReturnType<typeof createStateStore> {
       capabilityServed,
       systemSnapshots,
       systemBaseline,
+      legacyDigest,
       autonomySettings,
       mathIteration: mathLoopState.iteration,
     }),
@@ -1672,6 +1707,7 @@ function executeSelfRepair(
 
   // 1. Verify the repaired code honestly.
   let verifierResult: VerifierResult | null = null;
+  let repairSuite: string | undefined;
   if (domain === 'biotech') {
     try {
       const claim = JSON.parse(repairedCode) as BiotechClaim;
@@ -1680,9 +1716,9 @@ function executeSelfRepair(
       verifierResult = { passed: false, summary: 'FAILED (repaired payload is not valid JSON)', details: [], score: 0 };
     }
   } else {
-    const suite = resolveRepairSuite(tool, testSuite);
-    if (suite) {
-      verifierResult = verifyCodeWithSuite(repairedCode, suite);
+    repairSuite = resolveRepairSuite(tool, testSuite);
+    if (repairSuite) {
+      verifierResult = verifyCodeWithSuite(repairedCode, repairSuite);
     } else {
       // No regression suite on file: the most we can truthfully claim is that
       // the patched code compiles and runs. Label it a smoke check, not a pass.
@@ -1713,7 +1749,7 @@ function executeSelfRepair(
     score: verifierResult?.score ?? 0,
     promoted: healed,
     isRepaired: true,
-    test_suite_code: domain === 'biotech' ? undefined : (resolveRepairSuite(tool, testSuite) ?? undefined),
+    test_suite_code: repairSuite,
     verifier_notes: healed
       ? `AUTONOMOUSLY HEALED & RE-VERIFIED: ${verifierResult?.summary}${templateApplied ? ` [Template: ${templateApplied}, Conf: ${(confidence * 100).toFixed(0)}%]` : ''}`
       : `REPAIR ATTEMPT DID NOT PASS VERIFIER: ${verifierResult?.summary ?? 'no verifier available'}`,
@@ -1764,7 +1800,11 @@ function executeSelfRepair(
     anomalies.pop();
   }
 
-  // Update Status Metrics (successes only count as healed)
+  // Update Status Metrics. A heal claim opens a VERIFICATION WINDOW: it is not
+  // counted as a success until a later re-verify confirms it (see
+  // reverifyPendingRepairs). Smoke-only heals (no suite) are unverifiable and
+  // never count. The success rate is therefore verified/(verified+regressed),
+  // not "how many times we said we fixed it".
   if (healed) {
     status.selfRepair.totalHealedCount += 1;
     status.selfRepair.lastHealedTool = toolName;
@@ -1772,8 +1812,21 @@ function executeSelfRepair(
     status.selfRepair.meanTimeToRepairMs = Math.round(
       (status.selfRepair.meanTimeToRepairMs * (status.selfRepair.totalHealedCount - 1) + repairLatency) / status.selfRepair.totalHealedCount
     );
+    repairVerifications.push(openRepairVerification({
+      id: `rv_${Date.now()}_${crypto.randomBytes(2).toString('hex')}`,
+      tool: toolName,
+      version: newVersionStr,
+      healedAt: Date.now(),
+      suitePresent: Boolean(repairSuite),
+    }));
+    if (repairVerifications.length > 500) repairVerifications.splice(0, repairVerifications.length - 500);
   }
-  status.selfRepair.repairSuccessRate = repairAttempts > 0 ? Math.round((repairSuccesses / repairAttempts) * 100) / 100 : 0;
+  const rvStats = repairVerificationStats(repairVerifications);
+  status.selfRepair.repairSuccessRate = rvStats.successRate;
+  status.selfRepair.verifiedRepairs = rvStats.verified;
+  status.selfRepair.pendingRepairs = rvStats.pending;
+  status.selfRepair.regressedRepairs = rvStats.regressed;
+  status.selfRepair.unverifiableRepairs = rvStats.unverifiable;
   status.selfRepair.activeAnomaliesCount = anomalies.filter(a => a.status === 'detected').length;
 
   // Log in Provenance
@@ -1884,14 +1937,36 @@ app.get('/api/recourse/status', async (req, res) => {
       return t.versions.some(x => x.version === cur && x.promoted);
     }).length;
     if (!status.domainCoverage) status.domainCoverage = {} as any;
+    const passRate = tried > 0 ? Math.round((live / tried) * 100) / 100 : 0;
+    const health = domainHealth(live, passRate);
     status.domainCoverage[d] = {
       activeGenes: live,
-      passRate: tried > 0 ? Math.round((live / tried) * 100) / 100 : 0
+      passRate,
+      // P1.6: a domain with ~no genes / ~no pass rate is BROKEN, not covered.
+      broken: health.broken,
+      ...(health.note ? { note: health.note } : {}),
     };
     passTotal += tried;
     passOk += live;
   });
   status.verifierPassRate = passTotal > 0 ? Math.round((passOk / passTotal) * 100) / 100 : 0;
+
+  // P1.7: capability readiness — a number that can move. The existing
+  // `readinessScore` is the recursive-math convergence, not capability; label
+  // its basis and expose a separate capability figure.
+  {
+    const lastBench = latestBenchmark ?? benchmarkHistory[benchmarkHistory.length - 1] ?? null;
+    const rv = repairVerificationStats(repairVerifications);
+    const cap = capabilityReadiness({
+      benchmarkSolved: lastBench?.solved ?? 0,
+      benchmarkTotal: lastBench?.total ?? 0,
+      verified: rv.verified,
+      regressed: rv.regressed,
+    });
+    status.capabilityReadiness = cap.score;
+    status.capabilityBasis = cap.basis;
+    status.readinessBasis = 'math-loop convergence (not a capability score)';
+  }
 
   status.growthWeights = growthWeights;
   dreamState = await dreamEngine.status();
@@ -2102,7 +2177,8 @@ async function indexSystemMemory(): Promise<{ indexed: number; status: any }> {
     indexed++;
   }
   for (const snap of systemSnapshots.slice(-20)) {
-    const text = `${snap.label} gen ${snap.gen}: ${snap.tools.length} tools, ${snap.capabilities.length} capabilities`;
+    const toolCount = snap.toolCount ?? snap.tools?.length ?? 0;
+    const text = `${snap.label} gen ${snap.gen}: ${toolCount} tools, ${snap.capabilities.length} capabilities`;
     await mem.remember('snapshot', `snap:${snap.label}:${snap.ts}`, text, { gen: snap.gen });
     indexed++;
   }
@@ -2705,8 +2781,8 @@ app.get('/api/recourse/benchmark', (_req, res) => {
     success: true,
     latest: last,
     history: benchmarkHistory.slice(-30).map((r) => ({ at: r.at, solved: r.solved, total: r.total })),
-    totalProblems: BENCHMARK_PROBLEMS.length,
-    problems: BENCHMARK_PROBLEMS.map((p) => ({
+    totalProblems: allBenchmarkProblems().length,
+    problems: allBenchmarkProblems().map((p) => ({
       id: p.id,
       title: p.title,
       domain: p.domain,
@@ -2776,6 +2852,14 @@ app.use('/api/recourse/ghidra', createGhidraRouter({ learnFromAnalysis: learnFro
 // src/routes/oncology.ts (stateless bridges over lib modules).
 // ---------------------------------------------------------------------------
 app.use('/api/recourse/oncology', createOncologyRouter());
+
+// ---------------------------------------------------------------------------
+// FieldBridge batch-artifact bridge — cross-disciplinary trend/matrix engine
+// (`02_Pillars/Overlay Science/fieldbridge`). A batch tool, NOT a live HTTP
+// service: these routes read the checked-in matrix/benchmark JSON snapshot
+// (src/routes/fieldbridge.ts -> src/lib/fieldbridgeBridge.ts).
+// ---------------------------------------------------------------------------
+app.use('/api/recourse/fieldbridge', createFieldbridgeRouter());
 
 // ---------------------------------------------------------------------------
 // Research integrity bridge (:8025; reproducibility/custody wrapper).
@@ -3705,6 +3789,7 @@ app.post('/api/recourse/templates/build', async (req, res) => {
     };
 
     let existingTool = registry.find(t => t.name === cleanCompName);
+    let addedNew = true;
     if (existingTool) {
       existingTool.versions.push(newVersion);
       existingTool.currentVersion = newVersion.version;
@@ -3722,9 +3807,10 @@ app.post('/api/recourse/templates/build', async (req, res) => {
         healthStatus: 'healthy',
         anomalyCount: 0
       };
-      registry.unshift(existingTool);
+      addedNew = promoteTool(existingTool, { origin: 'templates' });
     }
 
+    if (addedNew) {
     status.registeredToolsCount = registry.length;
     status.totalUpgrades += 1;
 
@@ -3748,9 +3834,11 @@ app.post('/api/recourse/templates/build', async (req, res) => {
     // A freshly built (possibly self-hosted) component may back a capability.
     void sweepCapabilityAdoptions().catch(() => {});
     try { recordSystemChange('template-build'); } catch { /* non-fatal */ }
+    }
 
     res.json({
       success: true,
+      promoted: addedNew,
       toolEntry: existingTool,
       buildResult,
       verifierPassed: passedVerifier,
@@ -4121,6 +4209,13 @@ app.get('/api/recourse/system/snapshots', (req, res) => {
   res.json({ success: true, count: systemSnapshots.length, baseline: systemBaseline, snapshots: systemSnapshots });
 });
 
+// P2.9: the distilled legacy digest — a first-class artifact so old runs inform
+// new work (capability trend, registry/health trend, learner trend, repair
+// patterns, research topics, agenda themes) instead of being re-derived.
+app.get('/api/recourse/legacy-digest', (_req, res) => {
+  res.json({ success: true, available: legacyDigest !== null, digest: legacyDigest });
+});
+
 // Differential upgrade report: upgraded (current) system vs the boot baseline.
 app.get('/api/recourse/system/upgrade-report', async (req, res) => {
   try {
@@ -4203,6 +4298,7 @@ function currentSystemSnapshot(label: string): SystemSnapshot {
     ts: Date.now(),
     gen: status.generation ?? 0,
     tools,
+    toolCount: tools.length,
     capabilities,
     benchmarkSolved: lastBench?.solved ?? null,
     selfhostedHealthy,
@@ -4224,6 +4320,65 @@ function recordSystemChange(reason: string): void {
   systemSnapshots.push(snap);
   if (systemSnapshots.length > 200) systemSnapshots.shift();
   saveStateToDisk();
+}
+
+/**
+ * P2 state hygiene: keep the DB bounded without manual intervention.
+ *
+ *  - Historical system snapshots keep only a COUNT (the per-tool arrays are the
+ *    bloat; only the baseline + the most recent snapshots keep full `tools`, which
+ *    the upgrade report needs).
+ *  - Snapshot history is capped.
+ *  - The SQLite file is VACUUMed when it exceeds `RECOURSE_STATE_VACUUM_MB`.
+ *
+ * Safe to run while serving: it mutates in-memory arrays and issues a VACUUM on
+ * the live connection. Returns what it did (honestly).
+ */
+function stateHygiene(): { snapshots: number; toolsStripped: number; vacuum?: { before: number; after: number } } {
+  const keepFull = new Set<number>();
+  if (systemBaseline) keepFull.add(systemSnapshots.indexOf(systemBaseline));
+  for (let i = Math.max(0, systemSnapshots.length - 10); i < systemSnapshots.length; i++) keepFull.add(i);
+
+  let toolsStripped = 0;
+  systemSnapshots.forEach((s, i) => {
+    if (keepFull.has(i)) return;
+    if (Array.isArray(s.tools) && s.tools.length > 0) {
+      s.toolCount = s.tools.length;
+      s.tools = [];
+      toolsStripped += 1;
+    }
+  });
+
+  const MAX_SNAPSHOTS = 100;
+  if (systemSnapshots.length > MAX_SNAPSHOTS) {
+    systemSnapshots.splice(0, systemSnapshots.length - MAX_SNAPSHOTS);
+  }
+  saveStateToDisk();
+
+  let vacuum: { before: number; after: number } | undefined;
+  try {
+    const threshold = Number(process.env.RECOURSE_STATE_VACUUM_MB || 64) * 1024 * 1024;
+    const store = ensureStateStore();
+    if (fs.statSync(store.stateFile()).size > threshold) vacuum = store.vacuum();
+  } catch { /* best-effort; hygiene never blocks the loop */ }
+
+  return { snapshots: systemSnapshots.length, toolsStripped, ...(vacuum ? { vacuum } : {}) };
+}
+
+/** Schedule state hygiene on a cadence. Opt-in via RECOURSE_STATE_HYGIENE_MS. */
+function startStateHygiene(): void {
+  const intervalMs = Number(process.env.RECOURSE_STATE_HYGIENE_MS);
+  if (!Number.isFinite(intervalMs) || intervalMs <= 0) return;
+  const t = setInterval(() => {
+    try {
+      const r = stateHygiene();
+      console.log(`[state-hygiene] snapshots=${r.snapshots} toolsStripped=${r.toolsStripped}${r.vacuum ? ` vacuum ${(r.vacuum.before / 1048576).toFixed(1)}MB->${(r.vacuum.after / 1048576).toFixed(1)}MB` : ''}`);
+    } catch (err) {
+      console.warn('[state-hygiene] failed:', err instanceof Error ? err.message : String(err));
+    }
+  }, intervalMs);
+  t.unref?.();
+  console.log(`[state-hygiene] scheduled every ${intervalMs}ms`);
 }
 
 /** Build a "describe" mapper from registry tool descriptions → human phrasing.
@@ -4546,7 +4701,8 @@ app.post('/api/recourse/learn/synthesize-directive', async (req, res) => {
       anomalyCount: 0
     };
 
-    registry.unshift(newToolEntry);
+  const promotedLearn = promoteTool(newToolEntry, { origin: 'learn' });
+  if (promotedLearn) {
     status.registeredToolsCount = registry.length;
     status.totalUpgrades += 1;
 
@@ -4562,9 +4718,11 @@ app.post('/api/recourse/learn/synthesize-directive', async (req, res) => {
     });
 
     saveStateToDisk();
+  }
 
     res.json({
       success: true,
+      promoted: promotedLearn,
       directive: targetDirective,
       synthesizedTool: newToolEntry,
       buildResult
@@ -4620,26 +4778,29 @@ app.post('/api/recourse/crossover', (req, res) => {
     ]
   };
 
-  registry.unshift(hybridEntry);
-  if (verified) {
-    status.totalUpgrades += 1;
+  const promotedCrossover = promoteTool(hybridEntry, { origin: 'crossover' });
+  if (promotedCrossover) {
+    if (verified) {
+      status.totalUpgrades += 1;
+    }
+    status.generation += 1;
+
+    appendProvenanceEvent('gene_crossover', {
+      hybridTool: hybridToolName,
+      parentA: toolA?.name,
+      parentB: toolB?.name,
+      domain: targetDomain,
+      version: hybridVersion,
+      hash: versionHash,
+      verified
+    });
+
+    saveStateToDisk();
   }
-  status.generation += 1;
-
-  appendProvenanceEvent('gene_crossover', {
-    hybridTool: hybridToolName,
-    parentA: toolA?.name,
-    parentB: toolB?.name,
-    domain: targetDomain,
-    version: hybridVersion,
-    hash: versionHash,
-    verified
-  });
-
-  saveStateToDisk();
 
   res.json({
     success: true,
+    promoted: promotedCrossover,
     hybridTool: hybridEntry,
     verified,
     generation: status.generation
@@ -5016,6 +5177,191 @@ app.get('/api/recourse/decision/evaluate', async (req, res) => {
   res.json({ success: true, decision, synergy: { source: synergy.source, manifestHash: synergy.manifestHash } });
 });
 
+// =========================================================================
+// 1b. JEV (System One) DECISION ADVISORY ROUTES
+//     TypeSafe Jev via the Vercel AI Gateway. The deterministic engine stays
+//     authoritative; Jev adds a calibrated `choice`/`noul` advisory alongside
+//     it. When the gateway is unreachable the advisory is honestly `offline`
+//     (source:'offline') — never a fabricated probability.
+// =========================================================================
+app.get('/api/recourse/decision/jev/status', async (_req, res) => {
+  const status = await jevStatus();
+  const publicValue = await resolveJevPublic();
+  res.json({ success: true, jev: status, enabled: jevEnabled(), public: publicValue === '1' });
+});
+
+// Keywire-backed public/closed toggle for the paid Jev advisory routes. Flipping
+// to true opens them without auth (e.g. the browser composer panel); false
+// closes them again. The value is written to the Keywire vault
+// (`RECOURSE_JEV_PUBLIC` in the fleet project/env) so it persists and is
+// visible fleet-wide. Guarded (write, fail-closed).
+app.post('/api/recourse/decision/jev/public', async (req, res) => {
+  if (!requireMutationAuth(req, res)) return;
+  try {
+    const value = req.body?.public === true ? '1' : '0';
+    const keywire = await setJevPublic(value);
+    if (!keywire.ok) {
+      return res.status(keywire.status ?? 502).json({ success: false, error: keywire.error || 'Keywire toggle write failed' });
+    }
+    res.json({ success: true, public: value === '1', key: TOGGLE_KEY, keywire });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'toggle failed' });
+  }
+});
+
+app.get('/api/recourse/decision/jev/evaluate', async (req, res) => {
+  if (!(await requireJevAdvisoryAuth(req, res))) return;
+  try {
+    dreamState = await dreamEngine.status();
+    const synergy = decisionSynergyInputs();
+    const decision = evaluateGrowthDecision(
+      registry,
+      anomalies,
+      growthWeights,
+      status.generation,
+      dreamState.recentThoughts,
+      gitHubBlueprints,
+      synergy.crossDomainSynergyByDomain
+    );
+    lastGrowthDecision = decision;
+
+    const advisory = growthDecisionAdvisory(decision);
+    const result = await decideSystemOne({ state: advisory.state, questions: advisory.questions });
+    const jev = buildChoiceAdvisory(result, advisory.actions);
+    try {
+      appendProvenanceEvent('jev_decision_advisory', {
+        source: jev.source,
+        model: jev.model,
+        recommendedActionId: jev.recommendedActionId,
+        recommendedActionType: jev.recommendedActionType,
+        probability: jev.probability,
+        decisionEntropy: decision.decisionEntropy,
+      });
+    } catch { /* provenance must never break a decision call */ }
+
+    res.json({
+      success: true,
+      decision,
+      synergy: { source: synergy.source, manifestHash: synergy.manifestHash },
+      jev,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Jev advisory failed' });
+  }
+});
+
+app.get('/api/recourse/decision/jev/noul', async (req, res) => {
+  if (!(await requireJevAdvisoryAuth(req, res))) return;
+  try {
+    dreamState = await dreamEngine.status();
+    const synergy = decisionSynergyInputs();
+    const decision = evaluateGrowthDecision(
+      registry,
+      anomalies,
+      growthWeights,
+      status.generation,
+      dreamState.recentThoughts,
+      gitHubBlueprints,
+      synergy.crossDomainSynergyByDomain
+    );
+    lastGrowthDecision = decision;
+
+    const state = {
+      generation: decision.generation,
+      stateVectorSummary: decision.stateVectorSummary,
+      decisionEntropy: decision.decisionEntropy,
+      activeAnomalies: anomalies
+        .filter((a) => a.status === 'detected')
+        .map((a) => ({ tool: a.toolName, error: a.errorType, severity: a.severity })),
+    };
+    const result = await decideSystemOne({
+      state,
+      questions: {
+        proceed: {
+          type: 'noul',
+          instructions: 'Should the autonomous growth loop execute its top-ranked action right now?',
+          criteria: {
+            true: 'System is healthy and the top action is safe to run',
+            false: 'Health is degraded or the top action is risky',
+          },
+        },
+      },
+    });
+    const jev = buildNoulAdvisory(result);
+    try {
+      appendProvenanceEvent('jev_noul_advisory', {
+        source: jev.source,
+        model: jev.model,
+        noul: jev.noul,
+        proceed: jev.proceed,
+      });
+    } catch { /* provenance must never break a decision call */ }
+
+    res.json({ success: true, decision, jev });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Jev noul advisory failed' });
+  }
+});
+
+// Promotion-gate advisory: surface the DETERMINISTIC promotion decision
+// (resolvePromotion) plus a Jev noul ("auto-promote now?"). The verifier gate
+// stays authoritative; autopilot/operators may require jev.proceed === true
+// before executing. Guarded (mutation-adjacent, fail-closed).
+app.post('/api/recourse/decision/jev/promotion', async (req, res) => {
+  if (!requireMutationAuth(req, res)) return;
+  try {
+    const body = req.body ?? {};
+    const normalized = normalizePromotionPolicy(typeof body.policy === 'string' ? body.policy : '');
+    if ('error' in normalized) return res.status(400).json({ success: false, error: normalized.error });
+    const score = Number(body.score);
+    const priorScore = typeof body.priorScore === 'number' ? Number(body.priorScore) : undefined;
+    const verified = body.verified === false ? false : true;
+    const decision = resolvePromotion(normalized.policy, {
+      verified,
+      score: Number.isFinite(score) ? score : 0,
+      priorScore,
+    });
+
+    const result = await decideSystemOne({
+      state: {
+        promotionPolicy: normalized.policy,
+        toolName: typeof body.toolName === 'string' ? body.toolName.slice(0, 80) : 'gene',
+        domain: typeof body.domain === 'string' ? body.domain.slice(0, 40) : 'coding',
+        verified,
+        score: Number.isFinite(score) ? score : 0,
+        priorScore: priorScore ?? null,
+        deterministicVerdict: decision.outcome,
+        deterministicStatus: decision.status,
+        description: typeof body.description === 'string' ? body.description.slice(0, 200) : null,
+      },
+      questions: {
+        auto_promote: {
+          type: 'noul',
+          instructions: 'Should this sandbox-verified candidate be promoted automatically right now?',
+          criteria: {
+            true: 'Safe to auto-promote',
+            false: 'Hold for human review',
+          },
+        },
+      },
+    });
+    const jev = buildNoulAdvisory(result, 'auto_promote');
+    try {
+      appendProvenanceEvent('jev_promotion_advisory', {
+        source: jev.source,
+        model: jev.model,
+        noul: jev.noul,
+        proceed: jev.proceed,
+        policy: normalized.policy,
+        deterministicVerdict: decision.outcome,
+      });
+    } catch { /* provenance must never break a decision call */ }
+    res.json({ success: true, decision, jev });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Jev promotion advisory failed' });
+  }
+});
+
 app.post('/api/recourse/decision/weights', async (req, res) => {
   const { weights } = req.body;
   if (weights) {
@@ -5095,7 +5441,7 @@ app.post('/api/recourse/decision/execute', async (req, res) => {
               healthStatus: 'healthy',
               anomalyCount: 0
             };
-            registry.push(newTool);
+  if (promoteTool(newTool, { origin: 'decision', push: true })) {
             status.totalUpgrades += 1;
             status.generation += 1;
             status.lastTickTime = Date.now();
@@ -5110,6 +5456,9 @@ app.post('/api/recourse/decision/execute', async (req, res) => {
             });
             executionResult = { ...executionResult, newTool, message: `Built & verified ${toolName} (real test suite green) to resolve ${targetDomain} deficit.` };
           } else {
+            executionResult = { ...executionResult, message: `Substance gate refused ${toolName}; nothing promoted.` };
+          }
+        } else {
             executionResult = { ...executionResult, message: `${targetDomain} template candidate FAILED its real test suite; nothing promoted.` };
           }
         } else {
@@ -5171,8 +5520,9 @@ app.post('/api/recourse/decision/execute', async (req, res) => {
             healthStatus: cTool.verified ? 'healthy' : 'degraded',
             anomalyCount: 0
           };
-          registry.push(newTool);
+  const promotedDreamTool = promoteTool(newTool, { origin: 'decision', push: true });
           dreamState = r.dreamState;
+          if (promotedDreamTool) {
           if (cTool.verified) status.totalUpgrades += 1;
           appendProvenanceEvent('dream_crystallized', {
             thoughtId: thought.id,
@@ -5183,6 +5533,9 @@ app.post('/api/recourse/decision/execute', async (req, res) => {
             verified: cTool.verified
           });
           executionResult = { ...executionResult, dreamTool: newTool, message: cTool.verified ? `Crystallized engine-verified dream insight ${toolName}.` : `Dream crystallization of ${toolName} did not pass verification.` };
+          } else {
+            executionResult = { ...executionResult, message: `Substance gate refused ${toolName}; nothing promoted.` };
+          }
         } else {
           executionResult = { ...executionResult, message: `Dream crystallization failed verification: ${r.error || 'unknown'}` };
         }
@@ -5271,7 +5624,7 @@ async function mirrorCrystallizedDreamGenes(): Promise<number> {
         : 'coding';
       const version = '1.0.0';
       const versionHash = crypto.createHash('sha256').update(cTool.code).digest('hex').substring(0, 16);
-      registry.unshift({
+      const dreamPromoted = promoteTool({
         name: cTool.name,
         domain,
         entrypoint: `src/tools/${cTool.name}.ts`,
@@ -5289,7 +5642,10 @@ async function mirrorCrystallizedDreamGenes(): Promise<number> {
         }],
         healthStatus: 'healthy',
         anomalyCount: 0
-      });
+      }, { origin: 'dream-mirror' });
+      // A stub that fails the substance gate is not added and not queued for the
+      // forge — it would only be re-generated into the same junk.
+      if (!dreamPromoted) continue;
       existing.add(cTool.name);
       added++;
 
@@ -5466,7 +5822,8 @@ app.post('/api/recourse/dream/crystallize', async (req, res) => {
       anomalyCount: 0
     };
 
-    registry.unshift(newToolEntry);
+  const promotedDream = promoteTool(newToolEntry, { origin: 'dream-crystallize' });
+  if (promotedDream) {
     status.totalUpgrades += 1;
 
     appendProvenanceEvent('dream_crystallized', {
@@ -5480,9 +5837,11 @@ app.post('/api/recourse/dream/crystallize', async (req, res) => {
     });
 
     saveStateToDisk();
+  }
 
     res.json({
       success: true,
+      promoted: promotedDream,
       crystallizedTool: newToolEntry,
       dreamState: r.dreamState
     });
@@ -5552,6 +5911,7 @@ app.post('/api/recourse/mutate/evolve', async (req, res) => {
       targetToolName: typeof targetToolName === 'string' && targetToolName.trim() ? targetToolName.trim() : undefined
     });
 
+    let promoted = false;
     if (result.success && result.outcome === 'promoted') {
       const version = '1.0.0';
       const newTool: ToolEntry = {
@@ -5572,7 +5932,8 @@ app.post('/api/recourse/mutate/evolve', async (req, res) => {
         healthStatus: result.verifierResult.verified ? 'healthy' : 'degraded',
         anomalyCount: 0
       };
-      registry.unshift(newTool);
+    promoted = promoteTool(newTool, { origin: 'mutate' });
+    if (promoted) {
       status.totalUpgrades += 1;
       appendProvenanceEvent('ai_mutation', {
         tool: result.toolName,
@@ -5584,8 +5945,9 @@ app.post('/api/recourse/mutate/evolve', async (req, res) => {
       });
       saveStateToDisk();
     }
+    }
 
-    res.json(result);
+    res.json({ ...result, promoted });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -5599,6 +5961,7 @@ app.post('/api/recourse/mutate/approve', async (req, res) => {
       return res.status(400).json({ success: false, error: 'geneId required' });
     }
     const result = await approveGene(geneRegistryStore, geneId);
+    let promoted = false;
     if (result.success && result.gene) {
       const g = result.gene;
       const version = `${g.version}.0.0`;
@@ -5621,7 +5984,8 @@ app.post('/api/recourse/mutate/approve', async (req, res) => {
         healthStatus: (g.verifierChecks || []).every(c => c.passed) ? 'healthy' : 'degraded',
         anomalyCount: 0
       };
-      registry.unshift(newTool);
+  promoted = promoteTool(newTool, { origin: 'mutate-approve' });
+  if (promoted) {
       status.totalUpgrades += 1;
       appendProvenanceEvent('tool_human_approved', {
         tool: g.name,
@@ -5631,8 +5995,9 @@ app.post('/api/recourse/mutate/approve', async (req, res) => {
         hash: g.versionHash
       });
       saveStateToDisk();
+  }
     }
-    res.status(result.success ? 200 : 422).json(result);
+    res.status(result.success ? 200 : 422).json({ ...result, promoted });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -5979,7 +6344,12 @@ Your code is run in an isolated sandbox against your own tests. No placeholders.
     anomalyCount: 0,
   };
 
-  registry.unshift(entry);
+  if (!promoteTool(entry, { origin: 'swarm' })) {
+    // Substance gate refused the generated tool (recorded as promotion_refused):
+    // do not claim the task completed with a passing score.
+    patchTask(task.id, (t) => { t.status = 'failed'; t.completedAt = Date.now(); });
+    return false;
+  }
   status.totalUpgrades += 1;
 
   patchTask(task.id, (t) => {
@@ -7049,7 +7419,7 @@ function intakeSnapshot(): IntakeSnapshot {
 
 function benchmarkState() {
   return {
-    problems: BENCHMARK_PROBLEMS,
+    problems: allBenchmarkProblems(),
     history: benchmarkHistory,
     lastRunAt: benchmarkHistory.length ? benchmarkHistory[benchmarkHistory.length - 1].at : null,
     lastRun: benchmarkHistory.length ? benchmarkHistory[benchmarkHistory.length - 1] : null,
@@ -7120,7 +7490,14 @@ async function runGroundingCycle(signalId?: string): Promise<{ grounded: boolean
       healthStatus: 'healthy',
       anomalyCount: 0,
     };
-    registry.unshift(newTool);
+  if (!promoteTool(newTool, { origin: 'grounding' })) {
+    // Substance gate refused the generated tool: leave the signal unconsumed so
+    // a later cycle can retry, and report honestly.
+    lastGroundAt = Date.now();
+    lastGroundSummary = `${signal.source}:${signal.title.slice(0, 60)} → substance gate refused ${result.toolName}`;
+    saveStateToDisk();
+    return { grounded: false, reason: 'substance-gate', domain: result.domain, signal };
+  }
     status.totalUpgrades += 1;
     signalStore.markConsumed(signal.id, result.toolName);
     lastGroundAt = Date.now();
@@ -7340,6 +7717,7 @@ app.get('/api/recourse/readout', async (req, res) => {
     chainIntegrity: chain.valid,
     upgrade,
     plainUpgrade,
+    legacyDigest,
   };
   res.json({ success: true, markdown: buildDevelopmentReadout(ctx), plain: plainUpgrade, generatedAt: new Date().toISOString() });
 });
@@ -8288,7 +8666,10 @@ function forgeSnapshot() {
 }
 
 function allForgeSpecs(): ForgeSpec[] {
-  return [...FORGE_AGENDA, ...dynamicAgenda];
+  // Benchmark gaps are forge targets too: the generated tier is headroom only
+  // until the forge builds a tool for it (see benchmarkGapSpecs).
+  const lastRun = latestBenchmark ?? benchmarkHistory[benchmarkHistory.length - 1] ?? null;
+  return [...FORGE_AGENDA, ...dynamicAgenda, ...benchmarkGapSpecs(lastRun)];
 }
 
 /** Load the literature corpus once (cached). Used to ground forge agenda picks:
@@ -8345,6 +8726,43 @@ function nextForgeSpec(): ForgeSpec | null {
   return null;
 }
 
+/** Current promoted source of a registry entry, or null. */
+function currentSourceOf(entry: ToolEntry): string | null {
+  const v = entry.versions?.find((x) => x.version === entry.currentVersion)
+    ?? entry.versions?.[entry.versions.length - 1];
+  return v?.source_code ?? null;
+}
+
+/**
+ * Shared registry promotion chokepoint (P1.4).
+ *
+ * Every NEW capability — generated, learned, mutated, dream-crystallized,
+ * swarm-built, grounded, imported — must clear the substance gate before it
+ * enters the registry. Repairs, restores and pending candidates pass
+ * `gate:false` (they are not new generated capability; a repair is judged by the
+ * verification window, not by this gate). A refusal is recorded in provenance so
+ * it is auditable, never silent. Returns true when the entry was added.
+ */
+function promoteTool(entry: ToolEntry, opts: { origin: string; gate?: boolean; push?: boolean }): boolean {
+  if (opts.gate !== false) {
+    const source = currentSourceOf(entry);
+    if (source) {
+      const verdict = assessSourceSubstance(source);
+      if (!verdict.ok) {
+        try {
+          appendProvenanceEvent('promotion_refused', {
+            tool: entry.name, origin: opts.origin, reason: verdict.reason, lines: verdict.meaningfulLines,
+          });
+          recordDev('promotion-refused', false, `${entry.name} (${opts.origin}): ${verdict.reason}`, { driver: 'substance-gate' });
+        } catch { /* refusal logging is best-effort; the refusal itself still holds */ }
+        return false;
+      }
+    }
+  }
+  if (opts.push) registry.push(entry); else registry.unshift(entry);
+  return true;
+}
+
 /**
  * Materialize a passed forge outcome into a live self-hosted tool + registry
  * gene. All verification (reference suite + lint + live import re-run) must
@@ -8387,6 +8805,19 @@ async function materializeForgeOutcome(outcome: ForgeAttemptOutcome, spec: Forge
 
   if (outcome.ok !== true || !outcome.source) {
     base.status = outcome.reason === 'offline' ? 'offline' : 'failed';
+    base.wallMs = Date.now() - started;
+    forgeLedger.push(base);
+    saveStateToDisk();
+    return base;
+  }
+
+  // 1a. Quality gate (P1.4): reject sub-substance implementations before lint.
+  // A trivial stub that passes a trivial suite is not a capability.
+  const substance = assessSourceSubstance(outcome.source);
+  if (!substance.ok) {
+    base.status = 'failed';
+    base.summary = substance.reason;
+    base.failures = [...(base.failures || []), { attempt: 0, note: substance.reason ?? 'substance gate' }];
     base.wallMs = Date.now() - started;
     forgeLedger.push(base);
     saveStateToDisk();
@@ -9677,6 +10108,38 @@ async function escalateStuckIssue(issue: StuckIssue, repoUrl: string | null, rep
   return action;
 }
 
+/** Re-verify pending repair windows: a heal that later fails becomes `regressed`
+ *  (a real failure). Re-runs each repaired version's stored suite in the sandbox;
+ *  entries with no suite/source are left pending (honest — cannot verify). */
+function reverifyPendingRepairs(): { checked: number; verified: number; regressed: number } {
+  let checked = 0;
+  let verified = 0;
+  let regressed = 0;
+  for (const e of repairVerifications) {
+    if (e.status !== 'pending') continue;
+    const tool = registry.find((t) => t.name === e.tool);
+    const version = tool?.versions.find((v) => v.version === e.version);
+    const suite = version?.test_suite_code;
+    const source = version?.source_code;
+    if (!suite || !source) continue;
+    checked += 1;
+    let passed = false;
+    try { passed = verifyCodeWithSuite(source, suite).passed; } catch { passed = false; }
+    resolveRepairVerification(repairVerifications, e.id, passed, Date.now(),
+      passed ? 're-verified live' : 'regressed on re-verify');
+    if (passed) verified += 1; else regressed += 1;
+  }
+  if (checked > 0) {
+    const s = repairVerificationStats(repairVerifications);
+    status.selfRepair.repairSuccessRate = s.successRate;
+    status.selfRepair.verifiedRepairs = s.verified;
+    status.selfRepair.pendingRepairs = s.pending;
+    status.selfRepair.regressedRepairs = s.regressed;
+    status.selfRepair.unverifiableRepairs = s.unverifiable;
+  }
+  return { checked, verified, regressed };
+}
+
 /** One full stuck-repair pass: collect signals -> update issues -> escalate
  *  each stuck issue past its backoff. Returns what happened (honestly). */
 async function runStuckRepairPass(force = false): Promise<Record<string, unknown>> {
@@ -9684,6 +10147,7 @@ async function runStuckRepairPass(force = false): Promise<Record<string, unknown
   selfRepairBusy = true;
   try {
     const now = Date.now();
+    const reverify = reverifyPendingRepairs();
     const signals = await collectStuckSignals();
     stuckIssues = updateStuckIssues(stuckIssues, signals, now);
     const repoUrl = process.env.RECOURSE_REPO_URL || null;
@@ -9702,6 +10166,7 @@ async function runStuckRepairPass(force = false): Promise<Record<string, unknown
     return {
       ok: true,
       now,
+      reverify,
       signals: signals.length,
       snapshot: stuckSnapshot(stuckIssues),
       escalated: actions.length,
@@ -9902,17 +10367,41 @@ app.post('/api/recourse/develop/council/post-mortem', async (req, res) => {
 /** Inbound: apply a repair-team patch, but only after it passes Recourse's own
  *  sandbox verifier + lint gate. This is the safe autonomous-development gate. */
 app.post('/api/recourse/develop/patch', async (req, res) => {
+  // This route writes source to disk and runs a caller-supplied suite. It sat
+  // unauthenticated next to /develop/revert, which required the secret — so the
+  // destructive-but-reversible action was gated and the write-and-execute action
+  // was not. The server binds 0.0.0.0, so that was reachable from the LAN.
+  if (!requireMutationAuth(req, res)) return;
   try {
-    const { driverId, file, source = '', suite, domain, note } = req.body ?? {};
+    const { driverId, file, source = '', suite, domain, note, repo, authorization } = req.body ?? {};
     if (typeof driverId !== 'string' || typeof file !== 'string') {
       return res.status(400).json({ success: false, error: 'driverId and file are required' });
     }
     if (typeof source !== 'string') {
       return res.status(400).json({ success: false, error: 'source must be a string' });
     }
+
+    // Fleet target: an allowlisted sibling repo (Axiom, OpenHub). Absent or
+    // 'self' keeps the original own-repo behavior exactly.
+    const target = resolveFleetRepo(repo);
+    if (repo && repo !== 'self' && !target) {
+      return res.status(400).json({ success: false, error: `unknown fleet repo "${String(repo)}"` });
+    }
+
+    const root = target ? target.root : devRepoRoot();
+    // Whose policy decides: for our own repo, our own self-mod rules; for a
+    // sibling, the proof that ITS trust core already allowed this exact content.
+    const guard = target
+      ? createFleetRepairGuard({ repo: target.slug, source, authorization, secret: fleetSecret() })
+      : selfModGuard;
+    // Boot-green runs the TARGET repo's own checks, in the target repo.
+    const bootGreen = target
+      ? makeHarnessGate({ cwd: target.root })
+      : bootGreenForPatch(file);
+
     const result = await verifyAndApplyPatch(
       { driverId, file, source, suite: typeof suite === 'string' ? suite : undefined, domain, note },
-      { root: devRepoRoot(), bootGreen: bootGreenForPatch(file), guard: selfModGuard },
+      { root, bootGreen, guard },
     );
     const detail = result.applied
       ? `applied ${result.file} (${result.verified})${'revertToken' in result && result.revertToken ? ` [rollback ${result.revertToken}]` : ''}`
@@ -9950,7 +10439,8 @@ app.post('/api/recourse/develop/autopilot/toggle', (req, res) => {
  *  rollback tokens. Read-only; mirrors the persisted journal under the repo. */
 app.get('/api/recourse/develop/patches', (_req, res) => {
   try {
-    const root = devRepoRoot();
+    const ledgerTarget = resolveFleetRepo(_req.query?.repo);
+    const root = ledgerTarget ? ledgerTarget.root : devRepoRoot();
     const patches = listFleetPatches(root);
     res.json({
       success: true,
@@ -9976,11 +10466,16 @@ app.post('/api/recourse/develop/revert', async (req, res) => {
     if (typeof token !== 'string' || !token) {
       return res.status(400).json({ success: false, error: 'token is required' });
     }
-    const result = await revertAppliedPatch(token, devRepoRoot());
+    // A patch applied to a fleet repo is journalled under THAT repo, so the
+    // revert has to look there too — otherwise the token is simply not found and
+    // the change is unrollbackable.
+    const revertTarget = resolveFleetRepo((req.body ?? {}).repo);
+    const revertRoot = revertTarget ? revertTarget.root : devRepoRoot();
+    const result = await revertAppliedPatch(token, revertRoot);
     if (!result.ok) {
       return res.status(404).json({ success: false, error: result.error || 'revert failed' });
     }
-    const entry = listFleetPatches(devRepoRoot()).find((p) => p.token === token);
+    const entry = listFleetPatches(revertRoot).find((p) => p.token === token);
     appendProvenanceEvent('capability_reverted', {
       token,
       file: result.file,
@@ -10341,6 +10836,7 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Recourse server running on http://0.0.0.0:${PORT}`);
+    startStateHygiene();
   });
   console.log(`[boot] t+${Math.round(process.uptime())}s listen() called on ${PORT}`);
 }

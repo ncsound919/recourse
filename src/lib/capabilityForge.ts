@@ -21,6 +21,8 @@
  */
 
 import type { ToolDomain } from '../types';
+import type { BenchmarkRun } from '../intake/types';
+import { GENERATED_PROBLEMS } from '../benchmark/generatedProblems';
 import { executeTestSuite } from './executionSandbox';
 import { integrateAxiomTool, axiomReachable } from './axiomBridge.js';
 import { skillAwareChat } from './skillContext.js';
@@ -42,6 +44,31 @@ export interface ForgeSpec {
 export interface ForgeFailure {
   attempt: number;
   note: string;
+}
+
+/**
+ * Unsolved GENERATED benchmark problems as forge specs — the return leg that
+ * makes the generated tier move.
+ *
+ * Without this, the generated tier is only headroom: no gene implements those
+ * specs, so the score never rises. Feeding them to the forge means the loop
+ * generates + sandbox-verifies a real implementation against the problem's own
+ * hidden suite; a pass registers a tool the benchmark then counts. So
+ * `deltaSolved` reflects capability, not a set change.
+ */
+export function benchmarkGapSpecs(run: Pick<BenchmarkRun, 'solvedIds'> | null | undefined): ForgeSpec[] {
+  if (!run) return [];
+  const solved = new Set(run.solvedIds ?? []);
+  return GENERATED_PROBLEMS
+    .filter((p) => !solved.has(p.id))
+    .map((p) => ({
+      id: `benchgap_${p.id}`,
+      name: p.functionName,
+      domain: p.domain,
+      title: p.title,
+      prompt: `${p.description}\n\nDefine and export exactly one function named "${p.functionName}" that satisfies the contract. Return only the code.`,
+      refSuite: p.hiddenSuite,
+    }));
 }
 
 export interface ForgeAttemptOutcome {

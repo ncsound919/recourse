@@ -357,7 +357,8 @@ export async function probeAutopilotOnce(
 /* domain, a real test vector, and a real acceptance rubric.                  */
 /* -------------------------------------------------------------------------- */
 
-import { BENCHMARK_PROBLEMS } from '../benchmark/benchmark.js';
+import { allBenchmarkProblems, appendBenchmarkProblem, appendedBenchmarkProblems } from '../benchmark/benchmark.js';
+import { GENERATED_PROBLEMS, makeGeneratedProblem } from '../benchmark/generatedProblems.js';
 
 export interface BenchmarkRefreshInput {
   history: Array<{ solved: number; total: number; solvedIds?: string[]; perProblem?: Record<string, { passed: boolean }> }>;
@@ -365,63 +366,16 @@ export interface BenchmarkRefreshInput {
   maxProblems?: number;
 }
 
-const SYNTHESIS_TEMPLATES: Array<{ domain: ToolDomain; title: string; rubric: string; testVector: string }> = [
-  {
-    domain: 'systemic',
-    title: 'p_idempotency_guard',
-    rubric: 'Detect repeated-application: an idempotent operation on the same input must always return the same output regardless of how many times it is called. Implement a memoizer that maps (key, value) -> result and answers a repeat query with the cached result without re-running the work.',
-    testVector:
-      'const memo=f()=>{...}; memo("k1",()=>expensive()); memo("k1",()=>expensive()); // must return cached',
-  },
-  {
-    domain: 'coding',
-    title: 'p_string_reverse_unicode',
-    rubric: 'Implement a Unicode-safe string reverse that correctly handles surrogate pairs and grapheme clusters. Bytes and code units are not the same thing.',
-    testVector:
-      'reverse("👨‍👩‍👧abc") === "cba👨‍👩‍👧"',
-  },
-  {
-    domain: 'math',
-    title: 'p_matrix_inverse_2x2',
-    rubric: 'Compute the inverse of a 2x2 matrix exactly using rational arithmetic. Return null when the determinant is zero.',
-    testVector:
-      'inv([[1,2],[3,4]]) === [[-2,1],[1.5,-0.5]] (within 1e-9)',
-  },
-  {
-    domain: 'cyber_defense',
-    title: 'p_path_traversal_sanitizer',
-    rubric: 'Given a path string, return the safe canonical form that strips any traversal segments (../ or ..\\), resolves any embedded null bytes, and rejects paths that escape the root.',
-    testVector:
-      'sanitize("../../etc/passwd") === null',
-  },
-  {
-    domain: 'biotech',
-    title: 'p_amino_acid_lookup',
-    rubric: 'Given a 1-letter or 3-letter amino acid code, return the full name, single-letter mass, and codon table entry. Handle ambiguous codes (B, Z, X) by returning partial data with a confidence score.',
-    testVector:
-      'lookup("Met") === { name: "Methionine", mass: 149.21, codons: ["ATG"] }',
-  },
-  {
-    domain: 'quantum_sim',
-    title: 'p_qubit_entanglement_check',
-    rubric: 'Given a 2-qubit density matrix, return the concurrence (a measure of entanglement) in [0,1]. For a separable state concurrence must be exactly 0.',
-    testVector:
-      'concurrence(bellPhi) === 1; concurrence(productState) === 0',
-  },
-  {
-    domain: 'neuro_symbolic',
-    title: 'p_rule_contradiction_finder',
-    rubric: 'Given a set of Horn-clause rules, find every pair (r1, r2) such that r1 and r2 cannot both hold simultaneously in any model. Return the contradiction pairs and a minimal counter-example.',
-    testVector:
-      'findContradictions([{head:p,body:[q]},{head:r,body:[~q]}]) returns an empty list when derivable, a counter-example when not',
-  },
-];
 
-let benchmarkAppendCount = 0;
-/** Ids we have appended and that must be observed solved before the next
- *  append. Prevents re-adding every server tick while the benchmark history
- *  (refreshed on a slower cadence) still shows the pre-append total. */
-const appendedProblemIds: string[] = [];
+/**
+ * Ids appended at runtime, derived from the live appended set (which the server
+ * restores from persisted state at boot). They must be observed solved before the
+ * next append, which prevents re-adding every server tick while the benchmark
+ * history (refreshed on a slower cadence) still shows the pre-append total.
+ */
+function appendedProblemIds(): string[] {
+  return appendedBenchmarkProblems().map((p) => p.id);
+}
 
 export function maybeRefreshBenchmark(input: BenchmarkRefreshInput): {
   refreshed: boolean;
@@ -430,38 +384,32 @@ export function maybeRefreshBenchmark(input: BenchmarkRefreshInput): {
   currentSolved: number;
 } {
   const last = input.history[input.history.length - 1];
-  if (!last) return { refreshed: false, currentTotal: BENCHMARK_PROBLEMS.length, currentSolved: 0 };
-  const cap = input.maxProblems ?? 22;
-  if (BENCHMARK_PROBLEMS.length >= cap) {
-    return { refreshed: false, currentTotal: BENCHMARK_PROBLEMS.length, currentSolved: last.solved };
+  const currentTotal = allBenchmarkProblems().length;
+  if (!last) return { refreshed: false, currentTotal, currentSolved: 0 };
+  const cap = input.maxProblems ?? 100;
+  if (currentTotal >= cap) {
+    return { refreshed: false, currentTotal, currentSolved: last.solved };
   }
   // Any previously-appended problem that the latest run does NOT list as solved
   // means capability has not caught up yet — hold. This makes the benchmark
   // grow one problem at a time, only as fast as real solves accumulate.
   const solvedIds = new Set(last.solvedIds ?? []);
-  for (const id of appendedProblemIds) {
+  const appendedIds = appendedProblemIds();
+  for (const id of appendedIds) {
     if (!solvedIds.has(id)) {
-      return { refreshed: false, currentTotal: BENCHMARK_PROBLEMS.length, currentSolved: last.solved };
+      return { refreshed: false, currentTotal, currentSolved: last.solved };
     }
   }
-  if (appendedProblemIds.length === 0 && last.solved < last.total) {
-    return { refreshed: false, currentTotal: BENCHMARK_PROBLEMS.length, currentSolved: last.solved };
+  if (appendedIds.length === 0 && last.solved < last.total) {
+    return { refreshed: false, currentTotal, currentSolved: last.solved };
   }
-  // Baseline fully solved (and any appended problems already solved) — append
-  // the next template deterministically.
-  const template = SYNTHESIS_TEMPLATES[benchmarkAppendCount % SYNTHESIS_TEMPLATES.length];
-  benchmarkAppendCount += 1;
-  const newProblem: BenchmarkProblem = {
-    id: template.title,
-    domain: template.domain,
-    title: template.title.replace(/^p_/, '').replace(/_/g, ' '),
-    description: template.rubric,
-    functionName: template.title.replace(/^p_/, ''),
-    hiddenSuite: template.testVector,
-  };
-  BENCHMARK_PROBLEMS.push(newProblem);
-  appendedProblemIds.push(newProblem.id);
-  return { refreshed: true, added: newProblem, currentTotal: BENCHMARK_PROBLEMS.length, currentSolved: last.solved };
+  // The whole scored set is solved — append the next REAL generated problem
+  // (deterministic, with an executable suite and reference-computed expected
+  // values). The sequence continues past any problems restored from a prior run,
+  // so a restart never re-appends an id already in the set.
+  const problem = makeGeneratedProblem(GENERATED_PROBLEMS.length + appendedIds.length);
+  appendBenchmarkProblem(problem);
+  return { refreshed: true, added: problem, currentTotal: allBenchmarkProblems().length, currentSolved: last.solved };
 }
 
 /* -------------------------------------------------------------------------- */

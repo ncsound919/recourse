@@ -286,64 +286,73 @@ describe('autoDispatchSwarmTasks', () => {
 });
 
 describe('maybeRefreshBenchmark', () => {
-  it('returns not-refreshed with no history, using the real baseline count', () => {
-    const r = maybeRefreshBenchmark({ history: [] });
-    expect(r).toEqual({ refreshed: false, currentTotal: BENCHMARK_PROBLEMS.length, currentSolved: 0 });
+  let refresh: typeof import('../src/lib/recourseActivator').maybeRefreshBenchmark;
+  let total: () => number;
+  beforeEach(async () => {
+    vi.resetModules();
+    const act = await import('../src/lib/recourseActivator');
+    const bench = await import('../src/benchmark/benchmark');
+    refresh = act.maybeRefreshBenchmark;
+    total = () => bench.allBenchmarkProblems().length;
   });
 
-  it('holds while the baseline is not fully solved', () => {
-    const r = maybeRefreshBenchmark({ history: [{ solved: 10, total: 15 }] });
-    expect(r).toEqual({ refreshed: false, currentTotal: BENCHMARK_PROBLEMS.length, currentSolved: 10 });
+  it('returns not-refreshed with no history, using the real scored-set count', () => {
+    const r = refresh({ history: [] });
+    expect(r).toEqual({ refreshed: false, currentTotal: total(), currentSolved: 0 });
+  });
+
+  it('holds while the scored set is not fully solved', () => {
+    const r = refresh({ history: [{ solved: 10, total: total() }] });
+    expect(r).toEqual({ refreshed: false, currentTotal: total(), currentSolved: 10 });
   });
 
   it('holds when the cap is already reached', () => {
-    const r = maybeRefreshBenchmark({ history: [{ solved: 15, total: 15 }], maxProblems: BENCHMARK_PROBLEMS.length });
-    expect(r).toEqual({ refreshed: false, currentTotal: BENCHMARK_PROBLEMS.length, currentSolved: 15 });
+    const t = total();
+    const r = refresh({ history: [{ solved: t, total: t }], maxProblems: t });
+    expect(r).toEqual({ refreshed: false, currentTotal: t, currentSolved: t });
   });
 
-  it('appends the first synthesis template exactly when 15/15 baseline is solved', () => {
-    const baselineTotal = BENCHMARK_PROBLEMS.length;
-    const r = maybeRefreshBenchmark({ history: [{ solved: 15, total: 15, solvedIds: [] }] });
+  it('appends a real generated problem when the whole scored set is solved', () => {
+    const before = total();
+    const r = refresh({ history: [{ solved: before, total: before, solvedIds: [] }] });
     expect(r.refreshed).toBe(true);
-    expect(r.currentTotal).toBe(baselineTotal + 1);
-    expect(r.currentSolved).toBe(15);
-    expect(r.added).toEqual({
-      id: 'p_idempotency_guard',
-      domain: 'systemic',
-      title: 'idempotency guard',
-      description: 'Detect repeated-application: an idempotent operation on the same input must always return the same output regardless of how many times it is called. Implement a memoizer that maps (key, value) -> result and answers a repeat query with the cached result without re-running the work.',
-      functionName: 'idempotency_guard',
-      hiddenSuite: 'const memo=f()=>{...}; memo("k1",()=>expensive()); memo("k1",()=>expensive()); // must return cached',
-    });
-    BENCHMARK_PROBLEMS.pop();
+    expect(r.currentTotal).toBe(before + 1);
+    expect(r.added?.tier).toBe('generated');
+    expect(r.added?.id).toMatch(/^gen_/);
+    // The appended problem must be executable, not a pseudo-code "test vector".
+    expect(r.added?.hiddenSuite).toMatch(/assert /);
   });
 
   it('holds when a previously-appended problem is not solved yet', () => {
-    const baselineTotal = BENCHMARK_PROBLEMS.length;
-    const r = maybeRefreshBenchmark({ history: [{ solved: 15, total: 15, solvedIds: [] }] });
-    expect(r).toEqual({ refreshed: false, currentTotal: baselineTotal, currentSolved: 15 });
+    const before = total();
+    refresh({ history: [{ solved: before, total: before, solvedIds: [] }] });
+    const r = refresh({ history: [{ solved: before, total: before, solvedIds: [] }] });
+    expect(r).toEqual({ refreshed: false, currentTotal: before + 1, currentSolved: before });
   });
 
-  it('appends the next template once the appended problem is solved', () => {
-    const baselineTotal = BENCHMARK_PROBLEMS.length;
-    const r = maybeRefreshBenchmark({ history: [{ solved: 15, total: 15, solvedIds: ['p_idempotency_guard'] }] });
+  it('appends the next problem once the appended one is solved', () => {
+    const before = total();
+    const first = refresh({ history: [{ solved: before, total: before, solvedIds: [] }] });
+    const id = first.added!.id;
+    const r = refresh({ history: [{ solved: before + 1, total: before + 1, solvedIds: [id] }] });
     expect(r.refreshed).toBe(true);
-    expect(r.currentTotal).toBe(baselineTotal + 1);
-    expect(r.added).toEqual({
-      id: 'p_string_reverse_unicode',
-      domain: 'coding',
-      title: 'string reverse unicode',
-      description: 'Implement a Unicode-safe string reverse that correctly handles surrogate pairs and grapheme clusters. Bytes and code units are not the same thing.',
-      functionName: 'string_reverse_unicode',
-      hiddenSuite: 'reverse("👨‍👩‍👧abc") === "cba👨‍👩‍👧"',
-    });
-    BENCHMARK_PROBLEMS.pop();
+    expect(r.currentTotal).toBe(before + 2);
   });
 
-  it('holds when any appended problem is still unsolved after a partial solve', () => {
-    const baselineTotal = BENCHMARK_PROBLEMS.length;
-    const r = maybeRefreshBenchmark({ history: [{ solved: 15, total: 15, solvedIds: ['p_idempotency_guard'] }] });
-    expect(r).toEqual({ refreshed: false, currentTotal: baselineTotal, currentSolved: 15 });
+  it('continues the sequence after a restart, from the persisted appended set', async () => {
+    vi.resetModules();
+    const bench = await import('../src/benchmark/benchmark');
+    const act = await import('../src/lib/recourseActivator');
+    const gen = await import('../src/benchmark/generatedProblems');
+    // A prior run appended one problem and persisted it.
+    const restored = gen.makeGeneratedProblem(gen.GENERATED_PROBLEMS.length);
+    bench.restoreBenchmarkProblems([restored]);
+    const before = bench.allBenchmarkProblems().length;
+    // The restored problem is solved, so the next one is appended — a NEW id.
+    const r = act.maybeRefreshBenchmark({ history: [{ solved: before, total: before, solvedIds: [restored.id] }] });
+    expect(r.refreshed).toBe(true);
+    expect(r.added!.id).not.toBe(restored.id);
+    expect(r.currentTotal).toBe(before + 1);
   });
 });
 

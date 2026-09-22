@@ -27,6 +27,15 @@ import {
   type ComposerLearner,
 } from '../lib/composer/index.js';
 import { renderTrackToWav, renderStemToWav } from '../lib/composer/encode/wav.js';
+import {
+  decideSystemOne,
+  chordAdvisoryQuestions,
+  buildChordAdvisory,
+  chordRerankQuestions,
+  buildChordRerankAdvisory,
+  type ChordRerankCandidate,
+} from '../lib/jevClient.js';
+import { requireJevAdvisoryAuth } from '../lib/mutationAuth.js';
 
 export interface ComposeRouterDeps {
   requireMutationAuth: (req: Request, res: Response) => boolean;
@@ -229,6 +238,78 @@ router.get('/compose/song.json', (req, res) => {
     res.header('Access-Control-Allow-Origin', '*');
     res.header('Cache-Control', 'no-store');
     res.json(payload);
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message ?? String(err) });
+  }
+});
+
+/** Chord labels for a composed track (["Fmaj7","G7",...]). */
+function chordLabelsFor(track: { key: number; chords: Array<{ rootPc: number; quality: string }> }): string[] {
+  const names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  return track.chords.map((c) => `${names[((c.rootPc % 12) + 12) % 12]}${c.quality}`);
+}
+
+/**
+ * TypeSafe Jev advisory over the DETERMINISTIC chord progression (read-only,
+ * CORS-open like song.json). Jev scores mood fit + harmonic tension and flags
+ * the bar to reconsider — it never rewrites the progression. Gateway down =>
+ * jev.source is 'offline' (never a fabricated score).
+ *   GET /api/recourse/compose/jev?style=steely-dan&seed=1&bars=8&mode=loop&mood=melancholic
+ */
+router.get('/compose/jev', async (req, res) => {
+  if (!(await requireJevAdvisoryAuth(req, res))) return;
+  try {
+    const { mode, brief } = composeBriefFromQuery(req.query as Record<string, unknown>);
+    const track = mode === 'arr' ? composeArrangement(brief) : compose(brief);
+    const chords = chordLabelsFor(track);
+    const names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+    const keyName = `${names[((track.key % 12) + 12) % 12]}${track.major ? '' : 'm'}`;
+    const mood = typeof req.query.mood === 'string' && req.query.mood.trim() ? req.query.mood.slice(0, 120) : undefined;
+    const { state, questions } = chordAdvisoryQuestions({
+      style: track.style,
+      keyName,
+      chords,
+      bpm: track.bpm,
+      bars: track.bars,
+      mode,
+      mood,
+    });
+    const result = await decideSystemOne({ state, questions });
+    const jev = buildChordAdvisory(result, chords);
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Cache-Control', 'no-store');
+    res.json({ success: true, mode, style: track.style, seed: track.seed, bars: track.bars, bpm: track.bpm, key: keyName, chords, mood: mood ?? null, jev });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message ?? String(err) });
+  }
+});
+
+/**
+ * TypeSafe Jev RERANK over real candidate progressions: the same brief composed
+ * with several deterministic seeds, Jev picks the one that best fits the mood.
+ * Candidates are real (each seed is reproducible); Jev only ranks them.
+ *   GET /api/recourse/compose/jev/rerank?style=jasper-ballad&bars=8&mode=loop&mood=hopeful&seeds=1,2,3
+ */
+router.get('/compose/jev/rerank', async (req, res) => {
+  if (!(await requireJevAdvisoryAuth(req, res))) return;
+  try {
+    const style = typeof req.query.style === 'string' && listStyles().includes(req.query.style as any) ? req.query.style : 'steely-dan';
+    const bars = [4, 8, 16].includes(Number(req.query.bars)) ? Number(req.query.bars) : 8;
+    const mode = req.query.mode === 'arr' ? 'arr' : 'loop';
+    const seeds = String(req.query.seeds ?? '1,2,3').split(',').map((s) => Number(s.trim())).filter((n) => Number.isFinite(n) && n > 0).slice(0, 8);
+    const mood = typeof req.query.mood === 'string' && req.query.mood.trim() ? req.query.mood.slice(0, 120) : undefined;
+    const candidates: ChordRerankCandidate[] = seeds.map((seed) => {
+      const brief = { style: style as never, seed, bars, title: `${style} rerank ${seed}` };
+      const track = mode === 'arr' ? composeArrangement(brief) : compose(brief);
+      return { seed, chords: chordLabelsFor(track) };
+    });
+    if (candidates.length < 2) return res.status(400).json({ success: false, error: 'provide at least 2 seeds to rerank' });
+    const { state, questions } = chordRerankQuestions(candidates, mood);
+    const result = await decideSystemOne({ state, questions });
+    const jev = buildChordRerankAdvisory(result, candidates);
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Cache-Control', 'no-store');
+    res.json({ success: true, style, bars, mode, mood: mood ?? null, candidates, jev });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err?.message ?? String(err) });
   }

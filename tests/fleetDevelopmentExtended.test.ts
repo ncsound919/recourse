@@ -84,9 +84,14 @@ function abortingFetch() {
 }
 
 describe('fleet journal + backup dir + rollback', () => {
-  it('honors RECOURSE_FLEET_DIR and the default .recourse/fleet path', () => {
+  it('scopes RECOURSE_FLEET_DIR to the own-repo root and defaults elsewhere', () => {
+    vi.stubEnv('RECOURSE_REPO', '/repo');
     vi.stubEnv('RECOURSE_FLEET_DIR', '/custom/fleet');
+    // The override applies to the process's own repo...
     expect(fleetBackupDir('/repo')).toBe('/custom/fleet');
+    // ...but NOT to a fleet sibling: one global dir would point every repo's
+    // journal/backups at the same place and a revert could restore the wrong repo.
+    expect(fleetBackupDir('/other-repo')).toBe(path.join('/other-repo', '.recourse', 'fleet'));
     vi.unstubAllEnvs();
     expect(fleetBackupDir('/repo')).toBe(path.join('/repo', '.recourse', 'fleet'));
   });

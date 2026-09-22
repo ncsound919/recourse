@@ -11,11 +11,18 @@
  * measure of external capability — not a self-report.
  */
 import crypto from 'node:crypto';
-import type { BenchmarkProblem, BenchmarkRun } from '../intake/types';
+import type { BenchmarkProblem, BenchmarkRun, BenchmarkTier } from '../intake/types';
 import type { ToolDomain, ToolEntry } from '../types';
 import { executeTestSuite } from '../lib/executionSandbox';
+import { EDGE_PROBLEMS } from './edgeProblems';
+import { GENERATED_PROBLEMS } from './generatedProblems';
 
-export const BENCHMARK_PROBLEMS: BenchmarkProblem[] = [
+/**
+ * The stable baseline: 15 happy-path micro-tasks. Kept as its own export for
+ * back-compat; the scored set is `allBenchmarkProblems()` (baseline + robustness
+ * + generated), so the score can be < 100% and has real headroom.
+ */
+const BASELINE_PROBLEMS = [
   {
     id: 'p_fizzbuzz',
     domain: 'coding',
@@ -56,9 +63,9 @@ assert out.size === 3;`,
     id: 'p_merkle_taint',
     domain: 'cyber_defense',
     title: 'Buffer taint sanitizer',
-    description: 'Clamp out-of-range byte values into [0, 255] with overflow wrapping.',
+    description: 'Wrap out-of-range byte values modulo 256 into [0, 255].',
     functionName: 'sanitizeBuffer',
-    hiddenSuite: `const clean = sanitizeBuffer(new Uint8Array([1, 256, 300]));
+    hiddenSuite: `const clean = sanitizeBuffer([1, 256, 300]);
 assert clean.length === 3;
 assert clean[0] === 1;
 assert clean[1] === 0;
@@ -68,12 +75,15 @@ assert clean[2] === 44;`,
     id: 'p_bell_state',
     domain: 'quantum_sim',
     title: 'Bell-state construction',
-    description: 'Construct a 2-qubit Bell state vector that is normalized.',
+    description: 'Construct a maximally-entangled 2-qubit Bell state vector (two amplitudes of 1/sqrt(2)) that is normalized.',
     functionName: 'createBellState',
     hiddenSuite: `const s = createBellState();
 assert s.stateVector.length === 4;
 const norm = s.stateVector.reduce((a, x) => a + x * x, 0);
-assert Math.abs(norm - 1) < 1e-9;`,
+assert Math.abs(norm - 1) < 1e-9;
+const nz = s.stateVector.filter((x) => Math.abs(x) > 1e-9);
+assert nz.length === 2;
+assert nz.every((x) => Math.abs(Math.abs(x) - Math.SQRT1_2) < 1e-9);`,
   },
   {
     id: 'p_route_planner',
@@ -199,14 +209,74 @@ const o = applyX([0, 1]);
 assert o[0] === 1;
 assert o[1] === 0;`,
   },
-];
+] satisfies BenchmarkProblem[];
 
-/** Current promoted source of a tool (live code, exactly what the sandbox runs). */
+export const BENCHMARK_PROBLEMS: BenchmarkProblem[] = BASELINE_PROBLEMS.map((p) => ({ ...p, tier: 'baseline' as const }));
+
+/**
+ * The scored set: baseline + robustness + generated. `robustness` exposes genes
+ * that only solve the happy path; `generated` gives unbounded headroom (specs no
+ * gene implements yet), so the score can be < 100% and can rise only when the
+ * system produces working code for a new spec.
+ *
+ * Computed at call time (not a frozen array) so problems appended by the
+ * activator's benchmark-refresh are included in the same run.
+ */
+const extraProblems: BenchmarkProblem[] = [];
+
+export function allBenchmarkProblems(): BenchmarkProblem[] {
+  return [...BENCHMARK_PROBLEMS, ...EDGE_PROBLEMS, ...GENERATED_PROBLEMS, ...extraProblems];
+}
+
+/**
+ * Append a real generated problem to the scored set. Only the activator's
+ * benchmark-refresh calls this, and only after the current set is fully solved —
+ * so the yardstick gains headroom as capability catches up.
+ */
+export function appendBenchmarkProblem(problem: BenchmarkProblem): void {
+  if (!extraProblems.some((p) => p.id === problem.id)) extraProblems.push(problem);
+}
+
+/**
+ * The runtime-appended problems, in append order. The server persists this so
+ * the scored set — and therefore `total` and `problemSetHash` — is identical
+ * after a restart. Without it, a restart shrinks the set while the persisted
+ * history still reports the old `total`, making `deltaSolved` go negative.
+ */
+export function appendedBenchmarkProblems(): BenchmarkProblem[] {
+  return [...extraProblems];
+}
+
+/**
+ * Replace the appended set from persisted state at boot. Dedupes by id and
+ * ignores malformed entries, so a corrupt payload cannot poison the scored set.
+ */
+export function restoreBenchmarkProblems(problems: readonly BenchmarkProblem[]): void {
+  extraProblems.length = 0;
+  const seen = new Set<string>();
+  for (const p of problems) {
+    if (!p || typeof p.id !== 'string' || !p.id || seen.has(p.id)) continue;
+    seen.add(p.id);
+    extraProblems.push(p);
+  }
+}
+
+/** Stable hash of the scored set (ids + suites), so a set change is visible. */
+export function benchmarkProblemSetHash(problems: BenchmarkProblem[] = allBenchmarkProblems()): string {
+  const parts = problems.map((p) => `${p.id}:${p.functionName}:${crypto.createHash('sha256').update(p.hiddenSuite).digest('hex').slice(0, 12)}`).sort();
+  return crypto.createHash('sha256').update(parts.join('|')).digest('hex');
+}
+
+const TIERS: BenchmarkTier[] = ['baseline', 'robustness', 'generated'];
+
+/**
+ * Current PROMOTED source of a tool (live code, exactly what the sandbox runs).
+ * A tool with no promoted version is not scored: counting unpromoted/rejected
+ * code as capability would make the benchmark measure the registry, not results.
+ */
 export function currentToolSource(tool: ToolEntry): { source: string; name: string; domain: ToolDomain } | null {
   if (!tool.versions?.length) return null;
-  const current = [...tool.versions].reverse().find((v) => v.promoted && v.source_code);
-  const fallback = [...tool.versions].reverse().find((v) => v.source_code);
-  const v = current ?? fallback;
+  const v = [...tool.versions].reverse().find((x) => x.promoted && x.source_code);
   if (!v?.source_code) return null;
   return { source: v.source_code, name: tool.name, domain: tool.domain };
 }
@@ -214,6 +284,7 @@ export function currentToolSource(tool: ToolEntry): { source: string; name: stri
 /**
  * Score the registry against every benchmark problem. A problem is solved when
  * any current gene's live source passes the hidden suite in the real sandbox.
+ * Reports a per-tier breakdown so a flat overall score cannot hide a failing tier.
  */
 export function runBenchmark(registry: ToolEntry[]): BenchmarkRun {
   const sources: Array<{ source: string; name: string }> = [];
@@ -222,20 +293,29 @@ export function runBenchmark(registry: ToolEntry[]): BenchmarkRun {
     if (cur) sources.push({ source: cur.source, name: t.name });
   }
 
+  const problems = allBenchmarkProblems();
   const solvedIds: string[] = [];
-  for (const problem of BENCHMARK_PROBLEMS) {
-    const solved = sources.some((gene) => {
-      const run = executeTestSuite(gene.source, problem.hiddenSuite);
-      return run.passed;
-    });
-    if (solved) solvedIds.push(problem.id);
+  const byTier: Record<string, { solved: number; total: number }> = {};
+  for (const tier of TIERS) byTier[tier] = { solved: 0, total: 0 };
+
+  for (const problem of problems) {
+    const tier = problem.tier ?? 'baseline';
+    if (!byTier[tier]) byTier[tier] = { solved: 0, total: 0 };
+    byTier[tier].total += 1;
+    const solved = sources.some((gene) => executeTestSuite(gene.source, problem.hiddenSuite).passed);
+    if (solved) {
+      solvedIds.push(problem.id);
+      byTier[tier].solved += 1;
+    }
   }
 
   return {
     at: Date.now(),
     solved: solvedIds.length,
-    total: BENCHMARK_PROBLEMS.length,
+    total: problems.length,
     solvedIds,
+    byTier,
+    problemSetHash: benchmarkProblemSetHash(problems),
   };
 }
 
@@ -256,7 +336,7 @@ export function registryAttestation(registry: ToolEntry[]): string {
 }
 
 export function benchmarkSummary(run: BenchmarkRun | null): { solved: number; total: number; pct: number } {
-  if (!run) return { solved: 0, total: BENCHMARK_PROBLEMS.length, pct: 0 };
+  if (!run) return { solved: 0, total: allBenchmarkProblems().length, pct: 0 };
   return {
     solved: run.solved,
     total: run.total,

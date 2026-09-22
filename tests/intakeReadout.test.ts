@@ -55,7 +55,7 @@ describe('development readout', () => {
     expect(md).toContain('1 signals (0 pending, 1 grounded)');
     expect(md).toContain('solved (14%)');
     expect(md).toContain('signal_grounded: 1');
-    expect(md).toContain('Total healed: 2');
+    expect(md).toContain('Heal claims: 2');
   });
 
   it('degrades to "not run yet" benchmark and no-signal wording', () => {

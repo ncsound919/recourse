@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { BENCHMARK_PROBLEMS, runBenchmark, currentToolSource, benchmarkSummary } from '../src/benchmark/benchmark';
+import { BENCHMARK_PROBLEMS, allBenchmarkProblems, runBenchmark, currentToolSource, benchmarkSummary } from '../src/benchmark/benchmark';
 import { makeSignal } from '../src/intake/util';
 import { classifyDomain, groundSignal, parseGroundedJson } from '../src/intake/grounding';
 
@@ -16,7 +16,7 @@ describe('external benchmark', () => {
   it('scores 0/7 against an empty registry — never fabricates', () => {
     const run = runBenchmark([]);
     expect(run.solved).toBe(0);
-    expect(run.total).toBe(BENCHMARK_PROBLEMS.length);
+    expect(run.total).toBe(allBenchmarkProblems().length);
   });
 
   it('solves problems that a real promoted gene satisfies in the sandbox', () => {
@@ -54,7 +54,7 @@ describe('external benchmark', () => {
   });
 
   it('benchmarkSummary formats pct without div-by-zero', () => {
-    expect(benchmarkSummary(null)).toEqual({ solved: 0, total: BENCHMARK_PROBLEMS.length, pct: 0 });
+    expect(benchmarkSummary(null)).toEqual({ solved: 0, total: allBenchmarkProblems().length, pct: 0 });
     const s = benchmarkSummary({ at: 1, solved: 1, total: 4, solvedIds: [] });
     expect(s.pct).toBe(25);
   });

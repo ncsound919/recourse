@@ -107,7 +107,19 @@ export interface FleetPatchJournal {
 }
 
 export function fleetBackupDir(root: string): string {
-  return process.env.RECOURSE_FLEET_DIR || path.join(root, '.recourse', 'fleet');
+  // RECOURSE_FLEET_DIR relocates the journal + backups for THIS process's own
+  // repo. It must not apply to a fleet sibling: once Recourse can patch more
+  // than one root, a single global override points every repo's journal at one
+  // directory, and a revert token then restores the wrong repo's file over the
+  // right repo's path. Scope the override to the own-repo root; every other root
+  // keeps its journal beside its own code, which is where a rollback has to live
+  // anyway if that repo is ever moved or restored independently.
+  const override = process.env.RECOURSE_FLEET_DIR;
+  if (override) {
+    const ownRoot = path.resolve(process.env.RECOURSE_REPO || process.cwd());
+    if (path.resolve(root) === ownRoot) return override;
+  }
+  return path.join(root, '.recourse', 'fleet');
 }
 
 function journalFile(root: string): string {

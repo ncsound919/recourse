@@ -20,18 +20,22 @@ export interface ReadoutContext {
    *  everyday terms). Rendered verbatim so the operator can read the report
    *  without decoding hashes/scores. */
   plainUpgrade?: string | null;
+  /** P2.9: the distilled legacy digest (capability/registry/learner trends etc.). */
+  legacyDigest?: Record<string, unknown> | null;
 }
 
 const DOMAIN_ORDER: ToolDomain[] = ['math', 'coding', 'biotech', 'systemic', 'neuro_symbolic', 'cyber_defense', 'quantum_sim'];
 
 export function buildDevelopmentReadout(ctx: ReadoutContext): string {
-  const { status, registry, provenanceEvents, intake, benchmark, generation, chainIntegrity, upgrade, plainUpgrade } = ctx;
+  const { status, registry, provenanceEvents, intake, benchmark, generation, chainIntegrity, upgrade, plainUpgrade, legacyDigest } = ctx;
   const now = new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
   const healthy = registry.filter((t) => t.healthStatus === 'healthy').length;
   const degraded = registry.length - healthy;
   const domainLine = DOMAIN_ORDER.map((d) => {
     const c = status.domainCoverage?.[d];
-    return c ? `${d}: ${c.activeGenes} gene${c.activeGenes === 1 ? '' : 's'} @ ${Math.round(c.passRate * 100)}%` : d;
+    if (!c) return d;
+    // P1.6: a domain with ~no genes / ~no pass rate is BROKEN, not "covered".
+    return `${d}: ${c.activeGenes} gene${c.activeGenes === 1 ? '' : 's'} @ ${Math.round(c.passRate * 100)}%${c.broken ? ' [BROKEN]' : ''}`;
   }).join(' | ');
 
   const benchLatest = benchmark.lastRun
@@ -74,17 +78,33 @@ export function buildDevelopmentReadout(ctx: ReadoutContext): string {
   L.push('### External benchmark (capability, not self-report)');
   L.push(`- Latest: ${benchLatest}`);
   L.push(`- Trend (solved per run): ${benchTrend}`);
-  L.push(`- Problem set is FIXED and never changes; growth = live registry solving more of it.`);
+  L.push(`- Problem set is tiered (baseline + robustness + generated) and grows only as the current set is solved; growth = the live registry solving more of it.`);
+  if (typeof status.capabilityReadiness === 'number') {
+    L.push(`- Capability readiness: ${Math.round(status.capabilityReadiness * 100)}% (${status.capabilityBasis ?? 'benchmark + verified repairs'})`);
+  }
+  if (typeof status.readinessScore === 'number') {
+    L.push(`- Note: the top-level readinessScore (${Math.round(status.readinessScore * 100)}%) is ${status.readinessBasis ?? 'the math-loop convergence'} — NOT a capability score.`);
+  }
   L.push('');
-  L.push('### Provenance (last 14d)');
-  if (topEvents.length) {
+  if (legacyDigest) {
+    const cap = legacyDigest.capability as { benchmarkRuns?: number; window?: string; finding?: string } | undefined;
+    const pruned = legacyDigest.pruned as Record<string, number> | undefined;
+    L.push('### Legacy digest (distilled old runs)');
+    if (cap) L.push(`- Capability: ${cap.benchmarkRuns ?? 0} runs (${cap.window ?? '—'}). ${cap.finding ?? ''}`);
+    if (pruned) L.push(`- Pruned raw stores: ${Object.entries(pruned).map(([k, n]) => `${k}=${n}`).join(', ')}`);
+    L.push('- Full digest: GET /api/recourse/legacy-digest');
+    L.push('');
+  }
+  L.push('### Provenance (last 14d)');  if (topEvents.length) {
     L.push(topEvents.map(([t, n]) => `- ${t}: ${n}`).join('\n'));
   } else {
     L.push('- none');
   }
   L.push('');
   L.push('### Self-repair');
-  L.push(`- Total healed: ${status.selfRepair?.totalHealedCount ?? 0} | Active anomalies: ${status.selfRepair?.activeAnomaliesCount ?? 0} | Success rate: ${Math.round((status.selfRepair?.repairSuccessRate ?? 0) * 100)}%`);
+  L.push(`- Heal claims: ${status.selfRepair?.totalHealedCount ?? 0} | Active anomalies: ${status.selfRepair?.activeAnomaliesCount ?? 0}`);
+  L.push(`- Verified: ${status.selfRepair?.verifiedRepairs ?? 0} | Pending: ${status.selfRepair?.pendingRepairs ?? 0} | Regressed: ${status.selfRepair?.regressedRepairs ?? 0} | Unverifiable: ${status.selfRepair?.unverifiableRepairs ?? 0}`);
+  L.push(`- Success rate (verified / (verified+regressed), P0.2): ${Math.round((status.selfRepair?.repairSuccessRate ?? 0) * 100)}%`);
   if (upgrade) {
     L.push('');
     L.push('### Upgrade delta vs boot baseline (old → new system)');

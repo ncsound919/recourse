@@ -41,6 +41,7 @@ export type ProvenanceEventType =
   | 'tool_verification'
   | 'tool_promoted'
   | 'tool_rejected'
+  | 'promotion_refused'
   | 'tool_held_back'
   | 'tool_pending_approval'
   | 'tool_human_approved'
@@ -52,6 +53,9 @@ export type ProvenanceEventType =
   | 'system_tick'
   | 'ai_mutation'
   | 'growth_decision_executed'
+  | 'jev_decision_advisory'
+  | 'jev_noul_advisory'
+  | 'jev_promotion_advisory'
   | 'dream_crystallized'
   | 'github_tool_ingested'
   | 'subagent_task_completed'
@@ -340,7 +344,16 @@ export interface SelfRepairStatus {
   totalHealedCount: number;
   activeAnomaliesCount: number;
   meanTimeToRepairMs: number;
+  /** verified / (verified + regressed) — verified outcomes only, not heal claims. */
   repairSuccessRate: number;
+  /** Heals confirmed by a later re-verify. */
+  verifiedRepairs?: number;
+  /** Heals awaiting re-verify. */
+  pendingRepairs?: number;
+  /** Heals that passed once and failed a later re-verify — counted as failures. */
+  regressedRepairs?: number;
+  /** Smoke-only heals (no regression suite) — excluded from the rate. */
+  unverifiableRepairs?: number;
   lastHealedTool?: string;
   lastHealTimestamp?: number;
 }
@@ -560,7 +573,7 @@ export interface SystemStatus {
   };
   selfRepair: SelfRepairStatus;
   hyperParams: HyperParameters;
-  domainCoverage: Record<ToolDomain, { activeGenes: number; passRate: number }>;
+  domainCoverage: Record<ToolDomain, { activeGenes: number; passRate: number; broken?: boolean; note?: string }>;
   growthWeights?: GrowthFactorWeights;
   lastDecision?: GrowthDecisionReport;
   dreamState?: DreamState;
@@ -575,8 +588,13 @@ export interface SystemStatus {
   // Structural Forge
   artifacts?: StructuralArtifact[];
   
-  // Deterministic Mathematical Loop
+  // Deterministic Mathematical Loop — the recursive-math convergence score.
+  // NOT a capability score (see capabilityReadiness / readinessBasis).
   readinessScore?: number;
+  readinessBasis?: string;
+  /** P1.7: mean(benchmark solved%, verified-repair rate) — a movable capability number. */
+  capabilityReadiness?: number;
+  capabilityBasis?: string;
 
   // Real, durable progress (measured artifacts — NOT the self-consistent
   // readiness number). What the UI should treat as "development".

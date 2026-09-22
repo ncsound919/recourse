@@ -15,6 +15,7 @@ import type {
   TickResult,
   ToolDomain,
 } from './types';
+import { isNovelHypothesis, normalizeHypothesis } from '../lib/honestyMetrics';
 import {
   compileGenome,
   crossGenomes,
@@ -223,10 +224,14 @@ export class DreamingEngine {
         // Prefer the configured provider model: premise/hypothesis/code from the LLM,
         // still gated by real sandbox verification before it can ever promote.
         const modelThought = await this.tryModelThought(s);
-        if (modelThought) {
+        if (modelThought && isNovelHypothesis(modelThought.hypothesis, s.recentThoughts)) {
           s.recentThoughts.unshift(modelThought);
           newThought = modelThought;
           phaseReport = `REM: model proposed "${modelThought.hypothesis.slice(0, 60)}${modelThought.hypothesis.length > 60 ? '...' : ''}" (${modelThought.origin === 'api_model' ? 'API model' : modelThought.origin === 'local_model' ? 'local model' : 'draft'})`;
+        } else if (modelThought) {
+          // P1.5 novelty gate: a repeated hypothesis is not a new thought. The
+          // model re-deriving the same idea is a loop, not discovery — say so.
+          phaseReport = `REM: model proposal repeated a recent hypothesis — not added (novelty gate)`;
         } else {
           const created = this.phaseRem(s, rng);
           newThought = created[0] ?? null;
@@ -397,7 +402,16 @@ export class DreamingEngine {
 
   private phaseLucid(s: DreamState): CrystallizedTool[] {
     const tools: CrystallizedTool[] = [];
+    // P1.5: crystallize each distinct hypothesis once — a duplicate in the window
+    // is the same idea, not a second capability. Only substantive hypotheses are
+    // deduped (a one-word/empty hypothesis carries no idea to compare).
+    const seen = new Set<string>();
     for (const t of s.recentThoughts) {
+      const key = normalizeHypothesis(t.hypothesis);
+      if (key.length >= 8) {
+        if (seen.has(key)) continue;
+        seen.add(key);
+      }
       if (t.crystallizationReadiness >= AUTO_PROMOTE_THRESHOLD && t.genome) {
         const tool = this.promote(s, t);
         if (tool) tools.push(tool);

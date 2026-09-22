@@ -47,6 +47,8 @@ export interface IntakeSnapshot {
   groundedTools: string[];
 }
 
+export type BenchmarkTier = 'baseline' | 'robustness' | 'generated';
+
 export interface BenchmarkProblem {
   id: string;
   domain: ToolDomain;
@@ -55,6 +57,12 @@ export interface BenchmarkProblem {
   functionName: string;
   /** Hidden assert suite — evaluated against a candidate gene's real source. */
   hiddenSuite: string;
+  /**
+   * Difficulty tier. `baseline` = the original happy-path set; `robustness` =
+   * edge/adversarial cases for the same functions; `generated` = seeded specs
+   * the registry does not implement yet (unbounded headroom). Absent = baseline.
+   */
+  tier?: BenchmarkTier;
 }
 
 export interface BenchmarkRun {
@@ -62,6 +70,10 @@ export interface BenchmarkRun {
   solved: number;
   total: number;
   solvedIds: string[];
+  /** Per-tier solved/total, so a flat score cannot hide a failing tier. */
+  byTier?: Record<string, { solved: number; total: number }>;
+  /** Hash of the problem set scored, so a set change is visible in the ledger. */
+  problemSetHash?: string;
 }
 
 export interface BenchmarkState {

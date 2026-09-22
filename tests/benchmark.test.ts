@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { runBenchmark, benchmarkSummary, BENCHMARK_PROBLEMS } from '../src/benchmark/benchmark';
+import { runBenchmark, benchmarkSummary, allBenchmarkProblems } from '../src/benchmark/benchmark';
 import type { ToolEntry } from '../src/types';
 
 /** Build a minimal registry entry whose live promoted source is `source`. */
@@ -44,7 +44,7 @@ describe('external capability benchmark - real, not self-report', () => {
 
     const run = runBenchmark([vieta, taint]);
 
-    expect(run.total).toBe(BENCHMARK_PROBLEMS.length);
+    expect(run.total).toBe(allBenchmarkProblems().length);
     expect(run.solved).toBeGreaterThanOrEqual(2);
     expect(run.solvedIds).toContain('p_vieta_roots');
     expect(run.solvedIds).toContain('p_merkle_taint');
@@ -69,7 +69,7 @@ export function sanitizeBuffer(arr) { return arr.map((v) => v & 255); }
     );
     const run = runBenchmark([omni]);
     const summary = benchmarkSummary(run);
-    expect(summary.total).toBe(BENCHMARK_PROBLEMS.length);
+    expect(summary.total).toBe(allBenchmarkProblems().length);
     expect(summary.solved).toBeGreaterThanOrEqual(2);
     expect(summary.pct).toBeGreaterThan(0);
   });
@@ -77,7 +77,7 @@ export function sanitizeBuffer(arr) { return arr.map((v) => v & 255); }
   it('benchmarkSummary reports 0 honestly when there has been no run', () => {
     expect(benchmarkSummary(null).solved).toBe(0);
     expect(benchmarkSummary(null).pct).toBe(0);
-    expect(benchmarkSummary(null).total).toBe(BENCHMARK_PROBLEMS.length);
+    expect(benchmarkSummary(null).total).toBe(allBenchmarkProblems().length);
   });
 
   it('every hidden suite is well-formed and solvable (no broken/theater benchmark)', () => {

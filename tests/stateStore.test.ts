@@ -128,11 +128,29 @@ const store = makeStore({  stateFile, getPayload: () => ({}) });
   });
 
   it('preserves the exact public store API surface', () => {
-const store = makeStore({  stateFile, getPayload: () => ({}) });
+    const store = makeStore({  stateFile, getPayload: () => ({}) });
     expect(typeof store.save).toBe('function');
     expect(typeof store.load).toBe('function');
     expect(typeof store.flush).toBe('function');
     expect(typeof store.stateFile).toBe('function');
     expect(store.stateFile()).toBe(stateFile);
+  });
+});
+
+describe('StateStore.vacuum (P2.8 state hygiene)', () => {
+  it('runs a real VACUUM and preserves the current data', () => {
+    const payload: Record<string, unknown> = { big: 'x'.repeat(500_000), small: 1 };
+    const store = makeStore({ stateFile, getPayload: () => payload, debounceMs: 0 });
+    store.save();
+    store.flush();
+
+    const r = store.vacuum();
+
+    // A real VACUUM ran: it reports sizes and never grows the file.
+    expect(r.before).toBeGreaterThan(0);
+    expect(r.after).toBeLessThanOrEqual(r.before);
+    // Data survives the compaction.
+    expect(store.load<Record<string, unknown>>()).toMatchObject({ small: 1 });
+    expect(existsSync(stateFile)).toBe(true);
   });
 });
