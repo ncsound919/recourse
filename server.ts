@@ -162,7 +162,7 @@ import type { SelfHostedManifestEntry } from './src/lib/selfHosting.js';
 // attempt in a durable capability-delta ledger.
 import { FORGE_AGENDA, attemptForgeSpec, benchmarkGapSpecs, generateForgeSource, forgeSampleBudget } from './src/lib/capabilityForge.js';
 import type { ForgeSpec, ForgeAttemptOutcome } from './src/lib/capabilityForge.js';
-import { assessForgeCandidate, extractToolDoc } from './src/lib/forgeQuality.js';
+import { assessForgeCandidate, extractToolDoc, findNearDuplicate } from './src/lib/forgeQuality.js';
 import { BUILDER_SEED_PROFILES, chooseBuilderProfile, computeBuilderBeliefs, builderMutateDue, proposeBuilderProfile } from './src/lib/builderBrain.js';
 import type { BuilderProfile, BuilderOutcome } from './src/lib/builderBrain.js';
 // Close the loop: recursive learning orders tool generation, and real forge
@@ -9045,6 +9045,22 @@ function promoteTool(entry: ToolEntry, opts: { origin: string; gate?: boolean; p
         } catch { /* refusal logging is best-effort; the refusal itself still holds */ }
         return false;
       }
+      // Novelty (P1.4): the same algorithm with different constants under a new
+      // name (e.g. dream weight-mutation variants) is not a new capability.
+      const dup = findNearDuplicate(
+        source,
+        entry.name,
+        registry.map((t) => ({ name: t.name, sourceCode: currentSourceOf(t) ?? undefined })),
+      );
+      if (dup) {
+        try {
+          appendProvenanceEvent('promotion_refused', {
+            tool: entry.name, origin: opts.origin, reason: `near-duplicate of ${dup}`, lines: verdict.meaningfulLines,
+          });
+          recordDev('promotion-refused', false, `${entry.name} (${opts.origin}): near-duplicate of ${dup}`, { driver: 'novelty-gate' });
+        } catch { /* best-effort */ }
+        return false;
+      }
     }
   }
   if (opts.push) registry.push(entry); else registry.unshift(entry);
@@ -9134,11 +9150,27 @@ async function materializeForgeOutcome(outcome: ForgeAttemptOutcome, spec: Forge
     base.summary = `quality gate: ${quality.gate.reasons.join('; ')}`;
     base.failures = [...(base.failures || []), { attempt: 0, note: base.summary }];
     base.wallMs = Date.now() - started;
+    // Deterministic rejection: without a quarantine bump the autopilot would
+    // re-pick this (dream/backfill) spec every cycle.
+    bumpForgeQuarantine(spec.name);
     forgeLedger.push(base);
     saveStateToDisk();
     return base;
   }
   const doc = outcome.doc ?? extractToolDoc(outcome.source, spec.name);
+  const nearDup = findNearDuplicate(outcome.source, spec.name, listSelfHostedEntries());
+  if (nearDup) {
+    base.status = 'failed';
+    base.summary = `novelty gate: near-duplicate of self-hosted tool ${nearDup}`;
+    base.failures = [...(base.failures || []), { attempt: 0, note: base.summary }];
+    base.wallMs = Date.now() - started;
+    // Deterministic rejection: without a quarantine bump the autopilot would
+    // re-pick this (dream/backfill) spec every cycle.
+    bumpForgeQuarantine(spec.name);
+    forgeLedger.push(base);
+    saveStateToDisk();
+    return base;
+  }
 
   // 1. Real lint gate.
   const lint = gateWithLint(outcome.source).lint;

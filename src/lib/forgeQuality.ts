@@ -286,6 +286,38 @@ function meaningfulLineCount(src: string): number {
     .filter((l) => l && l !== '{' && l !== '}' && l !== '};').length;
 }
 
+/**
+ * Structural skeleton of a tool: comments, whitespace, its own name and every
+ * numeric/string literal erased. Two tools with the same skeleton are the same
+ * algorithm with different constants (e.g. dream-mutated weight variants) — a
+ * near-duplicate, not a new capability.
+ */
+export function sourceSkeleton(source: string, name?: string): string {
+  let s = stripComments(String(source ?? ''));
+  if (name && IDENT.test(name)) s = s.replace(new RegExp(`\\b${escapeRe(name)}\\b`, 'g'), '__F__');
+  return s
+    .replace(/^\s*export\s+(default\s+)?/gm, '')
+    .replace(/(["'`])(?:\\.|(?!\1)[^\\])*\1/g, '"S"')
+    .replace(/\b0x[0-9a-f]+\b|\b\d+(?:\.\d+)?(?:e[+-]?\d+)?\b/gi, 'N')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Name of an existing tool with the same skeleton, or null (novelty check). */
+export function findNearDuplicate(
+  source: string,
+  name: string,
+  existing: Array<{ name: string; sourceCode?: string }>,
+): string | null {
+  const sk = sourceSkeleton(source, name);
+  if (!sk) return null;
+  for (const e of existing) {
+    if (e.name === name || !e.sourceCode) continue;
+    if (sourceSkeleton(e.sourceCode, e.name) === sk) return e.name;
+  }
+  return null;
+}
+
 /** Parse the JSDoc block attached to the exported entrypoint (or the first one). */
 export function extractToolDoc(source: string, name?: string): ToolDoc {
   const src = String(source ?? '');

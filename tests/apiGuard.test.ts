@@ -14,7 +14,7 @@ function req(over: Partial<{ method: string; path: string; headers: Record<strin
   return {
     method: over.method ?? 'POST',
     path: over.path ?? '/api/recourse/execute',
-    headers: { host: 'localhost:3000', ...(over.headers ?? {}) } as any,
+    headers: { host: 'localhost:3000', ...over.headers } as any,
     socket: { remoteAddress: over.ip ?? '127.0.0.1' },
   };
 }
