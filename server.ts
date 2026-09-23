@@ -319,6 +319,7 @@ import { createResearchRouter } from './src/routes/research.js';
 import { createOrchestrationRouter } from './src/routes/orchestration.js';
 import { createMusicTherapyRouter } from './src/routes/musicTherapy.js';
 import { createMemoryRouter } from './src/routes/memory.js';
+import { createLegoRouter } from './src/routes/lego.js';
 import { createSynergyRouter } from './src/routes/synergy.js';
 import { createFleetDogfoodRouter } from './src/routes/fleetDogfood.js';
 import { runFleetDogfoodCycle } from './src/lib/fleetDogfood.js';
@@ -7211,49 +7212,8 @@ app.get('/api/recourse/generations', (req, res) => {
 // =========================================================================
 // 8. LEGO COMPOSABLE ML & AUTONOMOUS SELF-ASSEMBLY ROUTES
 // =========================================================================
-app.get('/api/lego/state', (req, res) => {
-  try {
-    res.json({ success: true, state: globalLegoEngine.getState() });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-app.post('/api/lego/assemble', (req, res) => {
-  try {
-    // Apply the live readiness score so functional assemblies commit under the
-    // running (stable) system, not just during the every-5th /tick.
-    const liveReadiness = typeof status.readinessScore === 'number' ? status.readinessScore : 1;
-    globalLegoEngine.setReadinessGate(liveReadiness);
-    const result = globalLegoEngine.assembleNewCandidate();
-    res.json({ success: true, result });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-app.post('/api/lego/execute', (req, res) => {
-  try {
-    const inputs = req.body?.inputs || [
-      [0.2, 0.8, 0.1, 0.9, 0.3, 0.7, 0.4, 0.6],
-      [0.5, 0.5, 0.2, 0.8, 0.1, 0.9, 0.0, 1.0]
-    ];
-    const result = globalLegoEngine.executePipeline(inputs);
-    res.json({ success: true, result });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-app.post('/api/lego/route', (req, res) => {
-  try {
-    const inputVector = req.body?.inputVector || [0.4, 0.9, 0.1, 0.8, 0.2, 0.7, 0.3, 0.5];
-    const result = globalLegoEngine.routeDynamicInput(inputVector);
-    res.json({ success: true, result });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
+// LEGO routes moved to src/routes/lego.ts.
+app.use(createLegoRouter({ readinessScore: () => (typeof status.readinessScore === 'number' ? status.readinessScore : 1) }));
 
 // =========================================================================
 // 9. EXTERNAL INTAKE (LEARNING), GROUNDING, BENCHMARK + READOUT
