@@ -299,6 +299,11 @@ describe('issueTracker — index rendering and ledger integrity', () => {
 describe('issueTracker — readIssueRecords persistence paths', () => {
   const original = fs.existsSync(RECORDS_PATH) ? fs.readFileSync(RECORDS_PATH, 'utf-8') : null;
 
+  // data/ is gitignored, so a fresh clone (CI, Docker) has no data/issues dir.
+  beforeEach(() => {
+    fs.mkdirSync(path.dirname(RECORDS_PATH), { recursive: true });
+  });
+
   afterEach(() => {
     if (original !== null) {
       fs.writeFileSync(RECORDS_PATH, original, 'utf-8');

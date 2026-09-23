@@ -1,0 +1,15 @@
+{
+  "id": "free",
+  "name": "Free",
+  "description": "Evaluation tier for local and hobby use.",
+  "priceCents": 0,
+  "currency": "usd",
+  "interval": "month",
+  "quotas": {
+    "requestsPerMonth": 10000,
+    "tokensPerMonth": 2000000,
+    "centsPerMonth": 500
+  },
+  "scopes": ["read", "write"],
+  "features": ["Metered API access", "Community support"]
+}

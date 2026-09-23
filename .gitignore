@@ -16,7 +16,9 @@ recourse_dream.json
 recourse_goals.json
 .recourse.lock
 .recourse.pid
-data/
+data/*
+# shipped config under data/ (needed by fresh clones, CI and Docker)
+!data/plans/
 
 
 # composer outputs

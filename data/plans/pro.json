@@ -1,0 +1,16 @@
+{
+  "id": "pro",
+  "name": "Pro",
+  "description": "Production tier: higher quotas, billing API and priority support.",
+  "priceCents": 4900,
+  "currency": "usd",
+  "interval": "month",
+  "stripePriceId": "",
+  "quotas": {
+    "requestsPerMonth": 250000,
+    "tokensPerMonth": 50000000,
+    "centsPerMonth": 25000
+  },
+  "scopes": ["read", "write", "billing"],
+  "features": ["High-volume metered access", "Billing API", "Priority support"]
+}

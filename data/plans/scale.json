@@ -1,0 +1,16 @@
+{
+  "id": "scale",
+  "name": "Scale",
+  "description": "Unattended, high-throughput operation with admin scopes and generous quotas.",
+  "priceCents": 24900,
+  "currency": "usd",
+  "interval": "month",
+  "stripePriceId": "",
+  "quotas": {
+    "requestsPerMonth": 2000000,
+    "tokensPerMonth": 500000000,
+    "centsPerMonth": 250000
+  },
+  "scopes": ["read", "write", "billing", "admin"],
+  "features": ["Highest quotas", "Admin scopes", "Dedicated support"]
+}
