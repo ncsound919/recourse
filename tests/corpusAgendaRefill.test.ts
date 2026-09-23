@@ -3,33 +3,31 @@ import {
   refillAgendaFromCorpus,
   artifactToFnName,
   kindToDomain,
-  artifactRefSuite,
+  GROUNDING_MIN_CHARS,
   type CorpusArtifactLike,
 } from '../src/intake/corpus/agendaRefill';
 
 describe('corpus → agenda refill', () => {
-  it('turns corpus artifacts into proposals + forge specs with deterministic reference suites', () => {
+  it('turns corpus artifacts into proposals + minting groundings, never clone forge specs', () => {
+    const longText = 'KRAS mutation drives tumor growth via AKT signaling. '.repeat(8);
     const artifacts: CorpusArtifactLike[] = [
-      { name: 'KRAS-inhibitor-paper.pdf', project: 'cancer-pdfs', kind: 'paper', preview: 'KRAS mutation drives tumor growth via AKT signaling', hash: 'h1' },
+      { name: 'KRAS-inhibitor-paper.pdf', project: 'cancer-pdfs', kind: 'paper', excerpt: longText, hash: 'h1' },
       { name: 'breast-cancer-dataset.csv', project: 'cancer-datasets', kind: 'dataset', preview: 'patient_id,age,stage,status', hash: 'h2' },
     ];
     const seen = new Set<string>();
-    const existing = new Set<string>();
-    const { proposals, specs, result } = refillAgendaFromCorpus(artifacts, seen, existing);
+    const { proposals, specs, groundings, result } = refillAgendaFromCorpus(artifacts, seen);
     expect(proposals.length).toBe(2);
-    expect(specs.length).toBe(2);
-    expect(result.proposalsCreated).toBe(2);
-    // Each spec has a runnable reference suite (the FNV fingerprint contract).
-    for (const s of specs) {
-      expect(s.refSuite).toContain('assert typeof');
-      expect(s.refSuite).toContain('=== ');
-      expect(s.refSuite.split('\n').length).toBeGreaterThanOrEqual(4);
-    }
+    // The FNV-fingerprint clone specs are gone: a file name is not a spec.
+    expect(specs.length).toBe(0);
+    expect(result.specsCreated).toBe(0);
+    // Only the artifact with substantive text becomes a grounding for minting.
+    expect(groundings.map((g) => g.hash)).toEqual(['h1']);
+    expect(groundings[0].excerpt.length).toBeGreaterThanOrEqual(GROUNDING_MIN_CHARS);
+    expect(groundings[0].domain).toBe('biotech');
     // Dedupe: second run with same seen-set adds nothing.
-    const again = refillAgendaFromCorpus(artifacts, seen, existing);
+    const again = refillAgendaFromCorpus(artifacts, seen);
     expect(again.proposals.length).toBe(0);
-    expect(again.specs.length).toBe(0);
-    expect(again.result.proposalsCreated).toBe(0);
+    expect(again.groundings.length).toBe(0);
   });
 
   it('maps kinds to sensible domains', () => {
@@ -62,15 +60,5 @@ describe('corpus → agenda refill', () => {
     expect(proposals.length).toBe(0);
     expect(specs.length).toBe(0);
     expect(result.skipped.length).toBe(2);
-  });
-
-  it('refSuite is deterministic and reproducible', () => {
-    const a: CorpusArtifactLike = { name: 'x.pdf', project: 'p', kind: 'paper', preview: 'some content', hash: 'z' };
-    const fn = artifactToFnName(a);
-    const suite1 = artifactRefSuite(fn, a);
-    const suite2 = artifactRefSuite(fn, a);
-    expect(suite1).toBe(suite2); // deterministic across calls
-    // Empty-input fingerprint must be reproducible (the FNV-1a offset basis).
-    expect(suite1).toContain('assert ' + fn + "('') === \"811c9dc5\""); // FNV-1a("") = 0x811c9dc5
   });
 });

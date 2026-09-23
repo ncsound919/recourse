@@ -9,10 +9,16 @@
  *
  * Honesty contract:
  *  - A proposal is only created from a REAL corpus artifact (name, kind,
- *    content preview) — never fabricated.
- *  - The forge spec's referenceSuite is a deterministic, runnable contract
- *    derived from the artifact's metadata (not a hand-authored "ground truth"
- *    — it pins real, checkable behavior the tool must exhibit).
+ *    content excerpt) — never fabricated.
+ *  - Corpus artifacts NO LONGER become forge specs directly. The previous
+ *    design turned every file into an identically-specified FNV-1a hash
+ *    function named after the file: ~420 clone "tools" (68 distinct sources)
+ *    that passed a trivially satisfiable suite and added zero capability.
+ *    Instead, substantive artifacts become GROUNDINGS: research excerpts the
+ *    learner-driven minting step uses as context, so the model drafts a real
+ *    problem + reference implementation + acceptance test from the source,
+ *    and the reference must pass that test in the sandbox before the spec is
+ *    admitted (see mintProblems / mintForgeSpecFromLearnerPlan).
  *  - Dedupe by artifact hash so repeated scans never duplicate.
  */
 
@@ -26,8 +32,27 @@ export interface CorpusArtifactLike {
   kind?: string;            // 'paper' | 'dataset' | 'whitepaper' | 'doc' | ...
   content?: string;
   preview?: string;
+  /** Real document head (CorpusArtifact.excerpt from the scanner). */
+  excerpt?: string;
   hash?: string;
   path?: string;
+}
+
+/** A research excerpt the forge's minting step can ground a new problem in. */
+export interface CorpusGrounding {
+  hash: string;
+  title: string;
+  project: string;
+  kind: string;
+  domain: ToolDomain;
+  excerpt: string;
+}
+
+/** Minimum excerpt length for an artifact to be worth grounding a tool in. */
+export const GROUNDING_MIN_CHARS = 200;
+
+function artifactText(a: CorpusArtifactLike): string {
+  return String(a.excerpt || a.preview || a.content || '').replace(/\s+/g, ' ').trim();
 }
 
 /** Map a corpus kind to a forge domain. Honest heuristic, never fabricated. */
@@ -66,41 +91,29 @@ export function artifactToFnName(artifact: CorpusArtifactLike): string {
   return name;
 }
 
-/** Deterministic reference suite for a corpus-derived tool. The tool must
- *  reproduce real, checkable properties of the artifact: stable hashing,
- *  field extraction, and a self-consistency check. */
-export function artifactRefSuite(fnName: string, artifact: CorpusArtifactLike): string {
-  const sample = artifact.preview || artifact.content || '';
-  // FNV-1a fingerprint of the EMPTY input = the offset basis (0x811c9dc5).
-  // The generated tool must return exactly this for empty input.
-  const emptyFp = (2166136261 >>> 0).toString(16).padStart(8, '0');
-  return [
-    `assert typeof ${fnName} === 'function';`,
-    `assert ${fnName}('') === ${JSON.stringify(emptyFp)};`,       // empty input -> FNV-1a("") = 0x811c9dc5
-    `assert ${fnName}(${JSON.stringify(sample.slice(0, 20))}) === ${fnName}(${JSON.stringify(sample.slice(0, 20))});`, // deterministic
-    `assert ${fnName}(123) === ${JSON.stringify(emptyFp)};`,       // non-string input tolerated
-  ].join('\n');
-}
-
 export interface RefillResult {
   proposalsCreated: number;
+  /** Always 0: corpus artifacts no longer become forge specs directly. */
   specsCreated: number;
+  groundingsCreated: number;
   skipped: string[];
 }
 
 /**
- * Turn corpus artifacts into intel proposals + forge specs. Runs after each
- * corpus scan. Dedupes by artifact hash (keeps a persistent seen-set).
+ * Turn corpus artifacts into intel proposals + minting groundings. Runs after
+ * each corpus scan. Dedupes by artifact hash (keeps a persistent seen-set).
+ * `specs` is kept in the return shape for compatibility and is always empty.
  */
 export function refillAgendaFromCorpus(
   artifacts: CorpusArtifactLike[],
   seenHashes: Set<string>,
-  existingAgendaNames: Set<string>,
-): { proposals: IntelProposal[]; specs: ForgeSpec[]; result: RefillResult } {
+  _existingAgendaNames?: Set<string>,
+): { proposals: IntelProposal[]; specs: ForgeSpec[]; groundings: CorpusGrounding[]; result: RefillResult } {
   const proposals: IntelProposal[] = [];
   const specs: ForgeSpec[] = [];
+  const groundings: CorpusGrounding[] = [];
   const skipped: string[] = [];
-  const result: RefillResult = { proposalsCreated: 0, specsCreated: 0, skipped };
+  const result: RefillResult = { proposalsCreated: 0, specsCreated: 0, groundingsCreated: 0, skipped };
 
   for (const a of artifacts) {
     const hash = a.hash || a.path || `${a.project}:${a.name}`;
@@ -119,19 +132,8 @@ export function refillAgendaFromCorpus(
     }
 
     const title = a.name.replace(/\.[^.]+$/, '');
-    const description = `Grounded in corpus artifact "${title}" (${a.project}, ${kind}). ${
-      (a.preview || a.content || '').slice(0, 200)
-    }`;
-
-    const id = `corpus_${hash.slice(0, 16)}`;
-    const spec: ForgeSpec = {
-      id,
-      name: fnName,
-      domain,
-      title,
-      prompt: `Implement \`export function ${fnName}(input)\` that returns a deterministic string fingerprint of its input (FNV-1a, unsigned 32-bit, hex lowercase, zero-padded to 8 chars). Pure, never throws; non-string input returns the empty-input fingerprint. Corpus source: ${a.project}/${a.name}.`,
-      refSuite: artifactRefSuite(fnName, a),
-    };
+    const text = artifactText(a);
+    const description = `Grounded in corpus artifact "${title}" (${a.project}, ${kind}). ${text.slice(0, 200)}`;
     const proposal: IntelProposal = {
       id: `prop_${hash.slice(0, 16)}`,
       source: 'corpus',
@@ -146,14 +148,15 @@ export function refillAgendaFromCorpus(
       status: 'new',
     };
     proposals.push(proposal);
-    if (!existingAgendaNames.has(spec.name)) {
-      specs.push(spec);
-      existingAgendaNames.add(spec.name);
+    // Only substantive text is worth grounding a new tool in (a title alone
+    // is not a specification).
+    if (text.length >= GROUNDING_MIN_CHARS) {
+      groundings.push({ hash, title, project: a.project, kind, domain, excerpt: text.slice(0, 1200) });
+      result.groundingsCreated++;
     }
     seenHashes.add(hash);
     result.proposalsCreated++;
-    result.specsCreated++;
   }
 
-  return { proposals, specs, result };
+  return { proposals, specs, groundings, result };
 }

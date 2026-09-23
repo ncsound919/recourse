@@ -57,6 +57,15 @@ export interface SelfHostedManifestEntry {
   lastVerified: { passed: boolean; detail: string } | null;
   /** Independent WASM-sandbox re-run of the stored suite (null until run). */
   lastSandboxVerified?: { passed: boolean; detail: string; at: number } | null;
+  /** Human/model-facing description (JSDoc summary or spec title). Used for
+   *  agent tool-calling instead of the provenance-style `summary`. */
+  description?: string;
+  /** Positional parameter docs (from JSDoc), in call order. */
+  paramDocs?: Array<{ name: string; type?: string; description?: string }>;
+  /** Return-value doc (from JSDoc). */
+  returnsDoc?: { type?: string; description?: string } | null;
+  /** Forge quality-gate verdict at promotion time (see forgeQuality.ts). */
+  quality?: { score: number; gateOk: boolean; reasons: string[]; differential?: { checked: number; agreed: number } | null; at: number };
 }
 
 export interface SelfHostedManifest {
@@ -687,6 +696,10 @@ export interface StatelessSelfHostInput {
   summary: string;
   /** Optional capability grants (default deny when omitted). */
   grants?: CapabilityGrants;
+  description?: string;
+  paramDocs?: SelfHostedManifestEntry['paramDocs'];
+  returnsDoc?: SelfHostedManifestEntry['returnsDoc'];
+  quality?: SelfHostedManifestEntry['quality'];
 }
 
 function generateStatelessSelfHostedModuleSource(input: StatelessSelfHostInput): string {
@@ -842,6 +855,10 @@ export function writeStatelessSelfHostedTool(
       sourceCode: input.sourceCode,
       testSuiteCode: input.testSuiteCode,
       summary: input.summary,
+      ...(input.description ? { description: input.description } : {}),
+      ...(input.paramDocs?.length ? { paramDocs: input.paramDocs } : {}),
+      ...(input.returnsDoc ? { returnsDoc: input.returnsDoc } : {}),
+      ...(input.quality ? { quality: input.quality } : {}),
       createdAt: Date.now(),
       lastVerifiedAt: null,
       lastVerified: null,

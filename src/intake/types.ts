@@ -63,6 +63,12 @@ export interface BenchmarkProblem {
    * the registry does not implement yet (unbounded headroom). Absent = baseline.
    */
   tier?: BenchmarkTier;
+  /** Known-correct reference implementation (JS source exporting
+   *  `functionName`). Never shown to a generator; used as a differential-testing
+   *  oracle by the forge quality gate. */
+  referenceSource?: string;
+  /** Representative argument vectors (each an array of positional args). */
+  sampleArgs?: unknown[][];
 }
 
 export interface BenchmarkRun {

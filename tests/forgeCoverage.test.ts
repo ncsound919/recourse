@@ -246,15 +246,25 @@ describe('attemptForgeSpec', () => {
   it('falls back to the Axiom bridge and promotes on success when offline', async () => {
     networkDown = true;
     (axiomReachable as any).mockResolvedValue(true);
-    (integrateAxiomTool as any).mockResolvedValue({
-      ok: true,
-      selfHosted: { sourceCode: DEDUPE_CORRECT },
-    });
+    (integrateAxiomTool as any).mockResolvedValue({ ok: true, sourceCode: DEDUPE_CORRECT });
     const out = await attemptForgeSpec(FORGE_AGENDA[0]);
     expect(out.ok).toBe(true);
     expect(out.source).toContain('function dedupeStable');
     expect(out.verifyScore).toBe(1);
     expect(out.verifyDetails![0]).toContain('Axiom bridge');
+    // The bridge must NOT self-host: the forge's own gates + materialization own that.
+    expect((integrateAxiomTool as any).mock.calls.at(-1)[4]).toEqual({ selfHost: false });
+    expect(out.quality?.gate.ok).toBe(true);
+  });
+
+  it('rejects an Axiom source that fails the reference suite (no blind trust)', async () => {
+    networkDown = true;
+    (axiomReachable as any).mockResolvedValue(true);
+    (integrateAxiomTool as any).mockResolvedValue({ ok: true, sourceCode: DEDUPE_WRONG });
+    const out = await attemptForgeSpec(FORGE_AGENDA[0]);
+    expect(out.ok).toBe(false);
+    expect(out.reason).toBe('offline');
+    expect(out.failures.some((f) => /Axiom source failed/.test(f.note))).toBe(true);
   });
 
   it('records offline failure when the Axiom bridge itself fails', async () => {

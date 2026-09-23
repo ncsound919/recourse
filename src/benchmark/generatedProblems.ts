@@ -48,6 +48,10 @@ interface Template {
   description: string;
   /** Produce one concrete problem instance from the rng. */
   make: (rng: () => number) => { title: string; suite: string };
+  /** Reference implementation as exportable JS source (mirrors the ref* fns). */
+  refSource: string;
+  /** Representative inputs for differential testing (not the hidden suite). */
+  sampleArgs: unknown[][];
 }
 
 const TEMPLATES: Template[] = [
@@ -55,51 +59,71 @@ const TEMPLATES: Template[] = [
     key: 'gcd', domain: 'math', functionName: 'gcdFast',
     description: 'Return the greatest common divisor of two non-negative integers.',
     make: (rng) => { const a = ri(rng, 2, 5000), b = ri(rng, 2, 5000); return { title: `gcd(${a}, ${b})`, suite: `assert gcdFast(${a}, ${b}) === ${refGcd(a, b)};` }; },
+    refSource: "export function gcdFast(a, b) { while (b) { [a, b] = [b, a % b]; } return a; }",
+    sampleArgs: [[12, 18], [17, 5], [0, 9], [100, 75]],
   },
   {
     key: 'lcm', domain: 'math', functionName: 'lcmFast',
     description: 'Return the least common multiple of two positive integers.',
     make: (rng) => { const a = ri(rng, 2, 60), b = ri(rng, 2, 60); return { title: `lcm(${a}, ${b})`, suite: `assert lcmFast(${a}, ${b}) === ${refLcm(a, b)};` }; },
+    refSource: "export function lcmFast(a, b) { let x = a, y = b; while (y) { [x, y] = [y, x % y]; } return (a / x) * b; }",
+    sampleArgs: [[4, 6], [7, 3], [12, 18]],
   },
   {
     key: 'reverse', domain: 'coding', functionName: 'reverseWords',
     description: 'Reverse word order in a whitespace-separated string, collapsing runs of whitespace.',
     make: (rng) => { const n = ri(rng, 2, 5); const s = Array.from({ length: n }, () => WORDS[ri(rng, 0, WORDS.length - 1)]).join(' '); return { title: `reverseWords(${n} words)`, suite: `assert reverseWords(${JSON.stringify(s)}) === ${JSON.stringify(refReverseWords(s))};` }; },
+    refSource: "export function reverseWords(s) { return s.trim().split(/\\s+/).reverse().join(' '); }",
+    sampleArgs: [["hello big world"], ["  a   b  "], ["single"]],
   },
   {
     key: 'vowels', domain: 'coding', functionName: 'countVowels',
     description: 'Count the vowels (a e i o u, case-insensitive) in a string.',
     make: (rng) => { const s = Array.from({ length: ri(rng, 3, 10) }, () => WORDS[ri(rng, 0, WORDS.length - 1)]).join(''); return { title: `countVowels(${s.length} chars)`, suite: `assert countVowels(${JSON.stringify(s)}) === ${refCountVowels(s)};` }; },
+    refSource: "export function countVowels(s) { return (s.match(/[aeiou]/gi) || []).length; }",
+    sampleArgs: [["Education"], ["rhythm"], ["AEIOU"]],
   },
   {
     key: 'digits', domain: 'math', functionName: 'sumDigits',
     description: 'Return the sum of the decimal digits of the absolute value of an integer.',
     make: (rng) => { const n = ri(rng, 0, 999999); return { title: `sumDigits(${n})`, suite: `assert sumDigits(${n}) === ${refSumDigits(n)};` }; },
+    refSource: "export function sumDigits(n) { return String(Math.abs(n)).split('').reduce((a, c) => a + Number(c), 0); }",
+    sampleArgs: [[1234], [0], [-907]],
   },
   {
     key: 'palindrome', domain: 'coding', functionName: 'isPalindrome',
     description: 'Return true iff the string is a palindrome ignoring case and non-alphanumerics.',
     make: (rng) => { const w = WORDS[ri(rng, 0, WORDS.length - 1)]; const s = rng() < 0.5 ? w + [...w].reverse().join('') : w + 'x'; return { title: `isPalindrome(${JSON.stringify(s)})`, suite: `assert isPalindrome(${JSON.stringify(s)}) === ${refIsPalindrome(s)};` }; },
+    refSource: "export function isPalindrome(s) { const t = s.toLowerCase().replace(/[^a-z0-9]/g, ''); return t === [...t].reverse().join(''); }",
+    sampleArgs: [["Racecar"], ["A man, a plan, a canal: Panama"], ["abc"]],
   },
   {
     key: 'dedupe', domain: 'coding', functionName: 'dedupePreserveOrder',
     description: 'Remove duplicates from an array preserving first-seen order.',
     make: (rng) => { const a = Array.from({ length: ri(rng, 4, 9) }, () => ri(rng, 0, 5)); return { title: `dedupe(${a.length})`, suite: `assert JSON.stringify(dedupePreserveOrder(${JSON.stringify(a)})) === ${JSON.stringify(JSON.stringify(refDedupe(a)))};` }; },
+    refSource: "export function dedupePreserveOrder(a) { return [...new Set(a)]; }",
+    sampleArgs: [[[3, 1, 3, 2, 1]], [[]], [[5, 5, 5]]],
   },
   {
     key: 'clamp', domain: 'systemic', functionName: 'clampRange',
     description: 'Clamp a value into [lo, hi] inclusive.',
     make: (rng) => { const x = ri(rng, -50, 150), lo = ri(rng, 0, 20), hi = lo + ri(rng, 1, 50); return { title: `clamp(${x}, ${lo}, ${hi})`, suite: `assert clampRange(${x}, ${lo}, ${hi}) === ${refClamp(x, lo, hi)};` }; },
+    refSource: "export function clampRange(x, lo, hi) { return Math.min(hi, Math.max(lo, x)); }",
+    sampleArgs: [[5, 0, 10], [-3, 0, 10], [42, 0, 10]],
   },
   {
     key: 'factmod', domain: 'math', functionName: 'factorialMod',
     description: 'Return n! modulo m (n >= 0, m >= 1).',
     make: (rng) => { const n = ri(rng, 3, 12), m = ri(rng, 7, 1000); return { title: `factorialMod(${n}, ${m})`, suite: `assert factorialMod(${n}, ${m}) === ${refFactorialMod(n, m)};` }; },
+    refSource: "export function factorialMod(n, m) { let r = 1; for (let i = 2; i <= n; i++) r = (r * i) % m; return r; }",
+    sampleArgs: [[5, 7], [0, 13], [10, 1000]],
   },
   {
     key: 'fib', domain: 'math', functionName: 'nthFibonacci',
     description: 'Return the nth Fibonacci number with F(0)=0, F(1)=1.',
     make: (rng) => { const n = ri(rng, 5, 40); return { title: `fib(${n})`, suite: `assert nthFibonacci(${n}) === ${refFib(n)};` }; },
+    refSource: "export function nthFibonacci(n) { let a = 0, b = 1; for (let i = 0; i < n; i++) { [a, b] = [b, a + b]; } return a; }",
+    sampleArgs: [[0], [1], [10], [30]],
   },
 ];
 
@@ -118,6 +142,8 @@ export function generateProblems(perTemplate = 2, seed = 0x5eed_1234): Benchmark
         functionName: t.functionName,
         hiddenSuite: suite,
         tier: 'generated',
+        referenceSource: t.refSource,
+        sampleArgs: t.sampleArgs,
       });
     }
   }
@@ -143,6 +169,8 @@ export function makeGeneratedProblem(seq: number): BenchmarkProblem {
     functionName: t.functionName,
     hiddenSuite: suite,
     tier: 'generated',
+    referenceSource: t.refSource,
+    sampleArgs: t.sampleArgs,
   };
 }
 

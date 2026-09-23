@@ -162,6 +162,7 @@ import type { SelfHostedManifestEntry } from './src/lib/selfHosting.js';
 // attempt in a durable capability-delta ledger.
 import { FORGE_AGENDA, attemptForgeSpec, benchmarkGapSpecs, generateForgeSource, forgeSampleBudget } from './src/lib/capabilityForge.js';
 import type { ForgeSpec, ForgeAttemptOutcome } from './src/lib/capabilityForge.js';
+import { assessForgeCandidate, extractToolDoc } from './src/lib/forgeQuality.js';
 import { BUILDER_SEED_PROFILES, chooseBuilderProfile, computeBuilderBeliefs, builderMutateDue, proposeBuilderProfile } from './src/lib/builderBrain.js';
 import type { BuilderProfile, BuilderOutcome } from './src/lib/builderBrain.js';
 // Close the loop: recursive learning orders tool generation, and real forge
@@ -170,7 +171,7 @@ import {
   rankForgeSpecsByLearnerPlan,
   forgeLearnUpdate,
   chooseMintTarget,
-  mintContextForTarget,
+  groundedMintContext,
   mintedProblemToForgeSpec,
 } from './src/lib/forgeLearningLoop.js';
 import { bbtchIdeaToProposal, heuristicScore, sortProposals, nextProposalToPursue } from './src/lib/intelInvention.js';
@@ -283,6 +284,7 @@ import type { ReadoutContext } from './src/intake/readout.js';
 // Ecosystem research corpus (local sibling-project ingestion)
 import { scanCorpus } from './src/intake/corpus/scanner.js';
 import { refillAgendaFromCorpus } from './src/intake/corpus/agendaRefill.js';
+import type { CorpusGrounding } from './src/intake/corpus/agendaRefill.js';
 import { summarize, corpusDigest, artifactsToSignals, DEFAULT_CORPUS_ROOTS } from './src/intake/corpus/index.js';
 import type {
   CorpusRoot,
@@ -909,6 +911,8 @@ export interface ForgeLedgerEntry {
   wallMs: number;
   /** R6: literature-grounding for this build (null = corpus unavailable). */
   literature?: { score: number; docs: number } | null;
+  /** Forge quality gate (forgeQuality.ts): score + verdict of the candidate. */
+  quality?: { score: number; gateOk: boolean; reasons: string[] };
 }
 let forgeLedger: ForgeLedgerEntry[] = [];
 let forgeAutopilotOn = false;
@@ -1548,7 +1552,9 @@ function loadStateFromDisk() {
       // (e.g. a corpus artifact named "package" produced a spec the forge
       // would fail forever on). Keeps the forge working real targets.
       const reserved = new Set(['package', 'default', 'class', 'function', 'return', 'if', 'else', 'for', 'while', 'do', 'switch', 'case', 'break', 'continue', 'new', 'delete', 'typeof', 'instanceof', 'in', 'of', 'var', 'let', 'const', 'export', 'import', 'extends', 'super', 'this', 'null', 'undefined', 'true', 'false', 'try', 'catch', 'throw', 'finally', 'yield', 'await', 'async', 'static', 'get', 'set', 'void', 'with']);
-      dynamicAgenda = data.dynamicAgenda.filter((s: any) => s?.name && /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(s.name) && !reserved.has(s.name));
+      // Also drop legacy corpus_* specs: every one was the same FNV-fingerprint
+      // contract under a file-derived name (clone tools, zero capability).
+      dynamicAgenda = data.dynamicAgenda.filter((s: any) => s?.name && /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(s.name) && !reserved.has(s.name) && !String(s.id ?? '').startsWith('corpus_'));
     }
       if (data.capabilityAdoptions) capabilityAdoptions = data.capabilityAdoptions;
       if (data.capabilityServed) capabilityServed = data.capabilityServed;
@@ -7832,9 +7838,12 @@ async function runCorpusScan(): Promise<{ snapshot: CorpusSnapshot; added: numbe
     try {
       const seen = new Set(corpusRefilledHashes);
       const existing = new Set(allForgeSpecs().map((s) => s.name));
-      const { proposals, specs, result } = refillAgendaFromCorpus(corpusArtifacts, seen, existing);
+      const { proposals, groundings, result } = refillAgendaFromCorpus(corpusArtifacts, seen, existing);
       for (const p of proposals) intelProposals.push(p);
-      for (const s of specs) dynamicAgenda.push(s);
+      // Corpus artifacts ground learner-driven minting (real problem + proven
+      // reference) instead of becoming clone FNV "tools" named after files.
+      for (const g of groundings) corpusGroundings.push(g);
+      if (corpusGroundings.length > 500) corpusGroundings = corpusGroundings.slice(-500);
       corpusRefilledHashes = [...seen].slice(-5000);
       refilled = result.proposalsCreated;
       if (refilled > 0) {
@@ -8883,6 +8892,17 @@ function sandboxVerify(source: string, suite: string): { passed: boolean; testDe
 }
 
 let forgeMintBusy = false;
+/** Research excerpts from the corpus scan, consumed one per grounded mint. */
+let corpusGroundings: CorpusGrounding[] = [];
+
+/** Next unused grounding, preferring the target domain. */
+function takeCorpusGrounding(domain: string): CorpusGrounding | null {
+  if (!corpusGroundings.length) return null;
+  const idx = corpusGroundings.findIndex((g) => g.domain === domain);
+  const at = idx >= 0 ? idx : 0;
+  const [g] = corpusGroundings.splice(at, 1);
+  return g ?? null;
+}
 
 /**
  * Mint a brand-new forge spec from the learner's top unmet synthesize/refine
@@ -8912,8 +8932,9 @@ async function mintForgeSpecFromLearnerPlan(): Promise<number> {
     if (!target) return 0;
 
     const knownTitles = existing.map((s) => s.title);
+    const grounding = takeCorpusGrounding(target.domain);
     const result = await mintProblems({
-      context: mintContextForTarget(target),
+      context: groundedMintContext(target, grounding),
       count: 1,
       knownTitles,
       draft: async (system, user) => {
@@ -9070,8 +9091,12 @@ async function materializeForgeOutcome(outcome: ForgeAttemptOutcome, spec: Forge
     // already in the registry — we need to write the self-host module.
   }
 
+  if (outcome.quality) {
+    base.quality = { score: outcome.quality.score, gateOk: outcome.quality.gate.ok, reasons: outcome.quality.gate.reasons };
+  }
   if (outcome.ok !== true || !outcome.source) {
     base.status = outcome.reason === 'offline' ? 'offline' : 'failed';
+    if (outcome.reason === 'quality') base.summary = `passed reference suite but failed quality gate: ${outcome.quality?.gate.reasons.join('; ') ?? 'unknown'}`;
     base.wallMs = Date.now() - started;
     forgeLedger.push(base);
     saveStateToDisk();
@@ -9090,6 +9115,30 @@ async function materializeForgeOutcome(outcome: ForgeAttemptOutcome, spec: Forge
     saveStateToDisk();
     return base;
   }
+
+  // 1b. Quality gate for sources that did not come through attemptForgeSpec
+  // (dream/backfill genes): the same differential/robustness/overfit checks.
+  const quality = outcome.quality ?? assessForgeCandidate(
+    {
+      name: spec.name,
+      refSuite: outcome.refSuite ?? spec.refSuite,
+      reference: spec.reference,
+      vectors: spec.vectors,
+      kind: spec.kind,
+    },
+    outcome.source,
+  );
+  base.quality = { score: quality.score, gateOk: quality.gate.ok, reasons: quality.gate.reasons };
+  if (!quality.gate.ok) {
+    base.status = 'failed';
+    base.summary = `quality gate: ${quality.gate.reasons.join('; ')}`;
+    base.failures = [...(base.failures || []), { attempt: 0, note: base.summary }];
+    base.wallMs = Date.now() - started;
+    forgeLedger.push(base);
+    saveStateToDisk();
+    return base;
+  }
+  const doc = outcome.doc ?? extractToolDoc(outcome.source, spec.name);
 
   // 1. Real lint gate.
   const lint = gateWithLint(outcome.source).lint;
@@ -9117,6 +9166,16 @@ async function materializeForgeOutcome(outcome: ForgeAttemptOutcome, spec: Forge
       // spec.refSuite (the stored contract) for model-built specs.
       testSuiteCode: outcome.refSuite ?? spec.refSuite,
       summary: `[Capability Forge] ${spec.title} (${spec.id})`,
+      description: doc.summary || spec.title,
+      paramDocs: doc.params,
+      returnsDoc: doc.returns,
+      quality: {
+        score: quality.score,
+        gateOk: quality.gate.ok,
+        reasons: quality.gate.reasons,
+        differential: quality.differential ? { checked: quality.differential.checked, agreed: quality.differential.agreed } : null,
+        at: Date.now(),
+      },
     });
     if (writeRes.success !== true) {
       base.status = 'materialize_failed';

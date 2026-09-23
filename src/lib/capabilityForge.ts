@@ -27,6 +27,15 @@ import { executeTestSuite } from './executionSandbox';
 import { integrateAxiomTool, axiomReachable } from './axiomBridge.js';
 import { skillAwareChat } from './skillContext.js';
 import { adaptiveBudget, difficultyIndex } from './adaptiveCompute.js';
+import {
+  assessForgeCandidate,
+  betterQuality,
+  extractToolDoc,
+  isSubstantivelyClean,
+  qualityFeedback,
+  splitSuiteForHoldout,
+} from './forgeQuality.js';
+import type { ForgeQualityReport, ToolDoc } from './forgeQuality.js';
 
 export interface ForgeSpec {
   id: string;
@@ -40,6 +49,12 @@ export interface ForgeSpec {
   prompt: string;
   /** Hidden reference suite (asserts) — the real judge. Not shown to model. */
   refSuite: string;
+  /** Optional known-correct implementation (never shown to the model). When
+   *  present the quality gate runs candidate and reference side by side on the
+   *  suite's inputs plus perturbations (differential testing). */
+  reference?: string;
+  /** Optional representative argument vectors for differential/robustness probes. */
+  vectors?: unknown[];
 }
 
 export interface ForgeFailure {
@@ -69,6 +84,8 @@ export function benchmarkGapSpecs(run: Pick<BenchmarkRun, 'solvedIds'> | null | 
       title: p.title,
       prompt: `${p.description}\n\nDefine and export exactly one function named "${p.functionName}" that satisfies the contract. Return only the code.`,
       refSuite: p.hiddenSuite,
+      ...(p.referenceSource ? { reference: p.referenceSource } : {}),
+      ...(p.sampleArgs ? { vectors: p.sampleArgs } : {}),
     }));
 }
 
@@ -81,13 +98,20 @@ export interface ForgeAttemptOutcome {
   source?: string;
   /** Overrides spec.refSuite when the source was renamed (dream-gene path). */
   refSuite?: string;
-  /** Human reason when not ok: 'offline' | 'failed' */
-  reason?: 'offline' | 'failed';
+  /** Human reason when not ok: 'offline' | 'failed' | 'quality' (passed the
+   *  reference suite but never cleared the quality gate). */
+  reason?: 'offline' | 'failed' | 'quality';
   attemptsUsed: number;
   maxTries: number;
   failures: ForgeFailure[];
   verifyScore?: number;
   verifyDetails?: string[];
+  /** Quality report of the promoted (or best rejected) candidate. */
+  quality?: ForgeQualityReport;
+  /** JSDoc-derived description of the promoted tool (for tool-calling). */
+  doc?: ToolDoc;
+  /** How many candidates passed the reference suite (best-of-N selection). */
+  candidatesPassed?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -598,6 +622,31 @@ export function forgeSampleBudget(
   return adaptiveBudget(difficultyIndex(input), { min: opts.min ?? 1, max: opts.max ?? 3 });
 }
 
+/** Non-negotiable quality rules appended to every function-generation prompt
+ *  (including Builder Brain profiles, which only tune style/strategy). Each rule
+ *  maps to a check in forgeQuality.ts, so the model is told what is measured. */
+export const FORGE_QUALITY_RULES =
+  `Quality rules (enforced by automated checks):\n` +
+  `- Pure and deterministic: no Math.random, Date, performance.now, I/O, globals, console output.\n` +
+  `- Never mutate the arguments; copy arrays/objects before sorting, reversing or splicing.\n` +
+  `- Do not special-case the example inputs: the hidden suite and differential tests use other inputs.\n` +
+  `- Handle boundary inputs the contract allows (empty, single element, zero, duplicates, large sizes) with the same logic, not with lookups.\n` +
+  `- No require/import/eval/Function/globalThis/process/constructor access (rejected by the sandbox).`;
+
+/** Default code-writing prompt: documented, production-grade micro-function. */
+export function defaultForgeSystemPrompt(name: string): string {
+  return (
+    `You are a senior JavaScript engineer writing ONE production-quality, dependency-free function.\n` +
+    `Output rules:\n` +
+    `- Return ONLY JavaScript source. No Markdown fences and no prose outside code comments.\n` +
+    `- No TypeScript types, no classes unless asked.\n` +
+    `- Define and export exactly one function: \`export function ${name}(...)\`. Helpers must be non-exported.\n` +
+    `- Put a JSDoc block directly above it: a one-sentence summary, @param {type} name - meaning for EVERY parameter, @returns {type} - meaning, and the time complexity.\n` +
+    `- The implementation is judged by a hidden test suite plus differential tests against a reference on unseen inputs. Match the contract exactly, including edge cases.\n` +
+    FORGE_QUALITY_RULES
+  );
+}
+
 /**
  * Ask the model for ONE implementation of a spec. Returns plain JS source that
  * exports the spec's function. Never returns placeholder text.
@@ -626,21 +675,16 @@ export async function generateForgeSource(spec: ForgeSpec, builder?: ForgeBuilde
       `- The implementation will be tested against a hidden test suite that asserts the exact behavior described. Match it precisely.\n` +
       `- Handle edge cases (empty inputs, capacity bounds) explicitly.`
     : builder?.systemPrompt?.trim()
-      ? builder.systemPrompt
-      : `You write plain JavaScript micro-functions. Rules:\n` +
-        `- Return ONLY the source code. No Markdown fences, no commentary, no prose.\n` +
-        `- No imports, no require, no TypeScript types, no classes unless asked.\n` +
-        `- Define and export exactly one function named ${spec.name}.\n` +
-        `- The implementation will be tested against a hidden test suite that asserts the exact behavior described. Match it precisely.\n` +
-        `- Handle edge cases (empty inputs, single elements) explicitly.`;
+      ? `${builder.systemPrompt}\n${FORGE_QUALITY_RULES}`
+      : defaultForgeSystemPrompt(spec.name);
   const temperature = typeof builder?.temperature === 'number' ? builder.temperature : 0.1;
   const hint = builder?.inspirationHint?.trim();
   const feedback = builder?.feedback?.trim();
   const user =
     `Write ${isClass ? 'a class' : ''} ${spec.name}.\n\nContract:\n${spec.prompt}` +
     `${hint ? `\n\n${hint}` : ''}` +
-    `${feedback ? `\n\nYour previous attempt failed the hidden suite. Fix it using this real failure output:\n${feedback}` : ''}` +
-    `\n\nReturn only the source.`;
+    `${feedback ? `\n\nYour previous attempt was rejected. Fix it using this real verification output:\n${feedback}` : ''}` +
+    `\n\nBefore writing, silently list the edge cases the contract implies and make sure each is handled. Return only the source.`;
   const res = await forgeChat(system, user, temperature);
   if (!res.ok) {
     return { ok: false, offline: res.offline, error: res.error };
@@ -657,6 +701,27 @@ export function verifyForgeSource(source: string, refSuite: string) {
   return executeTestSuite(source, refSuite);
 }
 
+/**
+ * Retry feedback that never reveals HOLDOUT assertions. Visible failures are
+ * shown verbatim; hidden failures are reported only as a count, so the model
+ * cannot converge by patching the exact asserts it was told about.
+ */
+function holdoutAwareFeedback(source: string, split: { visible: string; holdout: string }, fullVerify: { passed: boolean; testDetails: string[]; stderr: string[] }): string {
+  if (!split.holdout) return feedbackFromVerify(fullVerify);
+  const visible = verifyForgeSource(source, split.visible);
+  const hidden = verifyForgeSource(source, split.holdout);
+  const hiddenFails = hidden.testDetails.filter((d) => d.startsWith('[FAIL') || d.startsWith('[COMPILATION')).length;
+  const parts: string[] = [];
+  if (!visible.passed) parts.push(feedbackFromVerify(visible));
+  if (hiddenFails > 0) {
+    parts.push(
+      `${hiddenFails} hidden assertion(s) also failed. They test the same contract on other inputs — ` +
+      're-read the contract for cases your code does not handle yet.',
+    );
+  }
+  return parts.join('\n') || feedbackFromVerify(fullVerify);
+}
+
 function feedbackFromVerify(verify: { passed: boolean; testDetails: string[]; stderr: string[] }): string {
   const fails = verify.testDetails
     .filter((d) => d.startsWith('[FAIL') || d.startsWith('[COMPILATION'))
@@ -666,10 +731,60 @@ function feedbackFromVerify(verify: { passed: boolean; testDetails: string[]; st
   return [fails, errs].filter(Boolean).join('\n') || '(no failure detail)';
 }
 
+/** Candidate that passed the full reference suite, with its quality report. */
+interface PassingCandidate {
+  source: string;
+  verify: { score: number; testDetails: string[] };
+  quality: ForgeQualityReport;
+  via: 'model' | 'sleep' | 'axiom';
+}
+
+function assessCandidate(spec: ForgeSpec, source: string): ForgeQualityReport {
+  return assessForgeCandidate(
+    { name: spec.name, refSuite: spec.refSuite, reference: spec.reference, vectors: spec.vectors, kind: spec.kind },
+    source,
+  );
+}
+
+function successOutcome(
+  spec: ForgeSpec,
+  best: PassingCandidate,
+  attemptsUsed: number,
+  maxTries: number,
+  failures: ForgeFailure[],
+  candidatesPassed: number,
+): ForgeAttemptOutcome {
+  const note =
+    best.via === 'sleep' ? '[PASS] consumed sleep-time-compute artifact (re-verified)'
+      : best.via === 'axiom' ? '[PASS] Verified via Axiom bridge + Recourse sandbox'
+        : null;
+  return {
+    ok: true,
+    id: spec.id,
+    name: spec.name,
+    domain: spec.domain,
+    source: best.source,
+    attemptsUsed,
+    maxTries,
+    failures,
+    verifyScore: Math.round(best.verify.score * 100) / 100,
+    verifyDetails: note ? [note, ...best.verify.testDetails] : best.verify.testDetails,
+    quality: best.quality,
+    doc: extractToolDoc(best.source, spec.name),
+    candidatesPassed,
+  };
+}
+
 /**
- * One full forge attempt: generate the implementation and verify it against the
- * spec's reference suite, retrying up to `maxTries` times with real sandbox
- * failure output fed back. Only ever reports ok:true when the ref suite passed.
+ * One full forge attempt: generate implementations, verify each against the
+ * spec's reference suite, score every passing one with the quality gate
+ * (differential testing vs a reference when available, determinism, input
+ * mutation, overfitting, docs), and promote the BEST gate-passing candidate.
+ *
+ * Sampling stops early once a candidate is substantively clean; otherwise the
+ * next prompt carries the real failure (reference-suite failures with holdout
+ * assertions hidden, or quality-gate findings). Only ever reports ok:true when
+ * the full reference suite passed AND the quality gate passed.
  */
 export async function attemptForgeSpec(
   spec: ForgeSpec,
@@ -678,30 +793,43 @@ export async function attemptForgeSpec(
 ): Promise<ForgeAttemptOutcome> {
   const failures: ForgeFailure[] = [];
   let attemptsUsed = 0;
+  let best: PassingCandidate | null = null;
+  let candidatesPassed = 0;
+  const split = splitSuiteForHoldout(spec.refSuite);
+
+  const consider = (source: string, via: PassingCandidate['via']): { passed: boolean; feedback?: string } => {
+    const verify = verifyForgeSource(source, spec.refSuite);
+    if (!verify.passed) return { passed: false, feedback: holdoutAwareFeedback(source, split, verify) };
+    candidatesPassed++;
+    const quality = assessCandidate(spec, source);
+    const cand: PassingCandidate = { source, verify, quality, via };
+    if (betterQuality(quality, best?.quality)) best = cand;
+    return { passed: true, feedback: quality.gate.ok && isSubstantivelyClean(quality) ? undefined : qualityFeedback(quality) };
+  };
+  const bestIsClean = () => Boolean(best && best.quality.gate.ok && isSubstantivelyClean(best.quality));
+
   // P1 sleep-time compute: consume a pre-generated offline artifact when it
-  // still passes the reference suite. Re-verified here — a cache, not trust.
+  // still passes the reference suite AND the quality gate. A cache, not trust.
   if (builder?.precomputedSource) {
-    const pre = verifyForgeSource(builder.precomputedSource, spec.refSuite);
-    if (pre.passed) {
-      return {
-        ok: true,
-        id: spec.id,
-        name: spec.name,
-        domain: spec.domain,
-        source: builder.precomputedSource,
-        attemptsUsed: 0,
-        maxTries: 0,
-        failures,
-        verifyScore: Math.round(pre.score * 100) / 100,
-        verifyDetails: ['[PASS] consumed sleep-time-compute artifact (re-verified)'],
-      };
-    }
+    consider(builder.precomputedSource, 'sleep');
+    if (bestIsClean()) return successOutcome(spec, best!, 0, 0, failures, candidatesPassed);
   }
+
   // Compute-optimal budget: `builder.samples` when the caller supplied one
   // (adaptive), else the fixed `maxTries` (unchanged default behavior).
   const budget = Math.max(1, Math.floor(builder?.samples ?? maxTries));
+  // One extra "quality repair" sample (FORGE_QUALITY_RETRIES) when the budget is
+  // spent on a candidate that passed the reference suite but not the quality
+  // gate: the concrete gate findings make that retry cheap and targeted.
+  const qualityRetries = Math.max(0, Math.min(3, Math.floor(Number(process.env.FORGE_QUALITY_RETRIES ?? 1)) || 0));
+  let extraUsed = 0;
   let lastFailure: string | undefined;
-  for (let attempt = 1; attempt <= budget; attempt++) {
+  for (let attempt = 1; ; attempt++) {
+    if (attempt > budget) {
+      const needsRepair = best !== null && !(best as PassingCandidate).quality.gate.ok;
+      if (!needsRepair || extraUsed >= qualityRetries) break;
+      extraUsed++;
+    }
     attemptsUsed = attempt;
     // Feed the previous real failure into the next prompt so retries are not
     // identical re-rolls (and remain cache-distinct when caching is on).
@@ -711,64 +839,53 @@ export async function attemptForgeSpec(
       lastFailure = gen.error || 'generate returned no source';
       failures.push({ attempt, note: gen.offline ? `offline: ${gen.error}` : `generate error: ${gen.error}` });
       if (gen.offline) {
-        // Fallback: try Axiom autonomous builder
+        // Fallback: Axiom's autonomous builder. Its source goes through exactly
+        // the same reference-suite + quality gates as a model candidate (and is
+        // NOT self-hosted by the bridge — materialization stays with the caller).
         if (await axiomReachable()) {
-          const axiomRes = await integrateAxiomTool(spec.name, spec.domain, spec.prompt, spec.refSuite);
-          if (axiomRes.ok) {
-            return {
-              ok: true,
-              id: spec.id,
-              name: spec.name,
-              domain: spec.domain,
-              source: axiomRes.selfHosted?.sourceCode,
-              attemptsUsed: attempt,
-              maxTries: budget,
-              failures,
-              verifyScore: 1.0,
-              verifyDetails: ['[PASS] Verified via Axiom bridge + Recourse sandbox'],
-            };
+          const axiomRes = await integrateAxiomTool(spec.name, spec.domain, spec.prompt, spec.refSuite, { selfHost: false });
+          if (axiomRes.ok && axiomRes.sourceCode) {
+            const r = consider(axiomRes.sourceCode, 'axiom');
+            if (!r.passed) failures.push({ attempt, note: `Axiom source failed the reference suite: ${r.feedback}` });
+          } else {
+            failures.push({ attempt, note: `Axiom bridge failed: ${axiomRes.error}` });
           }
-          failures.push({ attempt, note: `Axiom bridge failed: ${axiomRes.error}` });
+        }
+        if (best && (best as PassingCandidate).quality.gate.ok) {
+          return successOutcome(spec, best, attempt, budget, failures, candidatesPassed);
         }
         return {
           ok: false,
           id: spec.id,
           name: spec.name,
           domain: spec.domain,
-          reason: 'offline',
+          reason: best ? 'quality' : 'offline',
           attemptsUsed,
           maxTries: budget,
           failures,
+          ...(best ? { quality: (best as PassingCandidate).quality, candidatesPassed } : {}),
         };
       }
       continue; // transient error -> retry
     }
-    const verify = verifyForgeSource(gen.source as string, spec.refSuite);
-    if (verify.passed) {
-      return {
-        ok: true,
-        id: spec.id,
-        name: spec.name,
-        domain: spec.domain,
-        source: gen.source as string,
-        attemptsUsed,
-        maxTries: budget,
-        failures,
-        verifyScore: Math.round(verify.score * 100) / 100,
-        verifyDetails: verify.testDetails,
-      };
-    }
-    lastFailure = feedbackFromVerify(verify);
-    failures.push({ attempt, note: lastFailure });
+    const r = consider(gen.source as string, 'model');
+    if (bestIsClean()) break;
+    lastFailure = r.feedback;
+    failures.push({ attempt, note: r.passed ? `passed reference suite; quality: ${r.feedback}` : (r.feedback ?? 'failed') });
+  }
+
+  if (best && (best as PassingCandidate).quality.gate.ok) {
+    return successOutcome(spec, best, attemptsUsed, budget, failures, candidatesPassed);
   }
   return {
     ok: false,
     id: spec.id,
     name: spec.name,
     domain: spec.domain,
-    reason: 'failed',
+    reason: best ? 'quality' : 'failed',
     attemptsUsed,
     maxTries: budget,
     failures,
+    ...(best ? { quality: (best as PassingCandidate).quality, candidatesPassed } : {}),
   };
 }

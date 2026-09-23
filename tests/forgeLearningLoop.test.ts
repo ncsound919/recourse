@@ -169,3 +169,15 @@ describe('learner key override — canonical keys compound, names stay human', (
     expect(b.geneName).toBe('MATH_LAGRANGE_4776');
   });
 });
+
+describe('groundedMintContext — corpus excerpts steer minting', () => {
+  it('embeds the excerpt as data and forbids hash/echo tools', async () => {
+    const { groundedMintContext } = await import('../src/lib/forgeLearningLoop');
+    const target = { domain: 'biotech', action: 'synthesize', priority: 1, reason: 'weak domain', directiveId: 'd' } as any;
+    const ctx = groundedMintContext(target, { title: 'Tumor doubling', project: 'cancer-pdfs', excerpt: 'Doubling time Td = t*ln2/ln(V2/V1).' });
+    expect(ctx).toContain('Tumor doubling');
+    expect(ctx).toContain('Td = t*ln2/ln(V2/V1)');
+    expect(ctx).toMatch(/not a\s+hash/);
+    expect(groundedMintContext(target, null)).not.toContain('Excerpt');
+  });
+});

@@ -89,12 +89,28 @@ export function isLikelyMutating(name: string): boolean {
   );
 }
 
-function selfHostedSpec(entry: { name: string; description?: string; summary?: string; methods?: Array<{ method: string; label?: string }> }): AgentToolSpec {
+function selfHostedSpec(entry: {
+  name: string;
+  description?: string;
+  summary?: string;
+  methods?: Array<{ method: string; label?: string }>;
+  paramDocs?: Array<{ name: string; type?: string; description?: string }>;
+  returnsDoc?: { type?: string; description?: string } | null;
+}): AgentToolSpec {
   const methods = (entry.methods ?? []).map((m) => m.method).filter(Boolean);
+  // Prefer the tool's own documentation (forge JSDoc) over the provenance-style
+  // summary ("[Capability Forge] ... (forge_x)"), which tells a model nothing.
+  const params = (entry.paramDocs ?? [])
+    .map((p, i) => `${i}: ${p.name}${p.type ? ` {${p.type}}` : ''}${p.description ? ` - ${p.description}` : ''}`)
+    .join('; ');
+  const returns = entry.returnsDoc
+    ? ` Returns${entry.returnsDoc.type ? ` {${entry.returnsDoc.type}}` : ''}${entry.returnsDoc.description ? `: ${entry.returnsDoc.description}` : ''}.`
+    : '';
   return {
     name: sanitizeToolName(`selfhosted_${entry.name}`),
     description:
-      (entry.summary || entry.description || `Self-hosted sandboxed tool "${entry.name}".`) +
+      (entry.description || entry.summary || `Self-hosted sandboxed tool "${entry.name}".`) +
+      returns +
       (methods.length ? ` Methods: ${methods.join(', ')}.` : ''),
     parameters: {
       type: 'object',
@@ -105,7 +121,9 @@ function selfHostedSpec(entry: { name: string; description?: string; summary?: s
         args: {
           type: 'array',
           items: {},
-          description: 'Positional arguments for the method. For a single input object, pass [ {...} ].',
+          description: params
+            ? `Positional arguments in order (${params}).`
+            : 'Positional arguments for the method. For a single input object, pass [ {...} ].',
         },
       },
       additionalProperties: false,
