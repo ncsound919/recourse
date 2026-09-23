@@ -66,8 +66,8 @@ import { runMathCycle, recentMathCycles } from './src/lib/mathConductor.js';
 import { recentInsights } from './src/lib/trendLedger.js';
 import { registerScheduledJob, setJobEnabled, listScheduledJobs } from './src/lib/jobScheduler.js';
 import { keywireHealth } from './src/lib/keywireBridge.js';
-import { computeIssueProgress, readIssueRecords, renderIssueDocs, renderIssueIndex } from './src/lib/issueTracker.js';
-import { generateFleetReport, renderDailyReport, recentReports } from './src/lib/researchReports.js';
+import { computeIssueProgress, renderIssueDocs, renderIssueIndex } from './src/lib/issueTracker.js';
+import { renderDailyReport } from './src/lib/researchReports.js';
 // SelfReporter — deterministic first-person field dispatches about Recourse.
 import {
   buildReporterFacts,
@@ -319,6 +319,7 @@ import { createToolsRouter } from './src/routes/tools.js';
 import { createPipelinesRouter } from './src/routes/pipelines.js';
 import { createServicesRouter } from './src/routes/services.js';
 import { createResearchRouter } from './src/routes/research.js';
+import { createOrchestrationRouter } from './src/routes/orchestration.js';
 import { createSynergyRouter } from './src/routes/synergy.js';
 import { createFleetDogfoodRouter } from './src/routes/fleetDogfood.js';
 import { runFleetDogfoodCycle } from './src/lib/fleetDogfood.js';
@@ -3141,66 +3142,14 @@ function mirrorAutopilotFlag(id: string, enabled: boolean): void {
 // ecosystem. Recourse drives which subsystem batch is up per research phase
 // and downscales under memory pressure (see src/lib/subsystemOrchestrator.ts).
 // ---------------------------------------------------------------------------
-app.get('/api/recourse/orchestration/status', async (_req, res) => {
-  const { SUBSYSTEMS, sampleResources, pm2Table } = await import('./src/lib/subsystemOrchestrator.js');
-  const resources = sampleResources();
-  const table = await pm2Table();
-  const subsystems = SUBSYSTEMS.map((s) => ({
-    id: s.id, pm2Name: s.pm2Name, port: s.port, phase: s.phase, control: !!s.control,
-    label: s.label,
-    status: table[s.pm2Name]?.status ?? 'unknown',
-    cpu: table[s.pm2Name]?.cpu ?? 0,
-    memMB: table[s.pm2Name]?.mem ?? 0,
-  }));
-  res.json({ success: true, resources, subsystems });
-});
-
-app.post('/api/recourse/orchestration/run', async (req, res) => {
-  const phase = req.body?.phase;
-  const { orchestrate } = await import('./src/lib/subsystemOrchestrator.js');
-  const apply = req.body?.apply !== false;
-  const result = await orchestrate(phase, { apply });
-  res.json({ success: true, ...result });
-});
-
-// ---------------------------------------------------------------------------
-// Issue progression + research reports.
-// ---------------------------------------------------------------------------
-app.get('/api/recourse/issues', (_req, res) => {
-  const records = readIssueRecords();
-  res.json({ success: true, count: records.length, issues: records });
-});
-
-app.post('/api/recourse/issues/refresh', (_req, res) => {
-  try {
-    renderIssueDocs();
-    renderIssueIndex();
-    const records = readIssueRecords();
-    res.json({ success: true, count: records.length, issues: records });
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'issue refresh failed';
-    res.status(500).json({ success: false, error: message });
-  }
-});
-
-app.get('/api/recourse/reports', (_req, res) => {
-  const files = recentReports(20);
-  res.json({ success: true, count: files.length, reports: files });
-});
-
-app.post('/api/recourse/reports/generate', async (_req, res) => {
-  try {
-    const daily = await renderDailyReport();
-    renderIssueDocs();
-    renderIssueIndex();
-    const report = await generateFleetReport();
-    appendProvenanceEvent('report_generated', { driverId: 'research_reports', files: daily.files, issues: report.issues.length });
-    res.json({ success: true, files: daily.files, report });
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'report generation failed';
-    res.status(500).json({ success: false, error: message });
-  }
-});
+// Phased subsystem orchestration + issues + research reports moved to
+// src/routes/orchestration.ts (mounted at /api/recourse).
+app.use(
+  '/api/recourse',
+  createOrchestrationRouter({
+    appendProvenance: (eventType, data) => appendProvenanceEvent(eventType as ProvenanceEvent['type'], data),
+  }),
+);
 
 // ---------------------------------------------------------------------------
 // SelfReporter — Recourse writing a deterministic, first-person dispatch about
