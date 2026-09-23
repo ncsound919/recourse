@@ -58,12 +58,11 @@ import { HARD_MATH_PROBLEMS, ProblemTier } from './src/lib/hardMathProblems.js';
 import { recordMathAttempt, recordBiotechClaim, getMathAttempts, getBiotechClaims, getGoalProgress, MathAttempt, BiotechClaim as LedgerBiotechClaim, initGoalLedger, saveGoalLedger } from './src/lib/goalLedger.js';
 import { pdfExtractBytes } from './src/lib/pdfSidecarClient.js';
 import { oncologyHealth } from './src/lib/oncologyEngineBridge.js';
-import { startScienceConductor, stopScienceConductor, runScienceCycle, getConductorStatus, recentFindings, recentCycles } from './src/lib/scienceConductor.js';
-import { globalLensHealth, globalLensConfigured, globalLensBaseUrl } from './src/lib/globalLensBridge.js';
+import { runScienceCycle, recentFindings, recentCycles } from './src/lib/scienceConductor.js';
 import { runPublishPass, PUBLISH_DOMAINS } from './src/lib/globalLensPublisher.js';
 import { musicTherapyFindings } from './src/lib/musicTherapyFindings.js';
 import { renderTuningContrast, TUNING_CAVEATS, benchmarkComparison, tuningContrastModel, TUNING_GRID, TUNING_RECORDS, tuningContrastDetailed, musicVsControlBenchmark, BENCHMARK_NOTE, renderTuningSummary } from './src/lib/musicTherapyTuning.js';
-import { startMathConductor, stopMathConductor, runMathCycle, mathConductorStatus, recentMathCycles, recentMathFindings } from './src/lib/mathConductor.js';
+import { runMathCycle, recentMathCycles } from './src/lib/mathConductor.js';
 import { recentInsights } from './src/lib/trendLedger.js';
 import { registerScheduledJob, setJobEnabled, listScheduledJobs } from './src/lib/jobScheduler.js';
 import { keywireHealth } from './src/lib/keywireBridge.js';
@@ -86,8 +85,8 @@ import {
 } from './src/lib/reporterStore.js';
 import { listVoices, listFormats, loadReporterSoul, resolveFormat } from './src/lib/reporterVoice.js';
 import { allProtocols } from './src/lib/reporterMetaphor.js';
-import { renderAndPersistAgenda, computeAgenda, selectNextMathMilestone, selectNextOncologyMilestone } from './src/lib/breakthroughAgenda.js';
-import { computeGameProfile, persistGameProfile, leaderboard } from './src/lib/gamification.js';
+import { renderAndPersistAgenda, selectNextMathMilestone, selectNextOncologyMilestone } from './src/lib/breakthroughAgenda.js';
+import { persistGameProfile } from './src/lib/gamification.js';
 import { renderDashboard } from './src/lib/fleetDashboard.js';
 import * as jobSchedulerApi from './src/lib/jobScheduler.js';
 import { zod400, kgNeighborhoodReq, kgBridgesReq, biotechClaimExtra } from './src/lib/contracts.js';
@@ -319,6 +318,7 @@ import { createBridgesRouter } from './src/routes/bridges.js';
 import { createToolsRouter } from './src/routes/tools.js';
 import { createPipelinesRouter } from './src/routes/pipelines.js';
 import { createServicesRouter } from './src/routes/services.js';
+import { createResearchRouter } from './src/routes/research.js';
 import { createSynergyRouter } from './src/routes/synergy.js';
 import { createFleetDogfoodRouter } from './src/routes/fleetDogfood.js';
 import { runFleetDogfoodCycle } from './src/lib/fleetDogfood.js';
@@ -684,24 +684,48 @@ const BIOTECH_CLAIM_COOLDOWN_MS = 30000;
 const LOCK_FILE = path.join(process.cwd(), '.recourse.lock');
 function acquireInstanceLock(): boolean {
   if (process.env.RECOURSE_ALLOW_MULTI === '1') return true;
+  const refuse = (existing: number) => {
+    console.error(
+      `[Recourse] Refusing to start: instance PID ${existing} is already running ` +
+      `(lock ${LOCK_FILE}). Kill it first, or run with RECOURSE_ALLOW_MULTI=1 to force.`
+    );
+    return false;
+  };
+  const takeOver = (): boolean => {
+    try {
+      fs.writeFileSync(LOCK_FILE, String(process.pid), 'utf-8');
+      return true;
+    } catch (err: any) {
+      console.warn('[Recourse] Could not write instance lock; continuing:', err?.message || err);
+      return true;
+    }
+  };
+  // Atomic create: `wx` fails if the file already exists, so two simultaneous
+  // starters cannot both believe they created it.
   try {
-    if (fs.existsSync(LOCK_FILE)) {
-      const existing = Number(String(fs.readFileSync(LOCK_FILE, 'utf-8')).trim());
-      if (existing > 0) {
-        try {
-          process.kill(existing, 0); // does not kill; checks liveness
-          console.error(
-            `[Recourse] Refusing to start: instance PID ${existing} is already running ` +
-            `(lock ${LOCK_FILE}). Kill it first, or run with RECOURSE_ALLOW_MULTI=1 to force.`
-          );
-          return false;
-        } catch {
-          // Stale lock from a dead process — fall through and take over.
-        }
+    const fd = fs.openSync(LOCK_FILE, 'wx');
+    fs.writeSync(fd, String(process.pid));
+    fs.closeSync(fd);
+    return true;
+  } catch (err: any) {
+    if (err?.code !== 'EEXIST') {
+      // Unwritable cwd etc. — preserve prior behavior and continue.
+      console.warn('[Recourse] Could not write instance lock; continuing:', err?.message || err);
+      return true;
+    }
+  }
+  // Lock exists — is the holder alive?
+  try {
+    const existing = Number(String(fs.readFileSync(LOCK_FILE, 'utf-8')).trim());
+    if (existing > 0) {
+      try {
+        process.kill(existing, 0); // liveness probe only
+        return refuse(existing);
+      } catch {
+        // Stale lock from a dead process — reclaim it.
       }
     }
-    fs.writeFileSync(LOCK_FILE, String(process.pid), 'utf-8');
-    return true;
+    return takeOver();
   } catch (err: any) {
     console.warn('[Recourse] Could not write instance lock; continuing:', err?.message || err);
     return true;
@@ -2974,48 +2998,26 @@ app.use('/api/recourse/security', createSecurityRouter({ requireMutationAuth }))
 // experiment (biosim/umoe/local-deterministic) -> integrity verify -> record.
 // Findings carry provenance; offline services are skipped honestly.
 // ---------------------------------------------------------------------------
-app.get('/api/recourse/science/status', (_req, res) => {
-  res.json({ success: true, ...getConductorStatus() });
-});
-
-app.get('/api/recourse/science/findings', (req, res) => {
-  const limit = Math.max(1, Math.min(500, Number(req.query.limit) || 50));
-  res.json({ success: true, count: recentFindings(limit).length, findings: recentFindings(limit) });
-});
-
-app.get('/api/recourse/science/cycles', (req, res) => {
-  const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 20));
-  res.json({ success: true, count: recentCycles(limit).length, cycles: recentCycles(limit) });
-});
-
-app.post('/api/recourse/science/cycle', async (_req, res) => {
-  try {
-    const cycle = await runScienceCycle();
-    appendProvenanceEvent('system_tick', { driverId: 'science_conductor_manual', cycle: cycle.cycle, mode: cycle.experimentMode, findings: cycle.findings.length });
-    res.json({ success: true, cycle });
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'science cycle failed';
-    res.status(500).json({ success: false, error: message });
-  }
-});
-
-app.post('/api/recourse/science/toggle', (req, res) => {
-  const action = (req.body ?? {}).action;
-  if (action === 'start') {
-    const intervalMs = Number((req.body ?? {}).intervalMs) || 15 * 60 * 1000;
-    const r = startScienceConductor({ intervalMs });
-    if (r.started) appendProvenanceEvent('loop_started', { driverId: 'science_conductor', intervalMs });
-    res.json({ success: r.started, ...r, status: getConductorStatus() });
-    return;
-  }
-  if (action === 'stop') {
-    const r = stopScienceConductor();
-    if (r.stopped) appendProvenanceEvent('loop_stopped', { driverId: 'science_conductor' });
-    res.json({ success: r.stopped, ...r, status: getConductorStatus() });
-    return;
-  }
-  res.status(400).json({ success: false, error: "action must be 'start' or 'stop'" });
-});
+// Science conductor / Global Lens / math conductor / agenda / game / fleet
+// dashboard routes moved to src/routes/research.ts. The compose+publish pass and
+// the global-lens autopilot flag stay in the monolith (the scheduler owns them).
+app.use(
+  '/api/recourse',
+  createResearchRouter({
+    appendProvenance: (eventType, data) => appendProvenanceEvent(eventType as ProvenanceEvent['type'], data),
+    globalLens: {
+      getAutopilot: () => globalLensAutopilotOn,
+      setAutopilot: (on) => {
+        globalLensAutopilotOn = on;
+        setJobEnabled('global-lens', on);
+        saveStateToDisk();
+      },
+      intervalMs: () => GLOBAL_LENS_PUBLISH_MS,
+      getLastPublish: () => globalLensLastPublish,
+      publishPass: () => runGlobalLensPublishPass(),
+    },
+  }),
+);
 
 // ---------------------------------------------------------------------------
 // Overlay Global Lens — direct research-publish connection.
@@ -3079,59 +3081,6 @@ async function runGlobalLensPublishPass(): Promise<{ result: import('./src/lib/g
   return { result, domains: PUBLISH_DOMAINS.length };
 }
 
-app.get('/api/recourse/global-lens/status', async (_req, res) => {
-  const health = await globalLensHealth();
-  res.json({
-    success: true,
-    online: health.ok,
-    latencyMs: health.latencyMs,
-    error: health.error ?? null,
-    configured: globalLensConfigured(),
-    url: globalLensBaseUrl(),
-    autopilot: globalLensAutopilotOn,
-    publishIntervalMs: GLOBAL_LENS_PUBLISH_MS,
-    lastPublish: globalLensLastPublish,
-    domains: PUBLISH_DOMAINS.map((d) => ({ label: d.label, category: d.category, pillar: d.pillar, projects: d.projects })),
-  });
-});
-
-app.post('/api/recourse/global-lens/publish', async (req, res) => {
-  if (!requireMutationAuthIfConfigured(req, res)) return;
-  try {
-    const { result } = await runGlobalLensPublishPass();
-    res.json({ success: true, ...result });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-app.post('/api/recourse/global-lens/toggle', async (req, res) => {
-  const action = (req.body ?? {}).action;
-  if (action === 'start') {
-    globalLensAutopilotOn = true;
-    setJobEnabled('global-lens', true);
-    // Compose + publish immediately, then let the scheduler own the cadence.
-    try {
-      const { result } = await runGlobalLensPublishPass();
-      appendProvenanceEvent('loop_started', { driverId: 'global_lens_publisher' });
-      res.json({ success: true, autopilot: true, result });
-      return;
-    } catch (err: any) {
-      res.status(500).json({ success: false, error: err.message });
-      return;
-    }
-  }
-  if (action === 'stop') {
-    globalLensAutopilotOn = false;
-    setJobEnabled('global-lens', false);
-    appendProvenanceEvent('loop_stopped', { driverId: 'global_lens_publisher' });
-    saveStateToDisk();
-    res.json({ success: true, autopilot: false });
-    return;
-  }
-res.status(400).json({ success: false, error: "action must be 'start' or 'stop'" });
-});
-
 // ---------------------------------------------------------------------------
 // translation / keywire / trend bridges. Extracted to src/routes/services.ts
 // (stateless proxies over lib modules).
@@ -3141,91 +3090,8 @@ app.use('/api/recourse', createSynergyRouter());
 // Bidirectional Recourse <-> Draymond dogfood loop (trend + synergy + TID).
 app.use('/api/recourse', createFleetDogfoodRouter());
 
-// Math Conductor routes — the 24/7 loop for hard math problems.
-app.post('/api/recourse/math/toggle', (req, res) => {
-  const action = (req.body ?? {}).action;
-  if (action === 'start') {
-    const intervalMs = Number((req.body ?? {}).intervalMs) || 20 * 60 * 1000;
-    const r = startMathConductor({ intervalMs });
-    if (r.started) appendProvenanceEvent('loop_started', { driverId: 'math_conductor', intervalMs });
-    res.json({ success: r.started, ...r, status: mathConductorStatus() });
-    return;
-  }
-  if (action === 'stop') {
-    const r = stopMathConductor();
-    if (r.stopped) appendProvenanceEvent('loop_stopped', { driverId: 'math_conductor' });
-    res.json({ success: r.stopped, ...r, status: mathConductorStatus() });
-    return;
-  }
-  res.status(400).json({ success: false, error: "action must be 'start' or 'stop'" });
-});
-
-app.get('/api/recourse/math/status', (_req, res) => {
-  res.json({ success: true, ...mathConductorStatus() });
-});
-
-app.get('/api/recourse/math/cycles', (req, res) => {
-  const limit = Number(req.query.limit || 20);
-  res.json({ success: true, cycles: recentMathCycles(limit) });
-});
-
-app.get('/api/recourse/math/findings', (req, res) => {
-  const limit = Number(req.query.limit || 50);
-  res.json({ success: true, findings: recentMathFindings(limit) });
-});
-
-app.post('/api/recourse/math/cycle', async (_req, res) => {
-  try {
-    const cycle = await runMathCycle();
-    appendProvenanceEvent('system_tick', { driverId: 'math_conductor_manual', cycle: cycle.cycle, problemId: cycle.problemId, passed: cycle.attemptPassed, score: cycle.attemptScore });
-    res.json({ success: true, cycle });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'math cycle failed';
-    res.status(500).json({ success: false, error: message });
-  }
-});
-
-// Agenda routes — breakthrough milestones and next-milestone selection.
-app.get('/api/recourse/agenda', (_req, res) => {
-  const agenda = computeAgenda();
-  res.json({ success: true, milestones: agenda });
-});
-
-app.get('/api/recourse/agenda/next', (_req, res) => {
-  const mathNext = selectNextMathMilestone();
-  const oncoNext = selectNextOncologyMilestone();
-  res.json({ success: true, nextMath: mathNext, nextOncology: oncoNext });
-});
-
-app.post('/api/recourse/agenda/refresh', (_req, res) => {
-  try {
-    const result = renderAndPersistAgenda();
-    res.json({ success: true, ...result });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'agenda refresh failed';
-    res.status(500).json({ success: false, error: message });
-  }
-});
-
-// Gamification routes — XP, level, badges, leaderboard.
-app.get('/api/recourse/game', (_req, res) => {
-  res.json({ success: true, ...computeGameProfile() });
-});
-
-app.get('/api/recourse/game/leaderboard', (_req, res) => {
-  res.json({ success: true, leaderboard: leaderboard() });
-});
-
-// Fleet dashboard — unified single-file view of everything.
-app.get('/api/recourse/fleet-dashboard', async (_req, res) => {
-  try {
-    const { file, sections } = await renderDashboard();
-    res.json({ success: true, file, sections });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'dashboard render failed';
-    res.status(500).json({ success: false, error: message });
-  }
-});
+// Math conductor / agenda / game / fleet-dashboard routes moved to
+// src/routes/research.ts (see the createResearchRouter mount above).
 
 // ---------------------------------------------------------------------------
 // Job scheduler API — the autonomy governor. Compartmentalized cron jobs for
@@ -3784,6 +3650,16 @@ app.post('/api/recourse/templates/build', async (req, res) => {
       });
     }
 
+    // Substance gate — mirrors the promoteTool gate so re-building an existing
+    // component (which appends a version directly) cannot slip in a stub.
+    const templateSubstance = assessSourceSubstance(buildResult.synthesizedCode);
+    if (!templateSubstance.ok) {
+      return res.status(422).json({
+        success: false,
+        error: `Synthesized component failed the substance gate: ${templateSubstance.reason ?? 'insufficient substance'}. Nothing was registered.`
+      });
+    }
+
     const versionHash = crypto.createHash('sha256').update(buildResult.synthesizedCode).digest('hex').substring(0, 16);
     const targetDomain = (domain || tpl.domain) as ToolDomain;
     const passedVerifier = true;
@@ -3799,6 +3675,10 @@ app.post('/api/recourse/templates/build', async (req, res) => {
     if (selfHost) {
       if (!tpl.selfHost) {
         selfHostOutcome.skippedReason = `Template "${tpl.id}" does not declare a selfHost descriptor; component registered as sandbox-only (registry gene).`;
+      } else if (!buildResult.testSuiteCode) {
+        // A real suite is required before code is materialized as a live module;
+        // an absent suite must not degrade to a trivial `assert true;` backing.
+        selfHostOutcome.skippedReason = `Template "${tpl.id}" produced no test suite; self-hosting requires a real suite. Registered sandbox-only.`;
       } else {
         const writeRes = writeSelfHostedTool({
           name: cleanCompName,
@@ -3807,7 +3687,7 @@ app.post('/api/recourse/templates/build', async (req, res) => {
           entrypointName: buildResult.entrypointName,
           params: mergedParams,
           sourceCode: buildResult.synthesizedCode,
-          testSuiteCode: buildResult.testSuiteCode || 'assert true;',
+          testSuiteCode: buildResult.testSuiteCode,
           summary: `${tpl.name} [self-hosted from ${tpl.id}]`,
           selfHost: tpl.selfHost,
           artifactKind: tpl.artifactKind ?? 'function'
@@ -4847,7 +4727,8 @@ app.post('/api/recourse/crossover', (req, res) => {
     ]
   };
 
-  const promotedCrossover = promoteTool(hybridEntry, { origin: 'crossover' });
+  // A hybrid whose structural suite failed is recorded but NOT promoted.
+  const promotedCrossover = verified ? promoteTool(hybridEntry, { origin: 'crossover' }) : false;
   if (promotedCrossover) {
     if (verified) {
       status.totalUpgrades += 1;
@@ -4877,7 +4758,7 @@ app.post('/api/recourse/crossover', (req, res) => {
 });
 
 app.post('/api/recourse/approve', (req, res) => {
-  const { toolName, version } = req.body;
+  const { toolName, version, force } = req.body;
   const tool = registry.find(t => t.name === toolName);
   if (!tool) {
     return res.status(404).json({ error: 'Tool not found' });
@@ -4889,6 +4770,38 @@ app.post('/api/recourse/approve', (req, res) => {
   }
 
   const [approvedVersion] = tool.pendingVersions!.splice(pendingIndex, 1);
+
+  // Human approval is an override, not a bypass: the stored suite must actually
+  // pass and the source must clear the quality gate. This is the shared
+  // promotion terminus for GitHub imports (no suite) and evolve's
+  // pending_approval, so an unguarded promote here promotes unverified code.
+  let gateReason = '';
+  if (approvedVersion.source_code && approvedVersion.test_suite_code) {
+    const verify = executeTestSuite(approvedVersion.source_code, approvedVersion.test_suite_code);
+    const safeName = String(toolName).replace(/[^A-Za-z0-9_$]/g, '_');
+    const isClass = new RegExp(`class\\s+${safeName}\\b`).test(approvedVersion.source_code);
+    const quality = assessForgeCandidate(
+      { name: toolName, refSuite: approvedVersion.test_suite_code, kind: isClass ? 'class' : 'function' },
+      approvedVersion.source_code,
+    );
+    if (!verify.passed) {
+      gateReason = `stored suite failed (${verify.testDetails.filter((d) => d.startsWith('[FAIL')).length} failure(s))`;
+    } else if (!quality.gate.ok) {
+      gateReason = `quality gate: ${quality.gate.reasons.join('; ')}`;
+    }
+  } else {
+    gateReason = 'no test suite stored on the pending version';
+  }
+
+  if (gateReason && force !== true) {
+    // Put it back — a refused approval changes nothing.
+    tool.pendingVersions!.splice(pendingIndex, 0, approvedVersion);
+    return res.status(422).json({
+      success: false,
+      error: `refusing to promote ${toolName}@${version}: ${gateReason}. Re-send with force:true to override (recorded in provenance).`,
+    });
+  }
+
   approvedVersion.promoted = true;
 
   tool.versions.push(approvedVersion);
@@ -4899,12 +4812,14 @@ app.post('/api/recourse/approve', (req, res) => {
     version: approvedVersion.version,
     hash: approvedVersion.hash,
     score: approvedVersion.score,
-    verifier_notes: approvedVersion.verifier_notes
+    verifier_notes: approvedVersion.verifier_notes,
+    forced: gateReason ? true : false,
+    ...(gateReason ? { gate_bypassed: gateReason } : {}),
   });
 
   status.totalUpgrades += 1;
   saveStateToDisk();
-  res.json({ success: true, tool, approvedVersion, event });
+  res.json({ success: true, tool, approvedVersion, event, forced: !!gateReason });
 });
 
 app.post('/api/recourse/verify', (req, res) => {
@@ -5048,12 +4963,23 @@ Write honest tests that would fail if the function were wrong. Do not reference 
 
     let outcome: 'promoted' | 'rejected' | 'held_back' | 'pending_approval' = 'promoted';
 
+    // No independent oracle exists for a chat-evolved tool: run the same
+    // quality checks the forge uses before anything can auto-promote. The
+    // model authors both the code and its test suite, so a self-authored suite
+    // ALONE must never promote code.
+    const quality = verifierResult.passed && (!lintReport || lintReport.clean)
+      ? assessForgeCandidate({ name: toolName, refSuite: suite }, parsed.sourceCode)
+      : null;
+    const qualityReasons = quality && !quality.gate.ok ? quality.gate.reasons : [];
+
     if (!verifierResult.passed) {
       outcome = 'rejected';
       if (status.selfRepair.isAutoHealingEnabled) {
         setTimeout(() => { executeSelfRepair(toolName, parsed.sourceCode, verifierResult.detectedFault, suite); }, 100);
       }
     } else if (lintReport && !lintReport.clean) {
+      outcome = 'rejected';
+    } else if (qualityReasons.length) {
       outcome = 'rejected';
     } else if (policy === 'human_approval' || domain === 'biotech') {
       outcome = 'pending_approval';
@@ -5073,7 +4999,7 @@ Write honest tests that would fail if the function were wrong. Do not reference 
       passed_verifier: verifierResult.passed,
       score: verifierResult.score,
       promoted: outcome === 'promoted',
-      verifier_notes: verifierResult.summary + (lintReport ? ' | ' + lintVerdictNote(lintReport) : ''),
+      verifier_notes: verifierResult.summary + (lintReport ? ' | ' + lintVerdictNote(lintReport) : '') + (qualityReasons.length ? ' | quality: ' + qualityReasons.join('; ') : ''),
       source_code: parsed.sourceCode,
       test_suite_code: domain === 'biotech' ? undefined : suite
     };
@@ -8425,14 +8351,25 @@ app.post('/api/recourse/skills/import', async (req, res) => {
       const verifier = verifyImportedCode(domainT, cand.source, cand.suite);
       if (verifier) {
         const gate = gateWithLint(cand.source);
-        const passed = verifier.passed && (gate.allowed);
+        let passed = verifier.passed && gate.allowed;
+        let qualityNote = '';
+        if (passed) {
+          // Imported code is judged by a suite embedded in the imported file;
+          // the quality gate catches mutation / nondeterminism / overfitting
+          // before it can enter the registry.
+          const quality = assessForgeCandidate({ name: cand.name, refSuite: cand.suite }, cand.source);
+          if (!quality.gate.ok) {
+            passed = false;
+            qualityNote = ` | quality: ${quality.gate.reasons.join('; ')}`;
+          }
+        }
         if (passed) {
           registered = registerImportedTool(cand.name, domainT, cand.source, cand.suite, verifier, { rootId, rel: mdRel });
           outcome = 'promoted';
           reason = `verified imported code (score ${verifier.score.toFixed(2)}) ${gate.allowed ? '' : lintVerdictNote(gate.lint)}`;
         } else {
           outcome = 'rejected';
-          reason = `${verifier.summary}${gate.allowed ? '' : ' | ' + lintVerdictNote(gate.lint)}`;
+          reason = `${verifier.summary}${gate.allowed ? '' : ' | ' + lintVerdictNote(gate.lint)}${qualityNote}`;
         }
       } else {
         // Code-domain gate not applicable (math/biotech). Honest pending.
