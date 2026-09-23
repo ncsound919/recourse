@@ -61,7 +61,6 @@ import { oncologyHealth } from './src/lib/oncologyEngineBridge.js';
 import { runScienceCycle, recentFindings, recentCycles } from './src/lib/scienceConductor.js';
 import { runPublishPass, PUBLISH_DOMAINS } from './src/lib/globalLensPublisher.js';
 import { musicTherapyFindings } from './src/lib/musicTherapyFindings.js';
-import { renderTuningContrast, TUNING_CAVEATS, benchmarkComparison, tuningContrastModel, TUNING_GRID, TUNING_RECORDS, tuningContrastDetailed, musicVsControlBenchmark, BENCHMARK_NOTE, renderTuningSummary } from './src/lib/musicTherapyTuning.js';
 import { runMathCycle, recentMathCycles } from './src/lib/mathConductor.js';
 import { recentInsights } from './src/lib/trendLedger.js';
 import { registerScheduledJob, setJobEnabled, listScheduledJobs } from './src/lib/jobScheduler.js';
@@ -305,7 +304,7 @@ import {
 } from './src/skills/exporter.js';
 // Composer (creative domain): the track routes live in src/routes/compose.ts;
 // the server still needs the style list + the learner for that router's mount.
-import { listStyles, ComposerLearner, defaultLearnerFile } from './src/lib/composer/index.js';
+import { ComposerLearner, defaultLearnerFile } from './src/lib/composer/index.js';
 
 const app = express();
 const PORT = Number(process.env.PORT || 3050);
@@ -320,6 +319,7 @@ import { createPipelinesRouter } from './src/routes/pipelines.js';
 import { createServicesRouter } from './src/routes/services.js';
 import { createResearchRouter } from './src/routes/research.js';
 import { createOrchestrationRouter } from './src/routes/orchestration.js';
+import { createMusicTherapyRouter } from './src/routes/musicTherapy.js';
 import { createSynergyRouter } from './src/routes/synergy.js';
 import { createFleetDogfoodRouter } from './src/routes/fleetDogfood.js';
 import { runFleetDogfoodCycle } from './src/lib/fleetDogfood.js';
@@ -8390,111 +8390,8 @@ app.use('/api/recourse', createRatingRouter({
   requireMutationAuth: requireMutationAuthIfConfigured,
 }));
 
-/**
- * Music sector descriptor (read-only). Makes the sector a discoverable surface
- * for the UI/MCP without mutating anything. Example:
- *   GET /api/recourse/music/sector
- */
-app.get('/api/recourse/music/sector', (_req, res) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Cache-Control', 'no-store');
-  res.json({
-    success: true,
-    sector: {
-      id: 'music',
-      label: 'Music / composition (SoundLab)',
-      verified: true,
-      sources: ['recourse composer (deterministic)', 'SoundLab chord/song bridge'],
-    },
-    styles: listStyles(),
-  });
-});
-
-// --- Music Therapy Oncology Research --------------------------------------
-// Turns the composer/DSP system into a research instrument for music therapy
-// in oncology (Cochrane 2021: anxiety/depression/pain/fatigue support). Each
-// call designs a reproducible, parameter-pinned music intervention and models
-// the expected biomarker response from literature priors — the "precision
-// music medicine" trial infrastructure the field calls for.
-app.post('/api/recourse/music-therapy/design', async (req, res) => {
-  try {
-    const { designMusicTherapyTrial, designMusicTherapyBatch, renderTrialBatch } = await import('./src/lib/musicTherapyResearch.js');
-    const { calibratePriors } = await import('./src/lib/musicTherapyEvidence.js');
-    const body = req.body || {};
-    const variants = Math.min(8, Number(body.variants) || 1);
-    const base = {
-      bpm: Number(body.bpm) || 60,
-      key: Number(body.key) || 0,
-      major: body.major === true,
-      style: typeof body.style === 'string' ? body.style : 'jasper-ballad',
-      seed: Number(body.seed) || 42,
-      intensity: (body.intensity === 'stimulative' ? 'stimulative' : 'sedative') as 'sedative' | 'stimulative',
-      tuningHz: Number(body.tuningHz) || 440,
-    };
-    // Use pooled trial evidence for the priors when a feed refresh has run and
-    // the caller opts in (default off so the fixed Cochrane anchors stay the
-    // baseline unless real evidence is present).
-    let priors: any = undefined;
-    if (body.useEvidence === true && musicTherapyEvidence.length > 0) {
-      const calibrated = calibratePriors(musicTherapyEvidence, MUSIC_THERAPY_ANCHORS);
-      priors = Object.fromEntries(calibrated.map((p: any) => [p.biomarker, { mean: p.mean, sd: p.sd, calibrated: p.calibrated, source: p.source }]));
-    }
-    const trials = variants > 1
-      ? designMusicTherapyBatch(base, variants, priors)
-      : [designMusicTherapyTrial(base, priors)];
-    res.json({
-      success: true,
-      count: trials.length,
-      useEvidence: body.useEvidence === true,
-      calibrated: trials[0].calibratedCount,
-      trials: trials.map((t) => ({
-        id: t.id,
-        stimulus: t.stimulus,
-        biomarkers: t.biomarkers,
-        evidenceTier: t.artifact.evidenceTier,
-        artifactHash: t.artifact.artifactHash,
-        claim: t.artifact.claim,
-        calibratedCount: t.calibratedCount,
-        tuningContrast: t.tuningContrast,
-        tuningNote: t.tuningNote,
-      })),
-      report: renderTrialBatch(trials),
-      honestNote: 'Biomarker responses are literature-prior models with uncertainty, not measurements. Music therapy is a supportive intervention, not a cancer treatment.',
-    });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err?.message ?? String(err) });
-  }
-});
-
-// --- Music Therapy Tuning Contrast ----------------------------------------
-// The frequency-tuning layer (432/440/443 Hz; 415 untested): seeded head-to-head
-// records + Cochrane benchmark + caveats. PMIDs pending verification — never
-// fabricated. Only HR + PWV carry a contrast; all other biomarkers invariant.
-app.get('/api/recourse/music-therapy/tuning', async (_req, res) => {
-  try {
-    res.json({
-      success: true,
-      grid: TUNING_GRID,
-      contrasts: TUNING_GRID.map((hz) => ({ tuningHz: hz, records: tuningContrastModel(hz) })),
-      detailedContrast: {
-        432: tuningContrastDetailed(432),
-        440: tuningContrastDetailed(440),
-        443: tuningContrastDetailed(443),
-        415: tuningContrastDetailed(415),
-      },
-      records: TUNING_RECORDS,
-      benchmark: benchmarkComparison(),
-      benchmarkRows: musicVsControlBenchmark(),
-      benchmarkNote: BENCHMARK_NOTE,
-      caveats: TUNING_CAVEATS,
-      render: renderTuningContrast(),
-      report: renderTuningSummary(TUNING_RECORDS, tuningContrastDetailed(432), musicVsControlBenchmark()),
-      honestNote: 'Tuning contrasts are seeded design-specified records with PMIDs pending verification; biomarker responses are estimates, not measurements.',
-    });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err?.message ?? String(err) });
-  }
-});
+// Music sector + music-therapy research routes moved to
+// src/routes/musicTherapy.ts (mounted below, after the pooled-evidence state).
 
 // --- Music Therapy Evidence Feed ------------------------------------------
 // Pulls REAL trial abstracts from Europe PMC, parses machine-parseable effect
@@ -8512,71 +8409,20 @@ let musicTherapyEvidence: any[] = [];
 let musicTherapyQualitative: any[] = [];
 let musicTherapyFeedAt: number | null = null;
 
-app.get('/api/recourse/music-therapy/evidence', async (_req, res) => {
-  try {
-    const { calibratePriors, renderCalibration } = await import('./src/lib/musicTherapyEvidence.js');
-    const priors = calibratePriors(musicTherapyEvidence, MUSIC_THERAPY_ANCHORS);
-    res.json({
-      success: true,
-      fetchedAt: musicTherapyFeedAt,
-      feedIdle: musicTherapyFeedAt == null,
-      poolableRecords: musicTherapyEvidence.length,
-      qualitativeRecords: musicTherapyQualitative.length,
-      calibrated: priors.map((p: any) => ({
-        biomarker: p.biomarker,
-        mean: p.mean,
-        sd: p.sd,
-        calibrated: p.calibrated,
-        source: p.source,
-        k: p.pooled?.k ?? 0,
-        totalN: p.pooled?.totalN ?? 0,
-        iSquared: p.pooled?.iSquared ?? null,
-        unpoolable: p.unpoolableCount,
-      })),
-      rawRecords: musicTherapyEvidence.map((r: any) => ({
-        biomarker: r.biomarker,
-        effect: r.effect,
-        se: r.se,
-        n: r.n,
-        year: r.year,
-        source: r.source,
-        pmid: r.pmid,
-        detail: r.detail,
-      })),
-      report: renderCalibration(priors),
-    });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err?.message ?? String(err) });
-  }
-});
-
-app.post('/api/recourse/music-therapy/evidence/refresh', async (req, res) => {
-  try {
-    const { fetchMusicTherapyTrials } = await import('./src/lib/musicTherapyFeed.js');
-    const body = req.body || {};
-    const feed = await fetchMusicTherapyTrials({
-      pageSize: Math.min(50, Number(body.pageSize) || 25),
-      fullText: body.fullText === true,
-      maxFullText: Math.min(20, Number(body.maxFullText) || 10),
-    });
-    musicTherapyEvidence = feed.poolable;
-    musicTherapyQualitative = feed.qualitative;
-    musicTherapyFeedAt = feed.fetchedAt;
-    res.json({
-      success: true,
-      hitCount: feed.hitCount,
-      trialsFetched: feed.trials.length,
-      poolableRecords: feed.poolable.length,
-      qualitativeRecords: feed.qualitative.length,
-      fullTextFetched: feed.fullTextFetched,
-      fullTextExtracted: feed.fullTextExtracted,
-      errors: feed.errors,
-      honestNote: 'Only machine-parseable effect statements (MD + 95% CI, regression coefficients with SE, or per-arm mean±SD with n) from real articles were pooled. Median (IQR) rows and unattributed rows are never turned into numbers.',
-    });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err?.message ?? String(err) });
-  }
-});
+app.use(
+  '/api/recourse',
+  createMusicTherapyRouter({
+    anchors: () => MUSIC_THERAPY_ANCHORS,
+    getEvidence: () => musicTherapyEvidence,
+    getQualitative: () => musicTherapyQualitative,
+    getFeedAt: () => musicTherapyFeedAt,
+    setFeed: (poolable, qualitative, fetchedAt) => {
+      musicTherapyEvidence = poolable;
+      musicTherapyQualitative = qualitative;
+      musicTherapyFeedAt = fetchedAt;
+    },
+  }),
+);
 // Episodes are human ratings on reproducible (style,seed) compositions. The
 // learner derives quality biases that the compose route now applies via
 // composeWithLearner. Ratings are the only signal; no fake autonomy.
