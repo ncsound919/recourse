@@ -273,7 +273,7 @@ import type { IntakeSnapshot, BenchmarkRun, ExternalSignal, SourcePollResult } f
 import { pollAllSources } from './src/intake/poll.js';
 import { groundSignal } from './src/intake/grounding.js';
 import { runBenchmark, allBenchmarkProblems, appendedBenchmarkProblems, restoreBenchmarkProblems, registryAttestation } from './src/benchmark/benchmark.js';
-import { appendBenchmarkRun, readBenchmarkLedger, verifyBenchmarkLedger, benchmarkLeaderboard } from './src/lib/benchmarkLedger.js';
+import { appendBenchmarkRun } from './src/lib/benchmarkLedger.js';
 import { buildDevelopmentReadout } from './src/intake/readout.js';
 import type { ReadoutContext } from './src/intake/readout.js';
 
@@ -320,6 +320,7 @@ import { createOrchestrationRouter } from './src/routes/orchestration.js';
 import { createMusicTherapyRouter } from './src/routes/musicTherapy.js';
 import { createMemoryRouter } from './src/routes/memory.js';
 import { createLegoRouter } from './src/routes/lego.js';
+import { createIntakeRouter } from './src/routes/intake.js';
 import { createSynergyRouter } from './src/routes/synergy.js';
 import { createFleetDogfoodRouter } from './src/routes/fleetDogfood.js';
 import { runFleetDogfoodCycle } from './src/lib/fleetDogfood.js';
@@ -7396,107 +7397,41 @@ function stopIntakeAutopilot(): void {
   setJobEnabled('intake', false);
 }
 
-app.get('/api/recourse/intake/status', (req, res) => {
-  res.json({
-    success: true,
-    intake: intakeSnapshot(),
-    autopilot: intakeAutopilotOn,
-    autopilotIntervalMs: INTAKE_AUTOPILOT_MS,
-  });
-});
-
-app.post('/api/recourse/intake/poll', async (req, res) => {
-  try {
-    const { queries } = req.body ?? {};
-    const result = await runIntakeCycle(
-      Array.isArray(queries) && queries.length ? queries.map(String).slice(0, INTAKE_MAX_POLL) : DEFAULT_TOPIC_QUERIES,
-    );
-    res.json({ success: true, ...result, intake: intakeSnapshot() });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-/** Pull deterministic-brain sources (Kaggle datasets + news) into the store
- *  now, regardless of the autopilot env flags. Honest: brain offline/empty is
- *  reported per-source, never fabricated. */
-app.post('/api/recourse/intake/brain', async (req, res) => {
-  try {
-    const b = (req.body ?? {}) as Record<string, unknown>;
-    const url = typeof b.url === 'string' && b.url.trim() ? b.url.trim().replace(/\/+$/, '') : INTAKE_BRAIN_URL;
-    if (!url) return res.status(400).json({ success: false, error: 'BRAIN_URL not configured (pass url or set BRAIN_URL)' });
-    const queries = Array.isArray(b.queries) && (b.queries as unknown[]).length
-      ? (b.queries as string[]).map(String).slice(0, INTAKE_MAX_POLL)
-      : (INTAKE_BRAIN_KAGGLE_QUERIES.length ? INTAKE_BRAIN_KAGGLE_QUERIES : DEFAULT_TOPIC_QUERIES);
-    const news = typeof b.news === 'boolean' ? b.news : INTAKE_BRAIN_NEWS || true;
-    const newsLimit = Number(b.newsLimit) || INTAKE_BRAIN_NEWS_LIMIT;
-
-    const { signals, results } = await pollAllSources({
-      queries: queries.slice(0, INTAKE_MAX_POLL),
-      brain: { url, kaggleQueries: queries, news, newsLimit },
-    });
-    lastPollResults = results;
-    const { added, dupes } = signalStore.ingest(signals);
-    saveStateToDisk();
-    if (added > 0) {
-      appendProvenanceEvent('intake_brain', {
-        added,
-        dupes,
-        sources: results.map((r) => ({ source: r.source, ok: r.ok, count: r.count, error: r.error ?? undefined })),
-      });
-    }
-    res.json({ success: true, added, dupes, signals: signals.slice(0, 20), results, intake: intakeSnapshot() });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-app.post('/api/recourse/intake/ground', async (req, res) => {
-  try {
-    const { signalId } = req.body ?? {};
-    const result = await runGroundingCycle(typeof signalId === 'string' && signalId ? signalId : undefined);
-    res.json({ success: true, ...result, intake: intakeSnapshot() });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-app.post('/api/recourse/intake/autopilot/toggle', (req, res) => {
-  intakeAutopilotOn = !intakeAutopilotOn;
-  if (intakeAutopilotOn) {
-    ensureIntakeAutopilot();
-    runIntakeAutopilotTick().catch(() => {});
-  } else {
-    stopIntakeAutopilot();
-  }
-  saveStateToDisk();
-  res.json({ success: true, autopilot: intakeAutopilotOn, intervalMs: INTAKE_AUTOPILOT_MS });
-});
-
-app.get('/api/recourse/benchmark/state', (req, res) => {
-  res.json({ success: true, benchmark: benchmarkState() });
-});
-
-app.post('/api/recourse/benchmark/run', (req, res) => {
-  try {
-    const run = runBenchmarkCycle();
-    res.json({ success: true, run, benchmark: benchmarkState() });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// Self-attested benchmark ledger: the hash-chained record of every run.
-app.get('/api/recourse/benchmark/ledger', (req, res) => {
-  const chain = verifyBenchmarkLedger();
-  res.json({ success: true, chain, records: readBenchmarkLedger().slice(-50) });
-});
-
-// Self-attested leaderboard: every recorded run ranked by solved count.
-app.get('/api/recourse/benchmark/leaderboard', (req, res) => {
-  const entries = benchmarkLeaderboard();
-  res.json({ success: true, count: entries.length, entries });
-});
+// Intake (poll/brain/ground/autopilot) + benchmark routes moved to
+// src/routes/intake.ts. The signal store / autopilot flag / benchmark cycles
+// stay host-owned and are injected.
+app.use(
+  '/api/recourse',
+  createIntakeRouter({
+    appendProvenance: (eventType, data) => appendProvenanceEvent(eventType as ProvenanceEvent['type'], data),
+    saveState: saveStateToDisk,
+    snapshot: () => intakeSnapshot(),
+    isAutopilotOn: () => intakeAutopilotOn,
+    intervalMs: () => INTAKE_AUTOPILOT_MS,
+    maxPoll: () => INTAKE_MAX_POLL,
+    brainUrl: () => INTAKE_BRAIN_URL,
+    brainKaggleQueries: () => INTAKE_BRAIN_KAGGLE_QUERIES,
+    brainNews: () => INTAKE_BRAIN_NEWS,
+    brainNewsLimit: () => INTAKE_BRAIN_NEWS_LIMIT,
+    runCycle: runIntakeCycle,
+    runGrounding: runGroundingCycle,
+    ingest: (signals) => signalStore.ingest(signals as ExternalSignal[]),
+    setLastPollResults: (results) => { lastPollResults = results as SourcePollResult[]; },
+    toggleAutopilot: () => {
+      intakeAutopilotOn = !intakeAutopilotOn;
+      if (intakeAutopilotOn) {
+        ensureIntakeAutopilot();
+        runIntakeAutopilotTick().catch(() => {});
+      } else {
+        stopIntakeAutopilot();
+      }
+      saveStateToDisk();
+      return intakeAutopilotOn;
+    },
+    benchmarkState: () => benchmarkState(),
+    runBenchmark: () => runBenchmarkCycle(),
+  }),
+);
 
 // Productized surfaces (telemetry / audio / wallet) are mounted from their own
 // router module — see src/routes/product.ts.
