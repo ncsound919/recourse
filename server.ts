@@ -325,6 +325,7 @@ import { createGhidraRouter } from './src/routes/ghidra.js';
 import { buildLearnResult } from './src/lib/ghidraLearning.js';
 import type { GhidraLearnInput, GhidraLearnResult } from './src/lib/ghidraLearning.js';
 import { requireMutationAuth, requireMutationAuthIfConfigured, hasValidMutationSecret, requireJevAdvisoryAuth } from './src/lib/mutationAuth.js';
+import { createApiGuard, resolveListenHost } from './src/lib/apiGuard.js';
 import { openWallet } from './src/lib/wallet.js';
 import { setSandboxSpendSink } from './src/lib/selfHostSandbox.js';
 import { createProductRouter } from './src/routes/product.js';
@@ -1079,6 +1080,10 @@ app.use(express.json({
     (req as typeof req & { rawBody?: string }).rawBody = buf.toString('utf-8');
   },
 }));
+
+// Default-deny floor for mutating /api routes (see src/lib/apiGuard.ts): the
+// local UI keeps working, remote/cross-site callers need RECOURSE_API_SECRET.
+app.use(createApiGuard());
 
 // Observability: count + time every HTTP request (exposed at GET /metrics).
 app.use((req, res, next) => {
@@ -11189,8 +11194,10 @@ async function startServer() {
     }
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Recourse server running on http://0.0.0.0:${PORT}`);
+  const LISTEN_HOST = resolveListenHost();
+  app.listen(PORT, LISTEN_HOST, () => {
+    console.log(`Recourse server running on http://${LISTEN_HOST}:${PORT}` +
+      (LISTEN_HOST === '127.0.0.1' ? ' (loopback only; set RECOURSE_HOST=0.0.0.0 to expose)' : ''));
     startStateHygiene();
   });
   console.log(`[boot] t+${Math.round(process.uptime())}s listen() called on ${PORT}`);

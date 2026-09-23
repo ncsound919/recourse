@@ -3,6 +3,7 @@ dist
 coverage
 coverage-baseline
 data
+!data/plans
 .selfhosted
 recourse-fix-bundle
 .git
@@ -24,3 +25,8 @@ tests
 "BF Resolver"
 docs
 media-package
+.env
+.env.*
+!.env.example
+scripts/kw-import-phoenix.js
+.claude-audit

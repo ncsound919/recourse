@@ -14,6 +14,7 @@
  * available (e.g. a platform without the native addon) — never the default.
  */
 
+import { inProcessFallbackRefusal } from './codeSafety';
 import { transformSync } from 'esbuild';
 import { executeTestSuiteInIsolate, executeToolInIsolate, isIsolateAvailable } from './isolatedSandbox';
 import { ASSERT_SHIM } from './assertShim';
@@ -156,6 +157,23 @@ export function executeToolFunction(
       stderr: iso.stderr.length ? iso.stderr : [iso.error ? `Execution Exception: ${iso.error}` : 'Execution failed'],
       executionTimeMs,
       error: iso.error,
+      assertionsPassed: 0,
+      assertionsFailed: 1,
+    };
+  }
+
+  // In-process fallback (no isolated-vm): `new Function` is not a security
+  // boundary, so screen the code first (see codeSafety.ts).
+  const refusal = inProcessFallbackRefusal(sourceCode);
+  if (refusal) {
+    stderr.push(`Execution Exception: ${refusal}`);
+    return {
+      success: false,
+      returnValue: undefined,
+      stdout,
+      stderr,
+      executionTimeMs: Math.round((performance.now() - startTime) * 100) / 100,
+      error: refusal,
       assertionsPassed: 0,
       assertionsFailed: 1,
     };
@@ -390,6 +408,18 @@ export function executeTestSuite(
   const startTime = performance.now();
 
   const customConsole = makeCapturedConsole(stdout, stderr);
+
+  const refusal = inProcessFallbackRefusal(sourceCode, testSuiteCode);
+  if (refusal) {
+    return {
+      passed: false,
+      score: 0,
+      stdout,
+      stderr: [refusal],
+      testDetails: [`[COMPILATION ERROR] ${refusal}`],
+      executionTimeMs: Math.round((performance.now() - startTime) * 100) / 100,
+    };
+  }
 
   const { cleanedSource, statements: body } = buildSuiteStatements(sourceCode, testSuiteCode);
 

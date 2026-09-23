@@ -51,6 +51,7 @@ import {
   getMathAttempts,
 } from './goalLedger.js';
 import { keywireHealth } from './keywireBridge.js';
+import { assertInProcessSafe } from './codeSafety.js';
 import {
   chatCompleteRoute,
   type ChatMessage,
@@ -344,6 +345,8 @@ function runAcceptanceTest(
   sourceCode: string,
   toolName: string,
   acceptanceTest: string,
+  /** True only for Recourse's own library-backed reference source. */
+  trustedSource = false,
 ): { passed: boolean; score: number; error: string | null } {
   try {
     installMathReferenceGlobals();
@@ -353,6 +356,8 @@ const runnable = sourceCode.replace(/^export\s+(?:default\s+)?/gm, '');
       `"use strict";\n` +
       `function assert(cond, msg) { if (!cond) { throw new Error('AssertionError' + (msg ? ': ' + msg : '')); } }\n` +
       `${runnable}\n${suite}\nreturn true;`;
+    // In-process evaluation of model-written code: screen it first.
+    assertInProcessSafe(trustedSource ? suite : `${runnable}\n${suite}`);
     const fn = new Function(wrapped);
     fn();
     return { passed: true, score: 1, error: null };
@@ -450,7 +455,7 @@ export async function runMathCycle(): Promise<MathCycle> {
     // returning a failing stub.
     enginesUsed.push('reference');
     sourceCode = mathReferenceSource(problem) ?? generateFallbackStub(toolName);
-    const result = runAcceptanceTest(sourceCode, toolName, problem.acceptanceTest);
+    const result = runAcceptanceTest(sourceCode, toolName, problem.acceptanceTest, true);
     passed = result.passed;
     score = result.score;
     failureReason = result.error;

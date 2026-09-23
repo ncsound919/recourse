@@ -27,6 +27,7 @@
 
 import { createRequire } from 'node:module';
 import { mulberry32 } from './engine';
+import { assertInProcessSafe } from '../lib/codeSafety';
 
 /* ------------------------- module bootstrap ------------------------ */
 
@@ -62,6 +63,8 @@ function getFc(): any | null {
 /* --------------------------- sandbox utils ------------------------- */
 
 function sandboxEval(source: string): (input: unknown) => unknown {
+  // node:vm / Function are not security boundaries; screen model code first.
+  assertInProcessSafe(source);
   const tryCompile = (code: string) => {
     const req = resolveRequire();
     const vm: any = req ? req('node:vm') : null;

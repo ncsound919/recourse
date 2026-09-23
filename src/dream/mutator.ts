@@ -7,6 +7,7 @@ import crypto from 'crypto';
 import { extractJsonBlock } from '../lib/modelProvider';
 import { skillAwareChat } from '../lib/skillContext';
 import { lintSource } from '../lib/lintGate';
+import { assertInProcessSafe } from '../lib/codeSafety';
 import {
   avoidGuidance,
   biasWeightForGene,
@@ -260,6 +261,8 @@ export function runSandboxVerification(candidate: MutationCandidate): SandboxVer
       .replace(/export\s+(async\s+)?function\s+([a-zA-Z0-9_$]+)/g, 'function $2')
       .replace(/export\s+const\s+([a-zA-Z0-9_$]+)\s*=/g, 'const $1 =');
 
+    // `new Function` runs with full host privileges: screen the model's code.
+    assertInProcessSafe(cleanedCode);
     const wrapper = new Function(
       `${cleanedCode};
       const candidateFn = typeof ${candidate.toolName} === 'function' ? ${candidate.toolName} : (typeof run === 'function' ? run : null);

@@ -5,9 +5,9 @@
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx server.ts",
+    "dev": "tsx --no-node-snapshot server.ts",
     "build": "vite build && node esbuild.config.mjs",
-    "start": "node dist/server.cjs",
+    "start": "node --no-node-snapshot dist/server.cjs",
     "clean": "rm -rf dist server.js",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src tests api server.ts mcp-server.ts",
