@@ -7,6 +7,10 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
+    // The completion cache is a process-global production feature; disable it
+    // for the suite so tests that assert model-call/retry behavior stay
+    // deterministic. The cache's own test deletes this to exercise it.
+    env: { MODEL_CACHE_DISABLED: '1' },
     exclude: [
       '**/node_modules/**',
       '**/dist/**',

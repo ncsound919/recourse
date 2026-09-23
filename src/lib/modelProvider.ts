@@ -15,6 +15,7 @@
  */
 
 import { modelSelection, rewardForOutcome } from './modelSelection.js';
+import { CompletionCache, type CacheMessage } from './completionCache.js';
 
 export interface ProviderConfig {
   kind: string;
@@ -64,6 +65,10 @@ export interface ChatCompleteOptions {
   /** Function tools the model may call. When present, `json` is ignored. */
   tools?: OpenAITool[];
   toolChoice?: ToolChoice;
+  /** Set false to bypass the completion cache for this call (default: cached). */
+  cache?: boolean;
+  /** Distinguishes caches that share a prompt shape (e.g. 'forge' vs 'dream'). */
+  cacheNamespace?: string;
 }
 
 export interface ChatCompleteResult {
@@ -81,6 +86,9 @@ export interface ChatCompleteResult {
   finishReason?: string;
   /** Separate reasoning text some servers emit (e.g. llama-server). */
   reasoning?: string;
+  /** True when this result was served from the completion cache (no model call,
+   *  no token spend, latency ~0). */
+  cached?: boolean;
 }
 
 export interface ModelUsageTokens {
@@ -112,6 +120,65 @@ function emitUsage(usage: ModelUsage): void {
   } catch {
     /* a metering sink must never break a model call */
   }
+}
+
+/* ------------------------- completion cache (P0.3) ------------------------ */
+// Exact + semantic cache for non-agentic, non-tool completions. A hit skips the
+// network entirely (no tokens, ~0 latency) and returns the exact text a model
+// previously produced. Kill-switch: MODEL_CACHE_DISABLED=1. Per-call bypass:
+// pass `{ cache: false }`. Tool-calling turns are never cached.
+let completionCacheSingleton: CompletionCache | null = null;
+
+function completionCache(): CompletionCache {
+  if (!completionCacheSingleton) {
+    completionCacheSingleton = new CompletionCache({
+      max: Math.max(1, Number(process.env.MODEL_CACHE_MAX) || 500),
+      similarity: Number(process.env.MODEL_CACHE_SIM) || 0.97,
+      ttlMs: Math.max(0, Number(process.env.MODEL_CACHE_TTL_MS) || 0),
+    });
+  }
+  return completionCacheSingleton;
+}
+
+/** Cache observability for status/UI. */
+export function completionCacheSnapshot(): {
+  size: number; max: number; hits: number; misses: number; stores: number;
+  evictions: number; expired: number; hitRate: number; disabled: boolean;
+} {
+  return { ...completionCache().stats(), disabled: process.env.MODEL_CACHE_DISABLED === '1' };
+}
+
+export function clearCompletionCache(): void {
+  completionCache().clear();
+}
+
+function cacheEnabledFor(opts: ChatCompleteOptions): boolean {
+  if (process.env.MODEL_CACHE_DISABLED === '1') return false;
+  if (opts.cache === false) return false;
+  return !(opts.tools && opts.tools.length > 0);
+}
+
+function cacheKeyOptions(opts: ChatCompleteOptions): { temperature?: number; json?: boolean; namespace?: string } {
+  return { temperature: opts.temperature, json: opts.json, namespace: opts.cacheNamespace };
+}
+
+/** Cache-aware wrapper around chatCompleteFor. */
+async function cachedComplete(
+  profileId: ProviderProfileId,
+  messages: ChatMessage[],
+  opts: ChatCompleteOptions,
+): Promise<ChatCompleteResult> {
+  if (!cacheEnabledFor(opts)) return chatCompleteFor(profileId, messages, opts);
+  const kopts = cacheKeyOptions(opts);
+  const hit = completionCache().lookup(messages as CacheMessage[], kopts);
+  if (hit) {
+    return { ok: true, content: hit.value, status: 'online', model: hit.model, latencyMs: 0, cached: true };
+  }
+  const result = await chatCompleteFor(profileId, messages, opts);
+  if (result.ok && result.content) {
+    completionCache().store(messages as CacheMessage[], kopts, result.content, result.model);
+  }
+  return result;
 }
 
 /** ~4 chars/token estimate, used only when a provider omits usage counts. */
@@ -541,11 +608,11 @@ export async function chatComplete(
   opts: ChatCompleteOptions = {},
 ): Promise<ChatCompleteResult> {
   const profile = pickGenerationProfile(messages);
-  const result = await chatCompleteFor(profile, messages, opts);
+  const result = await cachedComplete(profile, messages, opts);
   if (profile === 'local' && result.status !== 'online') {
     // Local failed (offline or error) — fall back to the API profile for this
     // generation. The returned result reports the profile that actually answered.
-    return chatCompleteFor('api', messages, opts);
+    return cachedComplete('api', messages, opts);
   }
   return result;
 }
@@ -558,7 +625,7 @@ export async function chatCompleteProfile(
   messages: ChatMessage[],
   opts: ChatCompleteOptions = {},
 ): Promise<ChatCompleteResult> {
-  return chatCompleteFor(profileId === 'local' ? 'local' : 'api', messages, opts);
+  return cachedComplete(profileId === 'local' ? 'local' : 'api', messages, opts);
 }
 
 /** Chat completion routed by policy. `route`:
@@ -573,5 +640,5 @@ export async function chatCompleteRoute(
   opts: ChatCompleteOptions = {},
 ): Promise<ChatCompleteResult> {
   const profile = pickProfileForRoute(route, messages);
-  return chatCompleteFor(profile, messages, opts);
+  return cachedComplete(profile, messages, opts);
 }

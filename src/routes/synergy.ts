@@ -15,6 +15,7 @@ import { extractProblems } from '../lib/synergy/problemIndex.js';
 import { recordSynergyScan } from '../lib/synergy/ledger.js';
 import { resolveTransfer, admit, applyTransferResult, recordTransferResult } from '../lib/synergy/resolver.js';
 import { requireMutationAuth } from '../lib/mutationAuth.js';
+import { readFleetDogfood } from '../lib/fleetDogfood.js';
 import type { RecourseProblem } from '../lib/problemArchive.js';
 import type { TransferCandidate, TransferResult } from '../lib/synergy/types.js';
 
@@ -108,7 +109,7 @@ export function createSynergyRouter(): Router {
 
   router.post('/synergy/scan', (req, res) => {
     if (!requireMutationAuth(req, res)) return;
-    const body = (req.body ?? {}) as { methods?: unknown; problems?: unknown; knownPairs?: unknown };
+    const body = (req.body ?? {}) as { methods?: unknown; problems?: unknown; knownPairs?: unknown; useFleetKnownPairs?: unknown };
     if (!Array.isArray(body.methods) || !Array.isArray(body.problems)) {
       return res.status(400).json({ success: false, error: 'methods and problems arrays required' });
     }
@@ -127,7 +128,16 @@ export function createSynergyRouter(): Router {
     try {
       const { methods, rejected } = extractMethods(body.methods);
       const problems = extractProblems(body.problems);
-      const { candidates, manifest } = discover(methods, problems, { knownPairs: (body.knownPairs as string[]) ?? [] });
+      // Merge cross-domain pairs Draymond already explored (imported by the
+      // fleet-dogfood cycle) so Recourse's novelty gate does not re-propose
+      // them. Disable with `useFleetKnownPairs: false`.
+      const knownPairs = new Set<string>((body.knownPairs as string[]) ?? []);
+      if (body.useFleetKnownPairs !== false) {
+        try {
+          for (const p of readFleetDogfood()?.knownPairList ?? []) knownPairs.add(p);
+        } catch { /* no dogfood snapshot -> nothing to merge */ }
+      }
+      const { candidates, manifest } = discover(methods, problems, { knownPairs: [...knownPairs].sort() });
       const map = buildSynergyMap(candidates, { generatedAtRun: `manifest:${manifest}` });
       writeSynergyMap(map);
       recordSynergyScan(map);

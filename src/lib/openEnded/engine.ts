@@ -62,6 +62,10 @@ export interface OpenEndedDeps {
   /** Optional bounded retry that sees the previous failure. */
   refine?: (problem: ArchivedProblem, priorSource: string, failure: string, inspirationHint: string) => Promise<SolverResult>;
   maxSolveAttempts?: number;
+  /** Compute-optimal per-problem attempt budget (overrides `maxSolveAttempts`
+   *  when provided). Lets the caller spend more only on hard/uncertain problems
+   *  (P0.1). When absent, `maxSolveAttempts` is used unchanged. */
+  attemptBudgetFor?: (problem: ArchivedProblem) => number;
   memory?: MemoryItem[];
   /** Inputs for the property gate; when absent the gate is reported unavailable. */
   propertyVectorsFor?: (problem: ArchivedProblem) => unknown[] | null;
@@ -174,7 +178,10 @@ export async function runOpenEndedCycle(deps: OpenEndedDeps): Promise<OpenEndedC
   }
 
   // 4. SOLVE
-  const maxAttempts = Math.max(1, deps.maxSolveAttempts ?? 1);
+  const maxAttempts = Math.max(
+    1,
+    deps.attemptBudgetFor ? deps.attemptBudgetFor(picked) : (deps.maxSolveAttempts ?? 1),
+  );
   const pool = [...archive.noveltyPool(), ...(deps.noveltyPool ?? [])];
   let lastFailure = '';
   let lastSource = '';

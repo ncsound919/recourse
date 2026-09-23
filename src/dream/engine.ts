@@ -48,12 +48,23 @@ export type DreamGenerator = (
   input: DreamGeneratorInput,
 ) => Promise<DreamGeneratorResult | null>;
 
+/** Result of one bounded offline precompute step (sleep-time compute). */
+export interface SleepComputeStep {
+  attempted: number;
+  ready: number;
+  note: string;
+}
+
 /** Real signals that the dream engine consumes on every tick. */
 export interface DreamSignalProvider {
   readinessScore(): number;     // from math engine
   legoAssemblyCount(): number; // from lego engine registry
   learnerEpisode(): number;    // from learner
   learnerCalibration(): number; // from learner
+  /** P1: run one bounded sleep-time-compute unit during memory consolidation
+   *  (offline precompute of verified artifacts). Absent => consolidation
+   *  behaves exactly as before. */
+  sleepCompute?(): SleepComputeStep | Promise<SleepComputeStep>;
 }
 
 /* ---------------------------- seeded RNG ---------------------------- */
@@ -265,7 +276,7 @@ export class DreamingEngine {
         break;
       }
       case 'memory_consolidation': {
-        phaseReport = this.phaseMemoryConsolidation(s);
+        phaseReport = await this.phaseMemoryConsolidation(s);
         break;
       }
       default:
@@ -427,7 +438,7 @@ export class DreamingEngine {
    * and `consolidationCount`. The cognitive coherence is then recomputed
    * downstream so the displayed value reflects REAL state, not a curve.
    */
-  private phaseMemoryConsolidation(s: DreamState): string {
+  private async phaseMemoryConsolidation(s: DreamState): Promise<string> {
     const readiness = this.signals?.readinessScore() ?? null;
     const legoCount = this.signals?.legoAssemblyCount() ?? null;
     const learnerEp = this.signals?.learnerEpisode() ?? null;
@@ -445,6 +456,21 @@ export class DreamingEngine {
     if (legoCount != null) parts.push(`lego assemblies: ${legoCount}`);
     if (learnerEp != null) parts.push(`learner ep ${learnerEp}`);
     if (learnerCal != null) parts.push(`calibration ${learnerCal.toFixed(3)}`);
+
+    // P1 sleep-time compute: during consolidation ("sleep") the host may
+    // precompute + sandbox-verify artifacts for anticipated forge specs. Absent
+    // hook => report string is byte-identical to the pre-upgrade behavior.
+    if (this.signals?.sleepCompute) {
+      try {
+        const step = await this.signals.sleepCompute();
+        s.sleepComputeRuns = (s.sleepComputeRuns || 0) + 1;
+        s.sleepReadyArtifacts = (s.sleepReadyArtifacts || 0) + Math.max(0, step.ready);
+        parts.push(`sleep ${step.note}`);
+      } catch {
+        /* offline precompute is best-effort; a failure must not break dreaming */
+      }
+    }
+
     return parts.length
       ? `Consolidated real signals: ${parts.join(' | ')}`
       : 'Consolidated (no live signals wired this cycle)';

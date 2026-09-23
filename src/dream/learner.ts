@@ -266,16 +266,20 @@ export class RecursiveLearner {
    *  version pass the verifier / have a suite / is it healthy?). Unlike the
    *  static-genome episodes, this is per-real-tool and discriminative. Returns
    *  the posterior mean per tool so the server can decide which real tools to
-   *  repair. One store read/write for the whole batch. */
+   *  repair. One store read/write for the whole batch.
+   *
+   *  `key` is an optional canonical identity (see `canonicalToolKey`) so every
+   *  name-variant of one capability compounds onto a single belief. When absent
+   *  the raw `name` is used, preserving the original behavior. */
   async learnRealTools(
-    tools: Array<{ name: string; domain?: string; reward: number }>,
+    tools: Array<{ name: string; domain?: string; reward: number; key?: string }>,
   ): Promise<Record<string, number>> {
     if (tools.length === 0) return {};
     const state = await this.loadOrDefault();
     const meta = state.meta;
     const means: Record<string, number> = {};
     for (const t of tools) {
-      const key = `real:${t.name}`;
+      const key = `real:${t.key ?? t.name}`;
       let b = state.geneBeliefs[key];
       if (!b) {
         b = {

@@ -26,6 +26,7 @@ import { GENERATED_PROBLEMS } from '../benchmark/generatedProblems';
 import { executeTestSuite } from './executionSandbox';
 import { integrateAxiomTool, axiomReachable } from './axiomBridge.js';
 import { skillAwareChat } from './skillContext.js';
+import { adaptiveBudget, difficultyIndex } from './adaptiveCompute.js';
 
 export interface ForgeSpec {
   id: string;
@@ -518,7 +519,15 @@ async function forgeOnline(_force = false): Promise<boolean> {
  *  routing, health checks, retry/timeout semantics and usage accounting are
  *  unified instead of a second bespoke HTTP client. Honest: reports
  *  offline/error, never fabricates content. */
-async function forgeChat(system: string, user: string, temperature = 0.1): Promise<{
+async function forgeChat(
+  system: string,
+  user: string,
+  temperature = 0.1,
+  // Forge generation completions are NOT cached: retries feed prior failures
+  // back into the prompt, and a cached raw completion could be a known-bad
+  // candidate. The forge's efficiency comes from verified sleep-time artifacts.
+  useCache = false,
+): Promise<{
   ok: boolean;
   content: string | null;
   offline?: boolean;
@@ -536,9 +545,10 @@ async function forgeChat(system: string, user: string, temperature = 0.1): Promi
     { role: 'system', content: system },
     { role: 'user', content: user },
   ];
+  const chatOpts = { temperature, ...(useCache ? {} : { cache: false as const }) };
   const res = explicitForge
-    ? await chatCompleteProfile(forgeTargetsLocal ? 'local' : 'api', messages, { temperature })
-    : await skillAwareChat(messages, { temperature }, user);
+    ? await chatCompleteProfile(forgeTargetsLocal ? 'local' : 'api', messages, chatOpts)
+    : await skillAwareChat(messages, chatOpts, user);
   if (!res.ok || res.content === null) {
     return {
       ok: false,
@@ -554,11 +564,45 @@ function stripFences(content: string): string {
   return content.replace(/```(?:js|javascript)?/gi, '').replace(/```/g, '').trim();
 }
 
+/** Optional generator overrides. The Builder Brain supplies the system prompt +
+ *  temperature; the recursive learner's durable memory supplies
+ *  `inspirationHint` (recalled prior solutions) so cross-run knowledge transfers
+ *  into new tool generation. */
+export interface ForgeBuilderOptions {
+  systemPrompt?: string;
+  temperature?: number;
+  /** Extra context appended to the user prompt (e.g. recalled prior solutions). */
+  inspirationHint?: string;
+  /** Compute-optimal candidate budget for this spec. When set it overrides the
+   *  fixed `maxTries`; callers derive it with `forgeSampleBudget`. Defaults to
+   *  `maxTries` (unchanged behavior). */
+  samples?: number;
+  /** P1 sleep-time-compute artifact for this spec (pre-generated + verified
+   *  offline). When present and still passing the reference suite, it is used
+   *  with zero model calls. */
+  precomputedSource?: string;
+  /** Prior attempt's real sandbox failure, fed back into the next prompt
+   *  (Reflexion-style) so retries are not identical re-rolls. */
+  feedback?: string;
+}
+
+/**
+ * Compute-optimal sample budget for one spec (P0.1). Easy / well-understood
+ * capabilities get the minimum (1); only hard, uncertain ones earn extra
+ * samples. Pure — see `adaptiveCompute.ts` (arXiv:2408.03314, arXiv:2510.07841).
+ */
+export function forgeSampleBudget(
+  input: { uncertainty?: number; meanReward?: number; promptChars?: number; difficulty?: number },
+  opts: { min?: number; max?: number } = {},
+): number {
+  return adaptiveBudget(difficultyIndex(input), { min: opts.min ?? 1, max: opts.max ?? 3 });
+}
+
 /**
  * Ask the model for ONE implementation of a spec. Returns plain JS source that
  * exports the spec's function. Never returns placeholder text.
  */
-export async function generateForgeSource(spec: ForgeSpec, builder?: { systemPrompt?: string; temperature?: number }): Promise<{
+export async function generateForgeSource(spec: ForgeSpec, builder?: ForgeBuilderOptions): Promise<{
   ok: boolean;
   source?: string;
   offline?: boolean;
@@ -590,7 +634,13 @@ export async function generateForgeSource(spec: ForgeSpec, builder?: { systemPro
         `- The implementation will be tested against a hidden test suite that asserts the exact behavior described. Match it precisely.\n` +
         `- Handle edge cases (empty inputs, single elements) explicitly.`;
   const temperature = typeof builder?.temperature === 'number' ? builder.temperature : 0.1;
-  const user = `Write ${isClass ? 'a class' : ''} ${spec.name}.\n\nContract:\n${spec.prompt}\n\nReturn only the source.`;
+  const hint = builder?.inspirationHint?.trim();
+  const feedback = builder?.feedback?.trim();
+  const user =
+    `Write ${isClass ? 'a class' : ''} ${spec.name}.\n\nContract:\n${spec.prompt}` +
+    `${hint ? `\n\n${hint}` : ''}` +
+    `${feedback ? `\n\nYour previous attempt failed the hidden suite. Fix it using this real failure output:\n${feedback}` : ''}` +
+    `\n\nReturn only the source.`;
   const res = await forgeChat(system, user, temperature);
   if (!res.ok) {
     return { ok: false, offline: res.offline, error: res.error };
@@ -624,14 +674,41 @@ function feedbackFromVerify(verify: { passed: boolean; testDetails: string[]; st
 export async function attemptForgeSpec(
   spec: ForgeSpec,
   maxTries = 3,
-  builder?: { systemPrompt?: string; temperature?: number },
+  builder?: ForgeBuilderOptions,
 ): Promise<ForgeAttemptOutcome> {
   const failures: ForgeFailure[] = [];
   let attemptsUsed = 0;
-  for (let attempt = 1; attempt <= maxTries; attempt++) {
+  // P1 sleep-time compute: consume a pre-generated offline artifact when it
+  // still passes the reference suite. Re-verified here — a cache, not trust.
+  if (builder?.precomputedSource) {
+    const pre = verifyForgeSource(builder.precomputedSource, spec.refSuite);
+    if (pre.passed) {
+      return {
+        ok: true,
+        id: spec.id,
+        name: spec.name,
+        domain: spec.domain,
+        source: builder.precomputedSource,
+        attemptsUsed: 0,
+        maxTries: 0,
+        failures,
+        verifyScore: Math.round(pre.score * 100) / 100,
+        verifyDetails: ['[PASS] consumed sleep-time-compute artifact (re-verified)'],
+      };
+    }
+  }
+  // Compute-optimal budget: `builder.samples` when the caller supplied one
+  // (adaptive), else the fixed `maxTries` (unchanged default behavior).
+  const budget = Math.max(1, Math.floor(builder?.samples ?? maxTries));
+  let lastFailure: string | undefined;
+  for (let attempt = 1; attempt <= budget; attempt++) {
     attemptsUsed = attempt;
-    const gen = await generateForgeSource(spec, builder);
+    // Feed the previous real failure into the next prompt so retries are not
+    // identical re-rolls (and remain cache-distinct when caching is on).
+    const attemptBuilder = lastFailure ? { ...builder, feedback: lastFailure } : builder;
+    const gen = await generateForgeSource(spec, attemptBuilder);
     if (!gen.ok) {
+      lastFailure = gen.error || 'generate returned no source';
       failures.push({ attempt, note: gen.offline ? `offline: ${gen.error}` : `generate error: ${gen.error}` });
       if (gen.offline) {
         // Fallback: try Axiom autonomous builder
@@ -645,7 +722,7 @@ export async function attemptForgeSpec(
               domain: spec.domain,
               source: axiomRes.selfHosted?.sourceCode,
               attemptsUsed: attempt,
-              maxTries,
+              maxTries: budget,
               failures,
               verifyScore: 1.0,
               verifyDetails: ['[PASS] Verified via Axiom bridge + Recourse sandbox'],
@@ -660,7 +737,7 @@ export async function attemptForgeSpec(
           domain: spec.domain,
           reason: 'offline',
           attemptsUsed,
-          maxTries,
+          maxTries: budget,
           failures,
         };
       }
@@ -675,13 +752,14 @@ export async function attemptForgeSpec(
         domain: spec.domain,
         source: gen.source as string,
         attemptsUsed,
-        maxTries,
+        maxTries: budget,
         failures,
         verifyScore: Math.round(verify.score * 100) / 100,
         verifyDetails: verify.testDetails,
       };
     }
-    failures.push({ attempt, note: feedbackFromVerify(verify) });
+    lastFailure = feedbackFromVerify(verify);
+    failures.push({ attempt, note: lastFailure });
   }
   return {
     ok: false,
@@ -690,7 +768,7 @@ export async function attemptForgeSpec(
     domain: spec.domain,
     reason: 'failed',
     attemptsUsed,
-    maxTries,
+    maxTries: budget,
     failures,
   };
 }

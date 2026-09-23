@@ -128,7 +128,7 @@ import {
   updateOpenHubHealth,
 } from './src/lib/fleetSignal.js';
 import { globalLegoEngine } from './src/lego/engine.js';
-import {   checkOnline as modelCheckOnline, providerStatus, providerStatuses, chatComplete, extractJsonBlock, setActiveProviderProfile, activeProviderProfile, providerProfiles, setModelUsageSink } from './src/lib/modelProvider.js';
+import {   checkOnline as modelCheckOnline, providerStatus, providerStatuses, chatComplete, extractJsonBlock, setActiveProviderProfile, activeProviderProfile, providerProfiles, setModelUsageSink, completionCacheSnapshot } from './src/lib/modelProvider.js';
 import type { ProviderProfileId } from './src/lib/modelProvider.js';
 import { lintSource } from './src/lib/lintGate.js';
 import type { LintReport } from './src/lib/lintGate.js';
@@ -140,7 +140,9 @@ import {
   selectTemplateForLearnerDirective,
   COMPONENT_TEMPLATES
 } from './src/lib/componentTemplates.js';
-import { nextGenerationTarget, generationTargets, generationPlanDigest } from './src/lib/learnerGenerationPlan.js';
+import { nextGenerationTarget, generationTargets, generationPlanDigest, summarizeBeliefsByDomain } from './src/lib/learnerGenerationPlan.js';
+import { runSleepComputeUnit, takeReadySleepArtifact, sleepComputeSnapshot } from './src/lib/sleepCompute.js';
+import { recordExperience, experienceHint, experienceSnapshot } from './src/lib/experience.js';
 import { planAuditDepth } from './src/autopilot/auditDepth.js';
 import type { Directive } from './src/dream/learner-types.js';
 import {
@@ -158,10 +160,19 @@ import type { SelfHostedManifestEntry } from './src/lib/selfHosting.js';
 // Capability Forge: the closed, honest self-improvement loop. Materializes
 // verified model-built functions into live self-hosted tools and records every
 // attempt in a durable capability-delta ledger.
-import { FORGE_AGENDA, attemptForgeSpec, benchmarkGapSpecs } from './src/lib/capabilityForge.js';
+import { FORGE_AGENDA, attemptForgeSpec, benchmarkGapSpecs, generateForgeSource, forgeSampleBudget } from './src/lib/capabilityForge.js';
 import type { ForgeSpec, ForgeAttemptOutcome } from './src/lib/capabilityForge.js';
 import { BUILDER_SEED_PROFILES, chooseBuilderProfile, computeBuilderBeliefs, builderMutateDue, proposeBuilderProfile } from './src/lib/builderBrain.js';
 import type { BuilderProfile, BuilderOutcome } from './src/lib/builderBrain.js';
+// Close the loop: recursive learning orders tool generation, and real forge
+// outcomes feed back into the learner (canonical keys + graded reward).
+import {
+  rankForgeSpecsByLearnerPlan,
+  forgeLearnUpdate,
+  chooseMintTarget,
+  mintContextForTarget,
+  mintedProblemToForgeSpec,
+} from './src/lib/forgeLearningLoop.js';
 import { bbtchIdeaToProposal, heuristicScore, sortProposals, nextProposalToPursue } from './src/lib/intelInvention.js';
 import type { IntelProposal } from './src/lib/intelInvention.js';
 import { intelSourceStatuses, pullBbtchArchetypes, rankProposalsWithStrategy } from './src/lib/intelSources.js';
@@ -253,9 +264,11 @@ import { buildFleetMemoryEntry } from './src/lib/fleetMemory.js';
 // Open-Ended Capability Engine — problem minting, curriculum, novelty/property
 // gates, patch-mode editing, and dedup-aware fleet recursion.
 import { OpenEndedArchive } from './src/lib/openEnded/archive.js';
-import { runOpenEndedCycle, type OpenEndedCycleResult } from './src/lib/openEnded/engine.js';
+import { runOpenEndedCycle, rewardForResult, capabilityKeyFor, type OpenEndedCycleResult } from './src/lib/openEnded/engine.js';
 import { FleetRecursionLedger, summarizeFleetRecursion } from './src/lib/openEnded/fleetRecursion.js';
+import { mintProblems } from './src/lib/openEnded/problemMint.js';
 import { runPatchAttempt } from './src/lib/openEnded/patchMode.js';
+import { inspire } from './src/lib/inspirationCrossover.js';
 
 // Intake / benchmark / readout subsystem
 import { SignalStore, DEFAULT_TOPIC_QUERIES, DEFAULT_RSS_FEEDS } from './src/intake/store.js';
@@ -305,6 +318,8 @@ import { createToolsRouter } from './src/routes/tools.js';
 import { createPipelinesRouter } from './src/routes/pipelines.js';
 import { createServicesRouter } from './src/routes/services.js';
 import { createSynergyRouter } from './src/routes/synergy.js';
+import { createFleetDogfoodRouter } from './src/routes/fleetDogfood.js';
+import { runFleetDogfoodCycle } from './src/lib/fleetDogfood.js';
 import { createVizRouter } from './src/routes/viz.js';
 import { createGhidraRouter } from './src/routes/ghidra.js';
 import { buildLearnResult } from './src/lib/ghidraLearning.js';
@@ -773,6 +788,8 @@ Rules:
 }
 
 const dreamStore = createDreamStore();
+// P1 sleep-time compute: how many specs to pre-compute per consolidation cycle.
+const SLEEP_COMPUTE_LIMIT = Math.max(1, Number(process.env.SLEEP_COMPUTE_LIMIT) || 2);
 // Real signal provider for memory_consolidation phase: feeds math readiness,
 // lego assembly count, and learner episode/calibration into the dream engine
 // so the dream's cognitive coherence is signed by the live system, not a curve.
@@ -795,6 +812,45 @@ const dreamEngine = new DreamingEngine(
         return (learner as any).lastReport?.calibrationError ?? 0;
       } catch {
         return 0;
+      }
+    },
+    // P1 sleep-time compute: during consolidation, precompute + sandbox-verify
+    // artifacts for the forge specs the learner is most likely to need next.
+    // The forge consumes a verified artifact with zero model calls; it is still
+    // re-verified before promotion.
+    sleepCompute: async () => {
+      try {
+        const specs = allForgeSpecs();
+        const have = new Set([
+          ...registry.map((t) => t.name),
+          ...forgeLedger.filter((l) => l.status === 'materialized').map((l) => l.name),
+        ]);
+        const pending = specs.filter((s) => !have.has(s.name)).slice(0, SLEEP_COMPUTE_LIMIT);
+        return await runSleepComputeUnit({
+          specs: pending.map((s) => ({
+            name: s.name,
+            domain: s.domain,
+            prompt: s.prompt ?? s.title,
+            refSuite: s.refSuite ?? '',
+          })),
+          generate: async (task) => {
+            const res = await generateForgeSource(
+              {
+                id: `sleep_${task.name}`,
+                name: task.name,
+                domain: task.domain as ToolDomain,
+                title: task.name,
+                prompt: task.prompt,
+                refSuite: task.refSuite,
+              },
+            );
+            return { ok: res.ok === true, source: res.source };
+          },
+          verify: (source, suite) => executeTestSuite(source, suite),
+          limit: SLEEP_COMPUTE_LIMIT,
+        });
+      } catch (err) {
+        return { attempted: 0, ready: 0, note: `sleep compute unavailable: ${err instanceof Error ? err.message : String(err)}` };
       }
     },
   },
@@ -3071,6 +3127,8 @@ res.status(400).json({ success: false, error: "action must be 'start' or 'stop'"
 // ---------------------------------------------------------------------------
 app.use('/api/recourse', createServicesRouter());
 app.use('/api/recourse', createSynergyRouter());
+// Bidirectional Recourse <-> Draymond dogfood loop (trend + synergy + TID).
+app.use('/api/recourse', createFleetDogfoodRouter());
 
 // Math Conductor routes — the 24/7 loop for hard math problems.
 app.post('/api/recourse/math/toggle', (req, res) => {
@@ -8708,11 +8766,13 @@ async function literatureScoreForSpec(spec: ForgeSpec): Promise<{ score: number;
   }
 }
 
-function nextForgeSpec(): ForgeSpec | null {
+function nextForgeSpec(order?: ForgeSpec[]): ForgeSpec | null {
   const names = new Set(registry.map((t) => t.name));
   const builtLedger = new Set(forgeLedger.filter((l) => l.status === 'materialized').map((l) => l.name));
   const selfHosted = new Set(listSelfHostedEntries().map((e) => e.name));
-  for (const spec of allForgeSpecs()) {
+  // Iterate the learner-ordered agenda when supplied; fall back to the static
+  // construction order (allForgeSpecs) so callers without a plan are unchanged.
+  for (const spec of order ?? allForgeSpecs()) {
     // Quarantined specs (repeated live-re-verify failures) are skipped — the
     // autopilot must not spin forever on a gene that cannot self-host.
     if ((forgeQuarantine.get(spec.name) ?? 0) >= FORGE_QUARANTINE_LIMIT) continue;
@@ -8724,6 +8784,208 @@ function nextForgeSpec(): ForgeSpec | null {
     if (!names.has(spec.name) && !builtLedger.has(spec.name)) return spec;
   }
   return null;
+}
+
+// =========================================================================
+// Recursive-learning <-> capability-forge integration
+// =========================================================================
+// The learner decides WHERE to build (its generation plan); the forge reports
+// WHAT it built back. Both directions go through the pure `forgeLearningLoop`
+// module so the decision is deterministic and replayable.
+
+// The fleet self-report (OpenHub) changes slowly; cache it so the 2s forge
+// autopilot does not hammer vector memory just to pick a priority domain.
+let forgeFleetSignalCache: { at: number; degraded: boolean; beliefs: GeneBelief[] } | null = null;
+const FORGE_FLEET_SIGNAL_TTL_MS = Math.max(5_000, Number(process.env.FORGE_FLEET_SIGNAL_TTL_MS) || 30_000);
+
+async function cachedFleetSignal(): Promise<{ degraded: boolean; beliefs: GeneBelief[] }> {
+  const now = Date.now();
+  if (forgeFleetSignalCache && now - forgeFleetSignalCache.at < FORGE_FLEET_SIGNAL_TTL_MS) {
+    return { degraded: forgeFleetSignalCache.degraded, beliefs: forgeFleetSignalCache.beliefs };
+  }
+  const fleet = await openhubFleetSignal();
+  forgeFleetSignalCache = { at: now, degraded: fleet.degraded, beliefs: fleet.beliefs };
+  return { degraded: fleet.degraded, beliefs: fleet.beliefs };
+}
+
+/**
+ * The forge agenda ordered by the recursive learner's real generation plan.
+ * When the fleet reports degraded, the systemic domain is ranked first (the
+ * fleet's own weak spot) — the same boost the synthesize-directive route uses.
+ * Honest fallback: any learner/fleet read failure returns the static agenda.
+ */
+async function forgeSpecOrder(): Promise<ForgeSpec[]> {
+  const specs = allForgeSpecs();
+  try {
+    const state = await learner.status();
+    const fleet = await cachedFleetSignal();
+    const planningState = mergeFleetBeliefs(state, fleet.beliefs);
+    const { ordered } = rankForgeSpecsByLearnerPlan(specs, planningState, {
+      priorityDomains: fleet.degraded ? (['systemic'] as const) : [],
+    });
+    return ordered;
+  } catch {
+    return specs;
+  }
+}
+
+/** Recall prior solutions from durable memory as generator inspiration, or
+ *  undefined when memory is unavailable / has no confident match. */
+async function forgeInspirationHint(spec: ForgeSpec): Promise<string | undefined> {
+  try {
+    const mem = await ensureVectorMemory();
+    const hits = await mem.recall(`${spec.title} ${spec.prompt}`, null, 20);
+    const items = hits
+      .filter((h) => typeof h.text === 'string' && h.text.length > 20)
+      .map((h) => ({ id: h.id, text: h.text }));
+    if (!items.length) return undefined;
+    const inspiration = inspire(`${spec.title} ${spec.prompt}`, items, { k: 2, threshold: 0.2 });
+    if (!inspiration.hits.length) return undefined;
+    const block = inspiration.hits
+      .map((h, i) => `[prior solution ${i + 1} — similarity ${h.similarity}] ${h.text}`)
+      .join('\n');
+    const experience = experienceHint(spec.domain);
+    return (
+      'Prior verified solutions worth borrowing ideas from ' +
+      `(do not copy blindly; the contract above is the real judge):\n${block}` +
+      (experience ? `\n\n${experience}` : '')
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+/** Fold a real forge outcome into the learner's beliefs (canonical key + graded
+ *  reward). Best-effort: a learner write failure never blocks the forge. */
+async function learnFromForgeOutcome(
+  outcome: ForgeAttemptOutcome,
+  spec: ForgeSpec,
+  status: ForgeLedgerEntry['status'],
+): Promise<void> {
+  const update = forgeLearnUpdate(outcome, spec, status);
+  if (!update) return;
+  try {
+    await learner.learnRealTools([update]);
+  } catch {
+    /* honest: learning is best-effort; the forge ledger is the source of truth */
+  }
+}
+
+/** Real sandbox verifier for minted problems (shared by forge minting). */
+function sandboxVerify(source: string, suite: string): { passed: boolean; testDetails: string[] } {
+  const run = executeTestSuite(source, suite);
+  return { passed: run.passed, testDetails: run.testDetails };
+}
+
+let forgeMintBusy = false;
+
+/**
+ * Mint a brand-new forge spec from the learner's top unmet synthesize/refine
+ * target. The model drafts a problem AND a reference implementation; the
+ * reference must pass its own acceptance test in the sandbox before the problem
+ * is admitted (the same proof the open-ended engine uses). The admitted
+ * acceptance test becomes the forge's hidden reference suite, so a later forge
+ * cycle builds and sandbox-verifies a real implementation against it. Returns
+ * the number of specs added.
+ */
+async function mintForgeSpecFromLearnerPlan(): Promise<number> {
+  if (forgeMintBusy) return 0;
+  forgeMintBusy = true;
+  try {
+    const state = await learner.status().catch(() => null);
+    if (!state) return 0;
+    const targets = generationTargets(state);
+    const existing = allForgeSpecs();
+    // Only domains with NOTHING waiting to be built count as "covered": once a
+    // minted spec is built, a still-weak domain may mint another.
+    const built = new Set([
+      ...registry.map((t) => t.name),
+      ...forgeLedger.filter((l) => l.status === 'materialized').map((l) => l.name),
+    ]);
+    const pendingDomains = existing.filter((s) => !built.has(s.name)).map((s) => s.domain);
+    const target = chooseMintTarget(targets, pendingDomains);
+    if (!target) return 0;
+
+    const knownTitles = existing.map((s) => s.title);
+    const result = await mintProblems({
+      context: mintContextForTarget(target),
+      count: 1,
+      knownTitles,
+      draft: async (system, user) => {
+        const res = await chatComplete(
+          [
+            { role: 'system', content: system },
+            { role: 'user', content: user },
+          ],
+          { temperature: 0.4 },
+        );
+        if (!res.ok || res.content === null) throw new Error(res.error || 'model offline');
+        return res.content;
+      },
+      verify: sandboxVerify,
+    });
+
+    let added = 0;
+    for (const problem of result.minted) {
+      const spec = mintedProblemToForgeSpec(problem, { sourceDirectiveId: target.directiveId });
+      if (registry.some((t) => t.name === spec.name)) continue;
+      if (allForgeSpecs().some((s) => s.name === spec.name)) continue;
+      dynamicAgenda.push(spec);
+      added += 1;
+    }
+    if (added > 0) {
+      saveStateToDisk();
+      appendProvenanceEvent('capability_adopted', {
+        driverId: `learner_mint:${target.domain}`,
+        note: `minted ${added} new ${target.domain} forge spec(s) from learner ${target.action}`,
+        domain: target.domain,
+      });
+      console.log(`[forge] minted ${added} new ${target.domain} spec(s) from learner plan (${target.reason}).`);
+    }
+    return added;
+  } catch (err) {
+    console.warn('[forge] learner mint failed:', err instanceof Error ? err.message : String(err));
+    return 0;
+  } finally {
+    forgeMintBusy = false;
+  }
+}
+
+/**
+ * Operator-facing view of the recursive-learning plan the forge is following:
+ * the domain targets, the next spec that will be built, and the top of the
+ * learner-ordered agenda. Honest: a read failure returns { error }.
+ */
+async function forgePlanSummary(): Promise<Record<string, unknown>> {
+  const specs = allForgeSpecs();
+  try {
+    const state = await learner.status();
+    const fleet = await cachedFleetSignal();
+    const planningState = mergeFleetBeliefs(state, fleet.beliefs);
+    const ranking = rankForgeSpecsByLearnerPlan(specs, planningState, {
+      priorityDomains: fleet.degraded ? (['systemic'] as const) : [],
+    });
+    const built = new Set([
+      ...registry.map((t) => t.name),
+      ...forgeLedger.filter((l) => l.status === 'materialized').map((l) => l.name),
+    ]);
+    const next = ranking.ordered.find((s) => !built.has(s.name));
+    return {
+      episode: state.episode,
+      fleetDegraded: fleet.degraded,
+      targets: ranking.targets.map((t) => ({
+        domain: t.domain, action: t.action, priority: t.priority, reason: t.reason,
+      })),
+      next: next
+        ? { id: next.id, name: next.name, domain: next.domain, title: next.title, reason: ranking.reasons[next.id] }
+        : null,
+      order: ranking.ordered.slice(0, 12).map((s) => ({
+        name: s.name, domain: s.domain, built: built.has(s.name), reason: ranking.reasons[s.id],
+      })),
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 /** Current promoted source of a registry entry, or null. */
@@ -9156,10 +9418,20 @@ async function runOpenEndedEngineCycle(): Promise<OpenEndedCycleResult | { skipp
 
     appendOpenEndedCycle(result);
 
-    // Learn back: fold the real outcome into the recursive learner.
+    // Learn back: fold the GRADED real outcome into the recursive learner,
+    // keyed by the canonical capability key so name-variants of one capability
+    // compound onto a single posterior (and match the forge's learned keys).
     if (result.picked) {
+      const key = capabilityKeyFor(result);
       await learner
-        .learnRealTools([{ name: result.picked.title, domain: result.picked.domain, reward: result.solved ? 1 : 0 }])
+        .learnRealTools([
+          {
+            name: result.picked.title,
+            domain: result.picked.domain,
+            reward: rewardForResult(result),
+            ...(key ? { key: key.replace(/^real:/, '') } : {}),
+          },
+        ])
         .catch(() => ({}));
     }
     if (result.solved && result.source && result.picked) {
@@ -9191,7 +9463,14 @@ function openEndedSnapshot() {
 }
 
 async function runForgeCycle(): Promise<ForgeLedgerEntry | { skipped: boolean; reason: string }> {
-  const spec = nextForgeSpec();
+  // The learner's generation plan orders the agenda so the next tool targets its
+  // weakest domain; when the whole agenda is exhausted, mint a fresh spec from
+  // the learner's top unmet synthesize/refine target.
+  let spec = nextForgeSpec(await forgeSpecOrder());
+  if (!spec) {
+    const minted = await mintForgeSpecFromLearnerPlan();
+    if (minted > 0) spec = nextForgeSpec(await forgeSpecOrder());
+  }
   if (!spec) {
     return { skipped: true, reason: 'agenda complete (all capabilities built or already present)' };
   }
@@ -9241,13 +9520,50 @@ async function runForgeCycle(): Promise<ForgeLedgerEntry | { skipped: boolean; r
     }
   } else {
     const b = activeBuilderProfile();
-    outcome = await attemptForgeSpec(spec, 3, { systemPrompt: b.systemPrompt, temperature: b.temperature });
+    // Cross-run knowledge transfer: recall prior verified solutions from durable
+    // memory and inject them as generator inspiration (best-effort).
+    const inspirationHint = await forgeInspirationHint(spec);
+    // P0.1 compute-optimal budget: easy/well-understood domains get 1 sample,
+    // only hard/uncertain ones earn more (arXiv:2408.03314).
+    const samples = await forgeSamplesForSpec(spec);
+    // P1: consume a verified sleep-time-compute artifact with zero model calls
+    // when the dream precomputed one (the forge still re-verifies it).
+    const sleepArtifact = takeReadySleepArtifact(spec.name, spec.domain);
+    outcome = await attemptForgeSpec(spec, samples, {
+      systemPrompt: b.systemPrompt,
+      temperature: b.temperature,
+      samples,
+      ...(inspirationHint ? { inspirationHint } : {}),
+      ...(sleepArtifact ? { precomputedSource: sleepArtifact.source } : {}),
+    });
     if (outcome.reason !== 'offline') {
       recordBuilderOutcome(b.id, spec, outcome.ok === true, outcome.attemptsUsed);
       builderMetaStep(false);
+      // P1 experience distillation: learn which (domain, strategy) actually works.
+      try { recordExperience(spec.domain, b.id, outcome.ok === true); } catch { /* best-effort */ }
     }
   }
-  return materializeForgeOutcome(outcome, spec, literature);
+  const entry = await materializeForgeOutcome(outcome, spec, literature);
+  // Close the loop: the real verification/materialization outcome updates the
+  // learner's domain beliefs so the next generation plan reflects it.
+  await learnFromForgeOutcome(outcome, spec, entry.status);
+  return entry;
+}
+
+/** P0.1: compute-optimal sample budget for a spec from the learner's real
+ *  domain belief. Falls back to a structural prompt-size proxy when the learner
+ *  has no evidence for the domain. */
+async function forgeSamplesForSpec(spec: ForgeSpec): Promise<number> {
+  try {
+    const state = await learner.status();
+    const summary = summarizeBeliefsByDomain(Object.values(state.geneBeliefs)).find((d) => d.domain === spec.domain);
+    return forgeSampleBudget(
+      { uncertainty: summary?.uncertainty, meanReward: summary?.meanReward, promptChars: spec.prompt?.length },
+      { max: Math.max(1, Number(process.env.FORGE_BUDGET_MAX) || 3) },
+    );
+  } catch {
+    return forgeSampleBudget({ promptChars: spec.prompt?.length });
+  }
 }
 
 function ensureForgeAutopilot(): void {
@@ -9266,6 +9582,45 @@ function stopForgeAutopilot(): void {
 
 app.get('/api/recourse/forge', (req, res) => {
   res.json({ success: true, forge: forgeSnapshot() });
+});
+
+// Efficiency telemetry (P0/P1): completion-cache hit rate, sleep-time-compute
+// artifacts, and distillation coverage. Read-only.
+app.get('/api/recourse/perf', (_req, res) => {
+  res.json({
+    success: true,
+    completionCache: completionCacheSnapshot(),
+    sleepCompute: sleepComputeSnapshot(),
+    experience: experienceSnapshot(),
+    policy: {
+      adaptiveBudgetMin: 1,
+      adaptiveBudgetMax: Number(process.env.FORGE_BUDGET_MAX) || 3,
+      modelCacheDisabled: process.env.MODEL_CACHE_DISABLED === '1',
+      sleepComputeLimit: SLEEP_COMPUTE_LIMIT,
+    },
+  });
+});
+
+// The recursive-learning plan the forge is following (which domain next, and
+// the learner-ordered agenda). Read-only.
+app.get('/api/recourse/forge/plan', async (_req, res) => {
+  try {
+    res.json({ success: true, plan: await forgePlanSummary() });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// Explicitly mint one new forge spec from the learner's top unmet target. The
+// autopilot does this automatically when the agenda is exhausted; this route
+// lets an operator trigger it on demand.
+app.post('/api/recourse/forge/mint', async (_req, res) => {
+  try {
+    const added = await mintForgeSpecFromLearnerPlan();
+    res.json({ success: true, added, forge: forgeSnapshot() });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e.message });
+  }
 });
 
 app.post('/api/recourse/forge/run', async (req, res) => {
@@ -10852,6 +11207,8 @@ async function startServer() {
  * failures are isolated (one broken subsystem never stops the others).
  * Called once at boot (and safe to re-call).
  */
+let fleetDogfoodBusy = false;
+
 function registerAllSchedulerJobs(): void {
   const register = (def: Parameters<typeof registerScheduledJob>[0]) => {
     const r = registerScheduledJob(def);
@@ -10908,6 +11265,29 @@ function registerAllSchedulerJobs(): void {
         archive: r.archive.total,
         unsolved: r.archive.unsolved,
       };
+    },
+  });
+
+  register({
+    id: 'fleet-dogfood',
+    name: 'Fleet Dogfood (Recourse <-> Draymond trend/synergy/TID loop)',
+    group: 'science',
+    cadenceMs: Math.max(60_000, Number(process.env.FLEET_DOGFOOD_MS) || 30 * 60 * 1000),
+    enabledByDefault: true,
+    run: async () => {
+      if (fleetDogfoodBusy) return { skipped: 'dogfood busy (overlap)' };
+      fleetDogfoodBusy = true;
+      try {
+        const snap = await runFleetDogfoodCycle();
+        return {
+          online: snap.draymond.online,
+          series: snap.ingest.series,
+          links: snap.graph.links,
+          persisted: snap.export.persisted,
+        };
+      } finally {
+        fleetDogfoodBusy = false;
+      }
     },
   });
 

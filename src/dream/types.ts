@@ -95,6 +95,10 @@ export interface DreamState {
   } | null;
   /** How many memory consolidation cycles have run (increments each phase). */
   consolidationCount?: number;
+  /** P1 sleep-time compute: consolidation cycles that ran an offline precompute. */
+  sleepComputeRuns?: number;
+  /** P1: cumulative sandbox-verified artifacts produced offline (sleep-time). */
+  sleepReadyArtifacts?: number;
 }
 
 export interface TickResult {
