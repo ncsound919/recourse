@@ -233,7 +233,6 @@ import {
   maybeRefreshBenchmark,
   memoryStoreStatus,
   consolidateSemanticMemory,
-  runSkillPromotionPass,
 } from './src/lib/recourseActivator.js';
 
 // AgentBrowser web-fetch connector (download from the web through the real browser).
@@ -258,8 +257,7 @@ import {
   isIsolateAvailable,
   executeToolInIsolate,
 } from './src/lib/isolatedSandbox.js';
-import { VectorMemory, openVectorMemory, MemoryKind } from './src/lib/vectorMemory.js';
-import { buildFleetMemoryEntry } from './src/lib/fleetMemory.js';
+import { VectorMemory, openVectorMemory } from './src/lib/vectorMemory.js';
 // Open-Ended Capability Engine — problem minting, curriculum, novelty/property
 // gates, patch-mode editing, and dedup-aware fleet recursion.
 import { OpenEndedArchive } from './src/lib/openEnded/archive.js';
@@ -320,6 +318,7 @@ import { createServicesRouter } from './src/routes/services.js';
 import { createResearchRouter } from './src/routes/research.js';
 import { createOrchestrationRouter } from './src/routes/orchestration.js';
 import { createMusicTherapyRouter } from './src/routes/musicTherapy.js';
+import { createMemoryRouter } from './src/routes/memory.js';
 import { createSynergyRouter } from './src/routes/synergy.js';
 import { createFleetDogfoodRouter } from './src/routes/fleetDogfood.js';
 import { runFleetDogfoodCycle } from './src/lib/fleetDogfood.js';
@@ -2277,46 +2276,15 @@ async function indexSystemMemory(): Promise<{ indexed: number; status: any }> {
   return { indexed, status: await mem.status() };
 }
 
-app.get('/api/recourse/memory/status', async (_req, res) => {
-  try { res.json({ success: true, status: await (await ensureVectorMemory()).status() }); }
-  catch (e: any) { res.status(500).json({ success: false, error: e.message }); }
-});
-
-app.post('/api/recourse/memory/index', async (_req, res) => {
-  try { res.json({ success: true, ...(await indexSystemMemory()) }); }
-  catch (e: any) { res.status(500).json({ success: false, error: e.message }); }
-});
-
-// Tiered memory (episodic + semantic): durable SQLite-backed store status.
-app.get('/api/recourse/memory/tiered', (_req, res) => {
-  res.json({ success: true, ...memoryStoreStatus() });
-});
-
-// Consolidate episode clusters into durable semantic facts (idempotent).
-app.post('/api/recourse/memory/consolidate', (req, res) => {
-  if (!requireMutationAuth(req, res)) return;
-  try {
-    const minClusterSize = Math.max(1, Number(req.body?.minClusterSize) || 2);
-    const created = consolidateSemanticMemory({ minClusterSize });
-    res.json({ success: true, created: created.length, facts: created, ...memoryStoreStatus() });
-  } catch (e: any) {
-    res.status(500).json({ success: false, error: e.message });
-  }
-});
-
-// Skill auto-promotion pass: detect generalist genes, then verify + lint +
-// export the verified self-hosted tool backing them as a SKILL.md folder.
-app.post('/api/recourse/memory/promote-skills', async (req, res) => {
-  if (!requireMutationAuth(req, res)) return;
-  try {
-    const minDistinctProblemWins = Math.max(1, Number(req.body?.minDistinctProblemWins) || 2);
-    const maxPerRun = Math.min(10, Math.max(1, Number(req.body?.maxPerRun) || 3));
-    const result = await runSkillPromotionPass({ minDistinctProblemWins, maxPerRun });
-    res.json({ success: true, ...result });
-  } catch (e: any) {
-    res.status(500).json({ success: false, error: e.message });
-  }
-});
+// Memory + fleet-memory routes moved to src/routes/memory.ts (mounted here).
+app.use(
+  '/api/recourse',
+  createMemoryRouter({
+    ensureVectorMemory,
+    indexSystemMemory,
+    openhubFleetSignal,
+  }),
+);
 
 // =========================================================================
 // A2A (Agent-to-Agent) surface — Recourse as a callable agent.
@@ -2496,58 +2464,8 @@ app.post('/api/mcp', async (req, res) => {
   }
 });
 
-app.get('/api/recourse/memory/recall', async (req, res) => {
-  try {
-    const q = String(req.query.q || '');
-    const kind = (req.query.kind as MemoryKind) || null;
-    const topK = Math.min(Number(req.query.topK || 5), 20);
-    const mem = await ensureVectorMemory();
-    const hits = q ? await mem.recall(q, kind, topK) : [];
-    res.json({ success: true, query: q, hits: hits.map((h) => ({ id: h.id, kind: h.kind, text: h.text.slice(0, 300), score: h.score })) });
-  } catch (e: any) { res.status(500).json({ success: false, error: e.message }); }
-});
-
-// Fleet memory intake — external agent loops (Axiom, OpenHub, Draymond) write
-// their real outcomes into Recourse's durable vector memory so Recourse
-// self-learns across the fleet. Guarded fail-closed: this mutates durable state,
-// so it requires RECOURSE_API_SECRET. Text is the only thing indexed; a missing
-// or oversized payload is rejected, never silently truncated into a fake memory.
-app.post('/api/recourse/fleet/memory', async (req, res) => {
-  if (!requireMutationAuth(req, res)) return;
-  try {
-    const entry = buildFleetMemoryEntry(req.body ?? {});
-    if (!entry.ok) {
-      const status = entry.error?.includes('exceeds') ? 413 : 400;
-      return res.status(status).json({ success: false, error: entry.error });
-    }
-    const mem = await ensureVectorMemory();
-    await mem.remember(entry.kind!, entry.id!, entry.text!, entry.meta);
-    res.json({ success: true, indexed: 1, id: entry.id, kind: entry.kind, source: entry.meta?.source, status: await mem.status() });
-  } catch (e: any) {
-    res.status(500).json({ success: false, error: e.message });
-  }
-});
-
-// Fleet signal read surface — what Recourse currently derives from the latest
-// external self-report (OpenHub). Read-only and honest: `available:false` when
-// no report has been ingested, so the loop-closing influence is inspectable.
-app.get('/api/recourse/fleet/signal', async (_req, res) => {
-  try {
-    const signal = await openhubFleetSignal();
-    res.json({
-      success: true,
-      available: signal.beliefs.length > 0,
-      source: 'openhub',
-      reportAt: signal.reportAt,
-      degraded: signal.degraded,
-      health: signal.health,
-      belief: signal.beliefs[0] ?? null,
-      auditSignals: signal.auditSignals,
-    });
-  } catch (e: any) {
-    res.status(500).json({ success: false, error: e.message });
-  }
-});
+// /api/recourse/memory/recall, /fleet/memory, /fleet/signal moved to
+// src/routes/memory.ts (see the createMemoryRouter mount above).
 
 app.post('/api/recourse/policy', (req, res) => {
   const applied = applyPromotionPolicy(req.body?.policy);
