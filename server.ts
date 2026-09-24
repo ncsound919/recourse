@@ -314,6 +314,7 @@ import { createForgeRouter } from './src/routes/forge.js';
 import { createOpenEndedRouter } from './src/routes/openEnded.js';
 import { createRepairRouter } from './src/routes/repair.js';
 import { createPolicyRouter } from './src/routes/policy.js';
+import { createDreamRouter } from './src/routes/dream.js';
 import { createSynergyRouter } from './src/routes/synergy.js';
 import { createFleetDogfoodRouter } from './src/routes/fleetDogfood.js';
 import { runFleetDogfoodCycle } from './src/lib/fleetDogfood.js';
@@ -5338,44 +5339,20 @@ app.post('/api/recourse/decision/execute', async (req, res) => {
 // =========================================================================
 // 2. ALWAYS-ON DREAMING ENGINE ROUTES
 // =========================================================================
-app.get('/api/recourse/dream/status', async (req, res) => {
-  try {
-    const liveDreamState = await dreamEngine.status();
-    dreamState = liveDreamState;
-    res.json({ success: true, dreamState: liveDreamState });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-app.post('/api/recourse/dream/toggle', async (req, res) => {
-  try {
-    await dreamEngine.toggle();
-    dreamState = await dreamEngine.status();
-    res.json({ success: true, isDreamingActive: dreamState.isDreamingActive });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-app.post('/api/recourse/dream/tick', async (req, res) => {
-  try {
-    const tickResult = await dreamEngine.tick();
-    dreamState = tickResult.dreamState;
-    saveStateToDisk();
-    const mirrored = await mirrorCrystallizedDreamGenes();
-    res.json({
-      success: true,
-      dreamState: tickResult.dreamState,
-      newThought: tickResult.newThought,
-      phaseReport: tickResult.phaseReport,
-      mirroredGenes: mirrored,
-      readyToCrystallize: tickResult.newThought?.crystallizationReadiness && tickResult.newThought.crystallizationReadiness >= 0.85 ? tickResult.newThought : undefined
-    });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
+// Moved to src/routes/dream.ts; engine instance, dream-state mirror, registry
+// promotion, and the crystal-mirror helper stay host-side and are injected.
+app.use(
+  '/api/recourse',
+  createDreamRouter({
+    dreamEngine,
+    setDreamState: (state) => { dreamState = state; },
+    saveState: saveStateToDisk,
+    mirrorCrystallizedDreamGenes,
+    promoteTool,
+    statusRef: () => status,
+    appendProvenance: (eventType, data) => appendProvenanceEvent(eventType as ProvenanceEvent['type'], data),
+  }),
+);
 
 /** Mirror the dream engine's internally-crystallized genes into the REAL main
  *  tool registry, so every "crystallized a new gene" narration corresponds to a
@@ -5561,87 +5538,6 @@ function buildForgePromptFromGene(gene: { name: string; description?: string; co
   ].join('\n');
 }
 
-app.post('/api/recourse/dream/crystallize', async (req, res) => {
-  try {
-    const { thoughtId } = req.body;
-    const liveState = await dreamEngine.status();
-    const thought = liveState.recentThoughts.find(t => t.id === thoughtId) || liveState.recentThoughts[0];
-    if (!thought) {
-      return res.status(404).json({ success: false, error: 'Thought not found for crystallization' });
-    }
-
-    const r = await dreamEngine.crystallize(thought.id);
-    if (!r.success || !r.crystallizedTool) {
-      return res.status(422).json({ success: false, error: r.error || 'Verification failed in sandbox' });
-    }
-
-    dreamState = r.dreamState;
-    const cTool = r.crystallizedTool;
-    const version = '1.0.0';
-    const versionHash = crypto.createHash('sha256').update(cTool.code).digest('hex').substring(0, 16);
-
-    const newToolEntry: ToolEntry = {
-      name: cTool.name,
-      domain: cTool.domain,
-      entrypoint: `src/tools/${cTool.name}.ts`,
-      description: `Lucidly Crystallized: ${cTool.description}`,
-      currentVersion: version,
-      versions: [{
-        version,
-        hash: versionHash,
-        created_at: Date.now(),
-        passed_verifier: cTool.verified,
-        score: cTool.verified ? 1.0 : 0,
-        promoted: cTool.verified,
-        verifier_notes: cTool.verified ? `Dream gene passed engine sandbox verification (${cTool.kind}).` : 'Dream gene failed engine verification.',
-        source_code: cTool.code
-      }],
-      healthStatus: cTool.verified ? 'healthy' : 'degraded',
-      anomalyCount: 0
-    };
-
-  const promotedDream = promoteTool(newToolEntry, { origin: 'dream-crystallize' });
-  if (promotedDream) {
-    status.totalUpgrades += 1;
-
-    appendProvenanceEvent('dream_crystallized', {
-      thoughtId: thought.id,
-      phase: thought.phase,
-      domain: thought.domain,
-      toolName: cTool.name,
-      kind: cTool.kind,
-      version,
-      hash: versionHash
-    });
-
-    saveStateToDisk();
-  }
-
-    res.json({
-      success: true,
-      promoted: promotedDream,
-      crystallizedTool: newToolEntry,
-      dreamState: r.dreamState
-    });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-app.get('/api/recourse/dream/cron', async (req, res) => {
-  try {
-    if (process.env.DREAM_CRON_SECRET && req.headers['x-dream-secret'] !== process.env.DREAM_CRON_SECRET) {
-      return res.status(401).json({ success: false, error: 'unauthorized' });
-    }
-    const r = await dreamEngine.runCatchUpTicks(60);
-    dreamState = r.dreamState;
-    saveStateToDisk();
-    const mirrored = await mirrorCrystallizedDreamGenes();
-    res.json({ success: true, ...r, mirroredGenes: mirrored });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
 
 // =========================================================================
 // 2.5 AI ARCHITECTURAL MUTATOR ROUTES
