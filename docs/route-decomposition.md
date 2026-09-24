@@ -48,17 +48,17 @@
 | `src/routes/decision.ts` | growth decision evaluate/weights/execute + JEV status/public/evaluate/noul/promotion |
 | `src/routes/templates.ts` | component template list/detail/build/benchmark |
 | `src/routes/learn.ts` | learn/synthesize-directive, crossover, approve, verify, evolve + learn/status\|episode\|run\|replay\|directives |
+| `src/routes/readout.ts` | big `GET /status`, provenance, registry, sandbox, failures, benchmark, selfuse, snapshots, legacy-digest, upgrade-report, capabilities, generations, readout (`GET /metrics` stays inline — app-root path) |
 
 Harness: `scripts/route-snapshot.mjs` + `tests/fixtures/route-snapshot.json` +
 `tests/routeSnapshot.test.ts` guard the full 496-route table against drift.
 
-As of `learn`: `server.ts` is ~8.7k lines, 50 routers, 53 inline routes.
+As of `readout`: `server.ts` is ~8.5k lines, 51 routers, 40 inline routes.
 
 ## Remaining clusters (in descending value, roughly)
 
 | Cluster | Approx. routes | Notes / likely deps to inject |
 | --- | --- | --- |
-| `readout.ts` / `metrics` / core | ~10 | `verifyChainIntegrity`, `buildUpgradeReport`, `telemetryAuthorized` |
 | A2A / MCP / openapi / replay | ~7 | `a2aBaseUrl`, `internalApiCall`, `buildA2aOperations` |
 
 The A2A/MCP block is intentionally coupled to `internalApiCall` (same-process
