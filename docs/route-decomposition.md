@@ -50,20 +50,20 @@
 | `src/routes/learn.ts` | learn/synthesize-directive, crossover, approve, verify, evolve + learn/status\|episode\|run\|replay\|directives |
 | `src/routes/readout.ts` | big `GET /status`, provenance, registry, sandbox, failures, benchmark, selfuse, snapshots, legacy-digest, upgrade-report, capabilities, generations, readout (`GET /metrics` stays inline — app-root path) |
 | `src/routes/interop.ts` | replay, OpenAPI spec + operation index, agent card, A2A JSON-RPC, remote MCP (mounted at app root — paths span `/api/recourse`, `/api`, `/.well-known`) |
+| `src/routes/math.ts` | math conductor: state/step/reset/configure, problems/attempts/goals, solve (pairs with `solveNextMathProblem` hoisted to module level) |
 
 Harness: `scripts/route-snapshot.mjs` + `tests/fixtures/route-snapshot.json` +
 `tests/routeSnapshot.test.ts` guard the full 496-route table against drift.
 
-As of `interop`: `server.ts` is ~8.4k lines, 52 routers, 34 inline routes.
+As of `math`: `server.ts` is ~8.3k lines, 53 routers, 26 inline routes.
 
 ## Remaining clusters (in descending value, roughly)
 
-All clusters named in this table have been extracted. The 34 inline routes
+All clusters named in this table have been extracted. The 26 inline routes
 that remain are grouped by domain but not yet scheduled:
 
 | Group | Approx. routes | Notes |
 | --- | --- | --- |
-| math conductor (`state`/`step`/`reset`/`configure`/`problems`/`attempts`/`goals`/`solve`) | 8 | pairs with `solveNextMathProblem` hoisting |
 | builder (`/builder`, select/propose/step) | 4 | builder brain + forge coupling |
 | provider settings + chat (`provider/chat`, `/v1/chat/completions`, `settings/provider` GET/POST) | 4 | provider profile mutation |
 | axiom (`axiom/status`, `develop/axiom`, `axiom/build-tool`) | 3 | axiom bridge |

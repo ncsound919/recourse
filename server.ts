@@ -47,7 +47,7 @@ import { exportOdeToPhysicell } from './src/lib/physicellExporter.js';
 import { buildEvidenceDossier } from './src/lib/evidenceDossier.js';
 import { otSearch, otHealth as openTargetsHealth } from './src/lib/openTargetsClient.js';
 import { ptSearch, ptHealth as pubTatorHealth, parsePubTatorAnnotations } from './src/lib/pubTatorClient.js';
-import { HARD_MATH_PROBLEMS, ProblemTier } from './src/lib/hardMathProblems.js';
+import { HARD_MATH_PROBLEMS } from './src/lib/hardMathProblems.js';
 import { recordMathAttempt, recordBiotechClaim, getMathAttempts, getBiotechClaims, getGoalProgress, MathAttempt, BiotechClaim as LedgerBiotechClaim, initGoalLedger, saveGoalLedger } from './src/lib/goalLedger.js';
 import { oncologyHealth } from './src/lib/oncologyEngineBridge.js';
 import { runScienceCycle, recentFindings, recentCycles } from './src/lib/scienceConductor.js';
@@ -93,7 +93,7 @@ import {
   normalizePromotionPolicy
 } from './src/dream/mutator.js';
 import { INITIAL_SWARM_STATUS, dispatchSubAgentTask, stepSubTeams, INITIAL_SUB_TEAM_STATES, SubTeamState } from './src/lib/subagentSwarm.js';
-import { createInitialLoopState, executeRecursiveStep, DEFAULT_LOOP_CONFIG } from './src/lib/recursiveMathEngine.js';
+import { createInitialLoopState, executeRecursiveStep } from './src/lib/recursiveMathEngine.js';
 import { createLearnerStore, RecursiveLearner } from './src/dream/learner.js';
 import type { GeneBelief } from './src/dream/learner-types.js';
 import {
@@ -290,6 +290,7 @@ import { createTemplatesRouter } from './src/routes/templates.js';
 import { createLearnRouter } from './src/routes/learn.js';
 import { createReadoutRouter } from './src/routes/readout.js';
 import { createInteropRouter } from './src/routes/interop.js';
+import { createMathRouter } from './src/routes/math.js';
 import { createSynergyRouter } from './src/routes/synergy.js';
 import { createFleetDogfoodRouter } from './src/routes/fleetDogfood.js';
 import { runFleetDogfoodCycle } from './src/lib/fleetDogfood.js';
@@ -4603,64 +4604,16 @@ app.use(
 // =========================================================================
 // 5. FIVE-FORMULA RECURSIVE LEARNING LOOP ROUTES
 // =========================================================================
-app.get('/api/recourse/math/state', (req, res) => {
-  res.json({
-    success: true,
-    state: mathLoopState
-  });
-});
 
-app.post('/api/recourse/math/step', (req, res) => {
-  try {
-    const result = executeRecursiveStep(mathLoopState);
-    if (result.readinessScore > 0.95 && result.loopStatus === 'optimal') {
-      appendProvenanceEvent('system_tick', {
-        type: 'recursive_math_convergence',
-        iteration: result.iteration,
-        readiness: result.readinessScore,
-        lorentzGamma: result.energyBudget.lorentzFactorGamma
-      });
-      saveStateToDisk();
-    }
-    res.json({
-      success: true,
-      result,
-      state: mathLoopState
-    });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-app.post('/api/recourse/math/reset', (req, res) => {
-  try {
-    mathLoopState = createInitialLoopState(mathLoopState.config || DEFAULT_LOOP_CONFIG);
-    res.json({
-      success: true,
-      state: mathLoopState
-    });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-app.post('/api/recourse/math/configure', (req, res) => {
-  try {
-    const { config } = req.body ?? {};
-    if (config && typeof config === 'object') {
-      mathLoopState.config = {
-        ...mathLoopState.config,
-        ...config
-      };
-    }
-    res.json({
-      success: true,
-      state: mathLoopState
-    });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
+// Recursive-math conductor routes (state/step/reset/configure,
+// problems/attempts/goals, solve) moved to src/routes/math.ts.
+app.use('/api/recourse', createMathRouter({
+  mathLoopStateRef: () => mathLoopState,
+  setMathLoopState: (s) => { mathLoopState = s; },
+  solveNextMathProblem,
+  appendProvenance: (type, data) => appendProvenanceEvent(type as any, data),
+  saveState: () => saveStateToDisk(),
+}));
 
 // =========================================================================
 // 5b. BIOTECH / ONCOLOGY GOAL — real semantic claim verification against KG
@@ -4725,49 +4678,6 @@ app.get('/api/recourse/biotech/claims', (req, res) => {
   res.json({ success: true, claims, total: claims.length });
 });
 
-// =========================================================================
-// 5c. MATH GOAL — hard problem tracking
-// =========================================================================
-
-app.get('/api/recourse/math/problems', (req, res) => {
-  const tier = req.query.tier as ProblemTier | undefined;
-  const problems = tier
-    ? HARD_MATH_PROBLEMS.filter(p => p.tier === tier)
-    : HARD_MATH_PROBLEMS;
-  res.json({
-    success: true,
-    count: problems.length,
-    total: HARD_MATH_PROBLEMS.length,
-    problems: problems.map(p => ({
-      id: p.id,
-      tier: p.tier,
-      title: p.title,
-      statement: p.statement,
-      toolName: p.toolName,
-      bound: p.bound,
-      citation: p.citation,
-      successCriterion: p.successCriterion,
-    })),
-  });
-});
-
-app.get('/api/recourse/math/attempts', (req, res) => {
-  const limit = Math.max(1, Math.min(200, Number(req.query.limit) || 50));
-  const attempts = getMathAttempts(limit);
-  res.json({ success: true, attempts, total: attempts.length });
-});
-
-app.get('/api/recourse/math/goals', (req, res) => {
-  const progress = getGoalProgress();
-  const unsolved = HARD_MATH_PROBLEMS
-    .filter(p => p.tier === 'solvable' || p.tier === 'bounded')
-    .map(p => {
-      const attempts = getMathAttempts(500).filter(a => a.problemId === p.id);
-      const solved = attempts.some(a => a.passed);
-      return { id: p.id, tier: p.tier, title: p.title, solved, attempts: attempts.length };
-    });
-  res.json({ success: true, progress, unsolved });
-});
 
 //      live model.
 // (math/solve route moved below the solveNextMathProblem function for proper hoisting)
@@ -5136,108 +5046,7 @@ function maybeAutoDispatchSwarm(dream: DreamState) {
   }
 }
 
-// 11b. HARD MATH SOLVER — attempt one hard math problem per call using the
-//      live model. Generates a candidate tool, verifies against the problem's
-//      acceptance test in the real sandbox, records the attempt + outcome in
-//      the goal ledger. Only ever records passed:true when the suite passed.
 
-async function solveNextMathProblem(): Promise<MathAttempt | { skipped: boolean; reason: string }> {
-  if (mathSolverBusy) return { skipped: true, reason: 'solver busy' };
-  // Rate-limit so we don't hammer the model every tick.
-  if (Date.now() - lastMathSolveAt < MATH_SOLVE_COOLDOWN_MS) {
-    return { skipped: true, reason: 'cooldown' };
-  }
-  mathSolverBusy = true;
-  try {
-    // Pick the next problem: prefer unsolved solvable/bounded tiers; if all
-    // solvable+bounded are solved, fall back to an open-tier (search) problem.
-    const attempts = getMathAttempts(1000);
-    const solvedIds = new Set(attempts.filter((a) => a.passed).map((a) => a.problemId));
-    const target =
-      HARD_MATH_PROBLEMS.find((p) => (p.tier === 'solvable' || p.tier === 'bounded') && !solvedIds.has(p.id)) ||
-      HARD_MATH_PROBLEMS.find((p) => !solvedIds.has(p.id));
-    if (!target) {
-      return { skipped: true, reason: 'all hard math problems solved' };
-    }
-    lastMathSolveAt = Date.now();
-    const started = Date.now();
-
-    const system =
-      `You are an expert competitive mathematician. Implement a self-contained plain JavaScript function ` +
-      `named ${target.toolName || 'solve'} that solves this problem deterministically.\n` +
-      `Return ONLY valid JSON: {"sourceCode": "PLAIN JAVASCRIPT with a single 'export function ${target.toolName || 'solve'}'", "description": "one sentence"}\n` +
-      `No imports, no TS, no placeholders. The code runs in a sandbox against a hidden acceptance test.`;
-    const user = `Problem statement:\n${target.statement}\n\n` +
-      (target.bound ? `Bound: test up to N=${target.bound}.\n` : '') +
-      `Acceptance test to satisfy:\n${target.acceptanceTest}`;
-
-    const result = await skillAwareChat(
-      [{ role: 'system', content: system }, { role: 'user', content: user }],
-      { temperature: 0.1, json: true },
-    );
-
-    let source = '';
-    if (result.ok && result.content) {
-      const block = extractJsonBlock(result.content);
-      if (block) {
-        try {
-          const parsed = JSON.parse(block);
-          source = typeof parsed?.sourceCode === 'string' ? parsed.sourceCode.trim() : '';
-        } catch { source = ''; }
-      }
-    }
-    if (!source) {
-      const attempt = recordMathAttempt({
-        problemId: target.id,
-        problemTier: target.tier,
-        toolName: target.toolName || 'solve',
-        passed: false,
-        score: 0,
-        failureReason: result.status === 'offline' ? `model offline (${currentProviderStatus().baseUrl})` : 'model returned no usable source',
-        generation: status.generation,
-        latMs: Date.now() - started,
-      });
-      saveGoalLedger();
-      return attempt;
-    }
-
-    // Verify the candidate against the problem's real acceptance test.
-    const run = executeTestSuite(source, target.acceptanceTest);
-    const attempt = recordMathAttempt({
-      problemId: target.id,
-      problemTier: target.tier,
-      toolName: target.toolName || 'solve',
-      passed: run.passed,
-      score: run.passed ? 1 : 0,
-      failureReason: run.passed ? undefined : run.testDetails.filter((d) => d.startsWith('[FAIL')).slice(0, 5).join('\n') || 'verification failed',
-      sourceCode: source,
-      acceptanceTest: target.acceptanceTest,
-      generation: status.generation,
-      latMs: Date.now() - started,
-    });
-    saveGoalLedger();
-    console.log(`[math-solver] ${target.id}: ${run.passed ? 'SOLVED' : 'failed'} (${run.testDetails.filter((d) => d.startsWith('[FAIL')).length} assertions) in ${Date.now() - started}ms`);
-    return attempt;
-  } catch (err: any) {
-    console.warn('[math-solver] cycle failed:', err?.message || err);
-    return { skipped: true, reason: `error: ${err?.message || 'unknown'}` };
-  } finally {
-    mathSolverBusy = false;
-  }
-}
-
-// Math solver REST endpoint — calls solveNextMathProblem (defined above).
-// Registered at module top level (before startServer) so it lands before
-// vite.middlewares in the Express routing stack.
-app.all('/api/recourse/math/solve', async (req, res) => {
-  if (req.method !== 'POST') return res.status(405).json({ success: false, error: 'POST only' });
-  try {
-    const result = await solveNextMathProblem();
-    res.json({ success: true, result });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
 
 async function generateNextBiotechClaim(): Promise<LedgerBiotechClaim | { skipped: boolean; reason: string }> {
   if (biotechClaimBusy) return { skipped: true, reason: 'biotech busy' };
@@ -5335,6 +5144,99 @@ async function maybeRunAutopilotProbe() {
       capabilityServed: capabilitiesState().served,
     };
 }
+
+// Hoisted to module level (was nested inside runServerTick) so the math
+// router can reference it and /math/solve registers once at boot.
+// 11b. HARD MATH SOLVER — attempt one hard math problem per call using the
+//      live model. Generates a candidate tool, verifies against the problem's
+//      acceptance test in the real sandbox, records the attempt + outcome in
+//      the goal ledger. Only ever records passed:true when the suite passed.
+
+async function solveNextMathProblem(): Promise<MathAttempt | { skipped: boolean; reason: string }> {
+  if (mathSolverBusy) return { skipped: true, reason: 'solver busy' };
+  // Rate-limit so we don't hammer the model every tick.
+  if (Date.now() - lastMathSolveAt < MATH_SOLVE_COOLDOWN_MS) {
+    return { skipped: true, reason: 'cooldown' };
+  }
+  mathSolverBusy = true;
+  try {
+    // Pick the next problem: prefer unsolved solvable/bounded tiers; if all
+    // solvable+bounded are solved, fall back to an open-tier (search) problem.
+    const attempts = getMathAttempts(1000);
+    const solvedIds = new Set(attempts.filter((a) => a.passed).map((a) => a.problemId));
+    const target =
+      HARD_MATH_PROBLEMS.find((p) => (p.tier === 'solvable' || p.tier === 'bounded') && !solvedIds.has(p.id)) ||
+      HARD_MATH_PROBLEMS.find((p) => !solvedIds.has(p.id));
+    if (!target) {
+      return { skipped: true, reason: 'all hard math problems solved' };
+    }
+    lastMathSolveAt = Date.now();
+    const started = Date.now();
+
+    const system =
+      `You are an expert competitive mathematician. Implement a self-contained plain JavaScript function ` +
+      `named ${target.toolName || 'solve'} that solves this problem deterministically.\n` +
+      `Return ONLY valid JSON: {"sourceCode": "PLAIN JAVASCRIPT with a single 'export function ${target.toolName || 'solve'}'", "description": "one sentence"}\n` +
+      `No imports, no TS, no placeholders. The code runs in a sandbox against a hidden acceptance test.`;
+    const user = `Problem statement:\n${target.statement}\n\n` +
+      (target.bound ? `Bound: test up to N=${target.bound}.\n` : '') +
+      `Acceptance test to satisfy:\n${target.acceptanceTest}`;
+
+    const result = await skillAwareChat(
+      [{ role: 'system', content: system }, { role: 'user', content: user }],
+      { temperature: 0.1, json: true },
+    );
+
+    let source = '';
+    if (result.ok && result.content) {
+      const block = extractJsonBlock(result.content);
+      if (block) {
+        try {
+          const parsed = JSON.parse(block);
+          source = typeof parsed?.sourceCode === 'string' ? parsed.sourceCode.trim() : '';
+        } catch { source = ''; }
+      }
+    }
+    if (!source) {
+      const attempt = recordMathAttempt({
+        problemId: target.id,
+        problemTier: target.tier,
+        toolName: target.toolName || 'solve',
+        passed: false,
+        score: 0,
+        failureReason: result.status === 'offline' ? `model offline (${currentProviderStatus().baseUrl})` : 'model returned no usable source',
+        generation: status.generation,
+        latMs: Date.now() - started,
+      });
+      saveGoalLedger();
+      return attempt;
+    }
+
+    // Verify the candidate against the problem's real acceptance test.
+    const run = executeTestSuite(source, target.acceptanceTest);
+    const attempt = recordMathAttempt({
+      problemId: target.id,
+      problemTier: target.tier,
+      toolName: target.toolName || 'solve',
+      passed: run.passed,
+      score: run.passed ? 1 : 0,
+      failureReason: run.passed ? undefined : run.testDetails.filter((d) => d.startsWith('[FAIL')).slice(0, 5).join('\n') || 'verification failed',
+      sourceCode: source,
+      acceptanceTest: target.acceptanceTest,
+      generation: status.generation,
+      latMs: Date.now() - started,
+    });
+    saveGoalLedger();
+    console.log(`[math-solver] ${target.id}: ${run.passed ? 'SOLVED' : 'failed'} (${run.testDetails.filter((d) => d.startsWith('[FAIL')).length} assertions) in ${Date.now() - started}ms`);
+    return attempt;
+  } catch (err: any) {
+    console.warn('[math-solver] cycle failed:', err?.message || err);
+    return { skipped: true, reason: `error: ${err?.message || 'unknown'}` };
+  } finally {
+    mathSolverBusy = false;
+  }
+}
+
 
 app.post('/api/recourse/tick', async (_req, res) => {
   try {
