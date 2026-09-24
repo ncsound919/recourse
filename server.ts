@@ -131,7 +131,6 @@ import {
   listComponentTemplates,
   getComponentTemplate,
   buildComponentFromTemplate,
-  getSelfRepairKnowledge,
   selectTemplateForLearnerDirective,
   COMPONENT_TEMPLATES
 } from './src/lib/componentTemplates.js';
@@ -313,6 +312,7 @@ import { createSkillsRouter } from './src/routes/skills.js';
 import { createDevelopRouter } from './src/routes/develop.js';
 import { createForgeRouter } from './src/routes/forge.js';
 import { createOpenEndedRouter } from './src/routes/openEnded.js';
+import { createRepairRouter } from './src/routes/repair.js';
 import { createSynergyRouter } from './src/routes/synergy.js';
 import { createFleetDogfoodRouter } from './src/routes/fleetDogfood.js';
 import { runFleetDogfoodCycle } from './src/lib/fleetDogfood.js';
@@ -2587,12 +2587,18 @@ app.post('/api/recourse/hyperparameters', (req, res) => {
   res.json({ success: true, hyperParams: status.hyperParams });
 });
 
-app.get('/api/recourse/repair/status', (req, res) => {
-  res.json({
-    selfRepair: status.selfRepair,
-    anomalies
-  });
-});
+// Self-repair routes (status/scan-heal/single/knowledge/auto-heal) moved to
+// src/routes/repair.ts; executeSelfRepair + anomaly/status state stay host-side.
+app.use(
+  '/api/recourse',
+  createRepairRouter({
+    selfRepairStatus: () => status.selfRepair,
+    anomalies: () => anomalies,
+    executeSelfRepair,
+    registry: () => registry,
+    saveState: saveStateToDisk,
+  }),
+);
 
 // Failures endpoint — surfaces the failure ledger so the operator can see
 // every silently-swallowed error across all autopilots instead of guessing.
@@ -2706,74 +2712,6 @@ app.post('/api/recourse/chaos/inject', (req, res) => {
   res.json({ success: true, anomaly });
 });
 
-// Scan & Heal Route
-app.post('/api/recourse/repair/scan-heal', (req, res) => {
-  const detectedAnomalies = anomalies.filter(a => a.status === 'detected');
-  const results = [];
-
-  for (const anom of detectedAnomalies) {
-    const healResult = executeSelfRepair(anom.toolName, anom.brokenCode, anom.errorType, anom.test_suite_code);
-    if (healResult.success) {
-      anom.status = 'repaired';
-      anom.fixedCode = healResult.anomaly.fixedCode;
-      anom.repairLatencyMs = healResult.anomaly.repairLatencyMs;
-    } else {
-      anom.status = 'detected';
-      anom.fixedCode = healResult.anomaly.fixedCode;
-      anom.repairLatencyMs = healResult.anomaly.repairLatencyMs;
-    }
-    results.push(healResult);
-  }
-
-  for (const tool of registry) {
-    if (tool.healthStatus === 'corrupted' || tool.healthStatus === 'degraded') {
-      const healResult = executeSelfRepair(tool.name, tool.versions[tool.versions.length - 1]?.source_code || '', 'logic_regression');
-      results.push(healResult);
-    }
-  }
-
-  saveStateToDisk();
-
-  res.json({
-    success: true,
-    healedCount: results.filter(r => r.success).length,
-    results,
-    selfRepairStatus: status.selfRepair
-  });
-});
-
-// Single Tool Gene Self-Repair
-app.post('/api/recourse/repair/single', (req, res) => {
-  const { toolName, brokenCode, faultHint } = req.body;
-  const tool = registry.find(t => t.name === toolName);
-  const codeToFix = brokenCode || tool?.versions[tool.versions.length - 1]?.source_code || 'export function execute() {}';
-
-  const healResult = executeSelfRepair(toolName, codeToFix, faultHint);
-  saveStateToDisk();
-
-  res.json({
-    success: true,
-    healResult,
-    selfRepairStatus: status.selfRepair
-  });
-});
-
-// Self-Repair Knowledge Base & Telemetry
-app.get('/api/recourse/repair/knowledge', (req, res) => {
-  const knowledge = getSelfRepairKnowledge();
-  res.json({
-    success: true,
-    knowledge,
-    selfRepair: status.selfRepair
-  });
-});
-
-// Toggle autonomous repair of failed candidates (isAutoHealingEnabled).
-app.post('/api/recourse/repair/auto-heal', (req, res) => {
-  status.selfRepair.isAutoHealingEnabled = Boolean(req.body?.enabled);
-  saveStateToDisk();
-  res.json({ success: true, isAutoHealingEnabled: status.selfRepair.isAutoHealingEnabled });
-});
 
 // External capability benchmark telemetry (drives the learner reward at weight
 // 0.30). Surfaces the latest run + history + per-problem solved state so the
