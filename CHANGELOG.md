@@ -51,14 +51,14 @@ about state, so entries describe what is real and what remains limited.
   skills, develop (stuck/repair/brain/council/patch), forge, open-ended,
   self-repair, policy/autonomy, dream, AI-mutator, growth-decision/JEV,
   component-template, learn/evolution-op, operator-readout, and
-  replay/OpenAPI/A2A/MCP, and math conductor route clusters into `src/routes/*`
-  (21 new routers, ~168 inline routes moved).
+  replay/OpenAPI/A2A/MCP, math conductor, and biotech claim route clusters
+  into `src/routes/*` (22 new routers, ~171 inline routes moved).
   A static route-table snapshot (`scripts/route-snapshot.mjs`,
   `tests/fixtures/route-snapshot.json`) now guards all 496 routes against drift.
   See `docs/route-decomposition.md` for the remaining clusters and the pattern.
 
 ### Known limitations
-- `server.ts` remains a large monolith (decomposition is incremental); ~26
+- `server.ts` remains a large monolith (decomposition is incremental); ~23
   inline routes remain — tracked in `docs/route-decomposition.md`.
 - Serverless `api/recourse/{math,dream}` still hold module-level state.
 - The pre-merge gate refuses proposals that require sandbox verification but

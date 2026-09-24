@@ -48,7 +48,7 @@ import { buildEvidenceDossier } from './src/lib/evidenceDossier.js';
 import { otSearch, otHealth as openTargetsHealth } from './src/lib/openTargetsClient.js';
 import { ptSearch, ptHealth as pubTatorHealth, parsePubTatorAnnotations } from './src/lib/pubTatorClient.js';
 import { HARD_MATH_PROBLEMS } from './src/lib/hardMathProblems.js';
-import { recordMathAttempt, recordBiotechClaim, getMathAttempts, getBiotechClaims, getGoalProgress, MathAttempt, BiotechClaim as LedgerBiotechClaim, initGoalLedger, saveGoalLedger } from './src/lib/goalLedger.js';
+import { recordMathAttempt, recordBiotechClaim, getMathAttempts, getGoalProgress, MathAttempt, BiotechClaim as LedgerBiotechClaim, initGoalLedger, saveGoalLedger } from './src/lib/goalLedger.js';
 import { oncologyHealth } from './src/lib/oncologyEngineBridge.js';
 import { runScienceCycle, recentFindings, recentCycles } from './src/lib/scienceConductor.js';
 import { runPublishPass, PUBLISH_DOMAINS } from './src/lib/globalLensPublisher.js';
@@ -291,6 +291,7 @@ import { createLearnRouter } from './src/routes/learn.js';
 import { createReadoutRouter } from './src/routes/readout.js';
 import { createInteropRouter } from './src/routes/interop.js';
 import { createMathRouter } from './src/routes/math.js';
+import { createBiotechRouter } from './src/routes/biotech.js';
 import { createSynergyRouter } from './src/routes/synergy.js';
 import { createFleetDogfoodRouter } from './src/routes/fleetDogfood.js';
 import { runFleetDogfoodCycle } from './src/lib/fleetDogfood.js';
@@ -4618,69 +4619,10 @@ app.use('/api/recourse', createMathRouter({
 // =========================================================================
 // 5b. BIOTECH / ONCOLOGY GOAL — real semantic claim verification against KG
 // =========================================================================
-
-app.get('/api/recourse/biotech/drugs', (req, res) => {
-  const entities = Object.values(CANONICAL_ONCOLOGY_KG);
-  res.json({
-    success: true,
-    count: entities.length,
-    drugs: entities.map(e => ({
-      id: e.id,
-      targetProtein: e.targetProtein,
-      drugClass: e.drugClass,
-      mechanism: e.mechanism,
-      leg: e.leg,
-      evidenceTier: e.evidenceTier,
-      clinicalIndication: e.clinicalIndication,
-      literatureCitation: e.literatureCitation,
-      biomarkers: e.biomarkers,
-    })),
-  });
-});
-
-app.get('/api/recourse/biotech/verify-claim', (req, res) => {
-  const { asset_name, mechanism, leg, evidence_tier, source } = req.query as Record<string, string>;
-  if (!asset_name) {
-    res.status(400).json({ success: false, error: 'asset_name is required' });
-    return;
-  }
-  const result = validateBiotechClaimAgainstKG({
-    asset_name: String(asset_name),
-    mechanism: mechanism || undefined,
-    leg: leg || undefined,
-    evidence_tier: evidence_tier ? Number(evidence_tier) : undefined,
-    source: source || undefined,
-  });
-  const recorded = recordBiotechClaim({
-    assetName: String(asset_name),
-    leg: leg || 'unknown',
-    evidenceTier: evidence_tier ? Number(evidence_tier) : 0,
-    passed: result.passed,
-    score: result.score,
-    source: source || undefined,
-    mechanism: mechanism || undefined,
-    summary: result.summary,
-    matchedEntity: result.entity ? {
-      id: result.entity.id,
-      targetProtein: result.entity.targetProtein,
-      drugClass: result.entity.drugClass,
-      clinicalIndication: result.entity.clinicalIndication,
-    } : undefined,
-    generation: status.generation,
-  });
-  saveGoalLedger();
-  res.json({ success: true, verification: result, claim: recorded });
-});
-
-app.get('/api/recourse/biotech/claims', (req, res) => {
-  const limit = Math.max(1, Math.min(200, Number(req.query.limit) || 50));
-  const claims = getBiotechClaims(limit);
-  res.json({ success: true, claims, total: claims.length });
-});
-
-
-//      live model.
-// (math/solve route moved below the solveNextMathProblem function for proper hoisting)
+app.use('/api/recourse', createBiotechRouter({
+  saveGoalLedger: () => saveGoalLedger(),
+  currentGeneration: () => status.generation,
+}));
 
 // =========================================================================
 // 7. GLOBAL TICK ROUTE (DETERMINISTIC COMPOUNDING)
