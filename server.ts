@@ -313,6 +313,7 @@ import { createIntakeRouter } from './src/routes/intake.js';
 import { createCorpusRouter } from './src/routes/corpus.js';
 import { createSkillsRouter } from './src/routes/skills.js';
 import { createDevelopRouter } from './src/routes/develop.js';
+import { createForgeRouter } from './src/routes/forge.js';
 import { createSynergyRouter } from './src/routes/synergy.js';
 import { createFleetDogfoodRouter } from './src/routes/fleetDogfood.js';
 import { runFleetDogfoodCycle } from './src/lib/fleetDogfood.js';
@@ -8680,9 +8681,27 @@ function stopForgeAutopilot(): void {
   setJobEnabled('forge', false);
 }
 
-app.get('/api/recourse/forge', (req, res) => {
-  res.json({ success: true, forge: forgeSnapshot() });
-});
+
+// Forge (snapshot/plan/mint/cycle/autopilot) moved to src/routes/forge.ts;
+// engines + ledger + busy/autopilot state stay host-side and are injected.
+app.use(
+  '/api/recourse',
+  createForgeRouter({
+    forgeSnapshot,
+    forgePlanSummary,
+    mintForgeSpecFromLearnerPlan,
+    runForgeCycle,
+    forgeBusy: () => forgeBusy,
+    setForgeBusy: (busy: boolean) => { forgeBusy = busy; },
+    toggleForgeAutopilot: () => {
+      forgeAutopilotOn = !forgeAutopilotOn;
+      if (forgeAutopilotOn) ensureForgeAutopilot();
+      else stopForgeAutopilot();
+      saveStateToDisk();
+      return forgeAutopilotOn;
+    },
+  }),
+);
 
 // Efficiency telemetry (P0/P1): completion-cache hit rate, sleep-time-compute
 // artifacts, and distillation coverage. Read-only.
@@ -8699,69 +8718,6 @@ app.get('/api/recourse/perf', (_req, res) => {
       sleepComputeLimit: SLEEP_COMPUTE_LIMIT,
     },
   });
-});
-
-// The recursive-learning plan the forge is following (which domain next, and
-// the learner-ordered agenda). Read-only.
-app.get('/api/recourse/forge/plan', async (_req, res) => {
-  try {
-    res.json({ success: true, plan: await forgePlanSummary() });
-  } catch (e: any) {
-    res.status(500).json({ success: false, error: e.message });
-  }
-});
-
-// Explicitly mint one new forge spec from the learner's top unmet target. The
-// autopilot does this automatically when the agenda is exhausted; this route
-// lets an operator trigger it on demand.
-app.post('/api/recourse/forge/mint', async (_req, res) => {
-  try {
-    const added = await mintForgeSpecFromLearnerPlan();
-    res.json({ success: true, added, forge: forgeSnapshot() });
-  } catch (e: any) {
-    res.status(500).json({ success: false, error: e.message });
-  }
-});
-
-app.post('/api/recourse/forge/run', async (req, res) => {
-  try {
-    if (forgeBusy) {
-      return res.status(409).json({ success: false, error: 'forge busy (a cycle is already running)' });
-    }
-    forgeBusy = true;
-    try {
-      const count = Math.max(1, Math.min(3, Math.floor(Number(req.body?.count ?? 1) || 1)));
-      const results: any[] = [];
-      for (let i = 0; i < count; i++) {
-        const r = await runForgeCycle();
-        results.push(r);
-        if (r && typeof r === 'object' && (r as any).skipped) break;
-      }
-      res.json({ success: true, results, forge: forgeSnapshot() });
-    } finally {
-      forgeBusy = false;
-    }
-  } catch (err: any) {
-    forgeBusy = false;
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-app.post('/api/recourse/forge/autopilot/toggle', (req, res) => {
-  forgeAutopilotOn = !forgeAutopilotOn;
-  if (forgeAutopilotOn) {
-    ensureForgeAutopilot();
-    if (!forgeBusy) {
-      forgeBusy = true;
-      runForgeCycle()
-        .catch(() => {})
-        .finally(() => { forgeBusy = false; });
-    }
-  } else {
-    stopForgeAutopilot();
-  }
-  saveStateToDisk();
-  res.json({ success: true, autopilot: forgeAutopilotOn, forge: forgeSnapshot() });
 });
 
 // Builder Brain routes — inspect / drive the meta-loop that improves the generator.
