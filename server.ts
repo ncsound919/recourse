@@ -289,6 +289,7 @@ import { createDecisionRouter } from './src/routes/decision.js';
 import { createTemplatesRouter } from './src/routes/templates.js';
 import { createLearnRouter } from './src/routes/learn.js';
 import { createReadoutRouter } from './src/routes/readout.js';
+import { createInteropRouter } from './src/routes/interop.js';
 import { createSynergyRouter } from './src/routes/synergy.js';
 import { createFleetDogfoodRouter } from './src/routes/fleetDogfood.js';
 import { runFleetDogfoodCycle } from './src/lib/fleetDogfood.js';
@@ -304,11 +305,9 @@ import { createProductRouter } from './src/routes/product.js';
 import { createOpsRouter, metricsText } from './src/routes/ops.js';
 import { metrics } from './src/lib/metrics.js';
 import { tracer, runInSpan, parseTraceparent, formatTraceparent, currentSpan } from './src/lib/tracing.js';
-import { handleMcpHttp } from './src/lib/mcpHttp.js';
-import { agentCard, handleA2aRpc, A2A_SKILLS, openA2aTaskStore } from './src/lib/a2a.js';
+import { A2A_SKILLS, openA2aTaskStore } from './src/lib/a2a.js';
 import type { A2aOperation } from './src/lib/a2a.js';
-import { replayTrendLedger, replayGoalLedger, deterministicHash } from './src/lib/replay.js';
-import { buildOpenApiSpec, listOperations } from './src/lib/openapi.js';
+import { buildOpenApiSpec } from './src/lib/openapi.js';
 import { openUsageMeter, priceForModel, tokenCostCents } from './src/lib/usageMeter.js';
 import { openTenantStore } from './src/lib/auth/tenants.js';
 import { openApiKeyStore } from './src/lib/auth/apikeys.js';
@@ -2252,84 +2251,13 @@ function buildA2aOperations(): Record<string, A2aOperation> {
   ]);
 }
 
-// Deterministic replay: re-derive a subsystem from its ledger and compare to
-// live state. A mismatch is reported, never hidden.
-app.post('/api/recourse/replay', async (req, res) => {
-  const stream = String(req.body?.stream ?? 'trend').toLowerCase();
-  try {
-    if (stream === 'trend') {
-      return res.json({ success: true, report: replayTrendLedger() });
-    }
-    if (stream === 'goals') {
-      return res.json({ success: true, report: replayGoalLedger() });
-    }
-    if (stream === 'selfhosted') {
-      const entries = await verifyAllSelfHosted();
-      const summary = entries.map((e) => ({ name: e.name, hash: e.hash, passed: e.lastVerified?.passed === true, sandbox: e.lastSandboxVerified?.passed === true }));
-      const allPassed = summary.every((s) => s.passed);
-      return res.json({
-        success: true,
-        report: {
-          stream: 'selfhosted',
-          records: summary.length,
-          matches: allPassed,
-          replayHash: deterministicHash(summary),
-          details: [`re-verified ${summary.length} self-hosted module(s); ${summary.filter((s) => s.sandbox).length} green in the WASM sandbox`],
-        },
-      });
-    }
-    return res.status(400).json({ success: false, error: `unsupported replay stream "${stream}" (trend|goals|selfhosted)` });
-  } catch (e: any) {
-    res.status(500).json({ success: false, error: e.message });
-  }
-});
-
-// Productized API contract: OpenAPI document + a discoverable operation index.
-app.get('/api/openapi.json', (req, res) => {
-  res.json(buildOpenApiSpec(a2aBaseUrl(req)));
-});
-
-app.get('/api/recourse/routes', (req, res) => {
-  const spec = buildOpenApiSpec(a2aBaseUrl(req));
-  res.json({ success: true, count: listOperations(spec).length, operations: listOperations(spec) });
-});
-
-app.get('/.well-known/agent.json', (req, res) => {
-  res.json(agentCard(a2aBaseUrl(req)));
-});
-
-app.post('/api/a2a', async (req, res) => {
-  try {
-    const result = await handleA2aRpc(req.body, {
-      authorized: hasValidMutationSecret(req),
-      operations: buildA2aOperations(),
-      tasks: a2aTaskStore,
-    });
-    res.status(result.httpStatus).json(result.body);
-  } catch (e: any) {
-    res.status(500).json({ jsonrpc: '2.0', id: null, error: { code: -32603, message: e.message } });
-  }
-});
-
-// Remote MCP transport over HTTP (JSON-RPC). Same tool surface as the stdio MCP
-// server; scope-gated: a valid mutation secret grants `write`, callers without
-// it get read-only tools.
-app.post('/api/mcp', async (req, res) => {
-  try {
-    const scopes = hasValidMutationSecret(req) ? ['read', 'write'] : ['read'];
-    const result = await handleMcpHttp(
-      req.body,
-      {
-        operations: buildA2aOperations(),
-        authorize: (ctx, required) => ctx.scopes.includes(required),
-      },
-      scopes,
-    );
-    res.status(result.status).json(result.body);
-  } catch (e: any) {
-    res.status(500).json({ jsonrpc: '2.0', id: null, error: { code: -32603, message: e.message } });
-  }
-});
+// Replay + OpenAPI + A2A + remote MCP (paths span /api/recourse, /api, and
+// /.well-known, so this router is mounted at the app root with full paths).
+app.use(createInteropRouter({
+  a2aBaseUrl,
+  buildA2aOperations,
+  a2aTaskStore,
+}));
 
 // /api/recourse/memory/recall, /fleet/memory, /fleet/signal moved to
 // src/routes/memory.ts (see the createMemoryRouter mount above).
