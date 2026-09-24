@@ -37,16 +37,18 @@
 | `src/routes/lego.ts` | LEGO composable-ML state/assemble/execute/route |
 | `src/routes/intake.ts` | external intake (poll/brain/ground/autopilot) + benchmark |
 | `src/routes/corpus.ts` | ecosystem corpus + local cancer library (datasets/PDFs/literature KG) |
+| `src/routes/skills.ts` | skill catalog + Phase-4 skill export/import |
+| `src/routes/develop.ts` | stuck-issue loop, repair-team report/deep/intake, brain/council, patch gate, autopilot toggle, patch ledger |
 
 Harness: `scripts/route-snapshot.mjs` + `tests/fixtures/route-snapshot.json` +
 `tests/routeSnapshot.test.ts` guard the full 496-route table against drift.
+
+As of `develop`: `server.ts` is ~10.5k lines, 41 routers, 108 inline routes.
 
 ## Remaining clusters (in descending value, roughly)
 
 | Cluster | Approx. routes | Notes / likely deps to inject |
 | --- | --- | --- |
-| `develop.ts` | 14 | `devSnapshot`, `runRepairReport`, `runDeepAnalyze`, `runBrainGateway`, council*, stuck*, `runStuckRepairPass`, `recordDev` |
-| `skills.ts` | 9 | skill catalog state (`skillSnapshot`, `runSkillScan`, `skillRoots`), exporter/importer |
 | `forge.ts` | 8 | `forgeSnapshot`, `runForgeCycle`, `mintForgeSpecFromLearnerPlan`, `forgeAutopilotOn` |
 | `openEnded.ts` | 8 | open-ended archive state, `runOpenEndedEngineCycle`, `fleetRecursion` |
 | `repair.ts` | 5 | `executeSelfRepair`, anomaly state, `haltAllAutonomousLoops` |
