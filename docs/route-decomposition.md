@@ -43,17 +43,19 @@
 | `src/routes/openEnded.ts` | QD archive view, open-ended snapshot/run/archive/hygiene/patch, fleet-recursion ledger |
 | `src/routes/repair.ts` | self-repair status/scan-heal/single/knowledge/auto-heal |
 | `src/routes/policy.ts` | promotion policy, toggle-auto, autonomy snapshot/safe-boot/halt (the big `GET /status` readout stays for the core cluster) |
+| `src/routes/dream.ts` | dream status/toggle/tick/crystallize/cron |
+| `src/routes/mutate.ts` | AI mutator gene status/evolve/approve + mutate-scoped policy |
 
 Harness: `scripts/route-snapshot.mjs` + `tests/fixtures/route-snapshot.json` +
 `tests/routeSnapshot.test.ts` guard the full 496-route table against drift.
 
-As of `policy`: `server.ts` is ~10.2k lines, 45 routers, 85 inline routes.
+As of `mutate`: `server.ts` is ~9.9k lines, 47 routers, 76 inline routes.
 
 ## Remaining clusters (in descending value, roughly)
 
 | Cluster | Approx. routes | Notes / likely deps to inject |
 | --- | --- | --- |
-| `dream.ts` | 4 | `dreamEngine`, `dreamState`, crystallize/mirror helpers |
+| `decision.ts` | 7 | `registry`, `anomalies`, `growthWeights`, JEV client |
 | `policy.ts` | 6 | `status`, `autonomySettings`, `applyPromotionPolicy`, `haltAllAutonomousLoops` |
 | `dream.ts` | 4 | `dreamEngine`, `dreamState`, crystallize/mirror helpers |
 | `mutate.ts` | 4 | `geneRegistryStore`, mutator helpers |

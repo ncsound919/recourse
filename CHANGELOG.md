@@ -49,14 +49,14 @@ about state, so entries describe what is real and what remains limited.
 - `server.ts` decomposition (incremental): extracted the research/agenda,
   orchestration, music-therapy, memory, LEGO, intake/benchmark, corpus,
   skills, develop (stuck/repair/brain/council/patch), forge, open-ended,
-  self-repair, and policy/autonomy route clusters into `src/routes/*` (13 new
-  routers, ~109 inline routes moved).
+  self-repair, policy/autonomy, dream, and AI-mutator route clusters into
+  `src/routes/*` (15 new routers, ~118 inline routes moved).
   A static route-table snapshot (`scripts/route-snapshot.mjs`,
   `tests/fixtures/route-snapshot.json`) now guards all 496 routes against drift.
   See `docs/route-decomposition.md` for the remaining clusters and the pattern.
 
 ### Known limitations
-- `server.ts` remains a large monolith (decomposition is incremental); ~85
+- `server.ts` remains a large monolith (decomposition is incremental); ~76
   inline routes remain — tracked in `docs/route-decomposition.md`.
 - Serverless `api/recourse/{math,dream}` still hold module-level state.
 - The pre-merge gate refuses proposals that require sandbox verification but
