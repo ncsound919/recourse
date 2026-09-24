@@ -294,6 +294,7 @@ import { createMathRouter } from './src/routes/math.js';
 import { createBiotechRouter } from './src/routes/biotech.js';
 import { createAxiomRouter } from './src/routes/axiom.js';
 import { createProviderChatRouter } from './src/routes/providerChat.js';
+import { createBuilderRouter } from './src/routes/builder.js';
 import { createSynergyRouter } from './src/routes/synergy.js';
 import { createFleetDogfoodRouter } from './src/routes/fleetDogfood.js';
 import { runFleetDogfoodCycle } from './src/lib/fleetDogfood.js';
@@ -6584,39 +6585,21 @@ app.get('/api/recourse/perf', (_req, res) => {
   });
 });
 
-// Builder Brain routes — inspect / drive the meta-loop that improves the generator.
-app.get('/api/recourse/builder', (req, res) => {
-  res.json({ success: true, builder: builderSnapshot() });
-});
 
-/** Manually pin the active generator strategy to a profile id. */
-app.post('/api/recourse/builder/select', (req, res) => {
-  const { profileId } = req.body ?? {};
-  if (typeof profileId !== 'string' || !builderProfiles.some((p) => p.id === profileId)) {
-    return res.status(400).json({ success: false, error: 'unknown profileId' });
-  }
-  activeBuilderId = profileId;
-  builderVariantTrials = 0;
-  builderLastMetaRun = builderJournal.length;
-  saveStateToDisk();
-  res.json({ success: true, builder: builderSnapshot() });
-});
-
-/** Force the meta-loop to propose a NEW generator strategy variant (validation window). */
-app.post('/api/recourse/builder/propose', (req, res) => {
-  builderMetaStep(true);
-  res.json({ success: true, builder: builderSnapshot() });
-});
-
-/** Manually run the selection step (greedy best from the real journal). */
-app.post('/api/recourse/builder/step', (req, res) => {
-  builderVariantTrials = 0;
-  const best = chooseBuilderProfile(builderProfiles, builderJournal);
-  activeBuilderId = best.id;
-  builderLastMetaRun = builderJournal.length;
-  saveStateToDisk();
-  res.json({ success: true, builder: builderSnapshot() });
-});
+// =========================================================================
+// BUILDER BRAIN - inspect/drive the generator meta-loop.
+// =========================================================================
+app.use('/api/recourse', createBuilderRouter({
+  snapshot: () => builderSnapshot(),
+  profilesRef: () => builderProfiles,
+  journalRef: () => builderJournal,
+  activeIdRef: () => activeBuilderId,
+  setActiveId: (id) => { activeBuilderId = id; },
+  setVariantTrials: (n) => { builderVariantTrials = n; },
+  setLastMetaRun: (n) => { builderLastMetaRun = n; },
+  metaStep: (forceMutate) => builderMetaStep(forceMutate),
+  saveState: saveStateToDisk,
+}));
 
 // =========================================================================
 // INTEL → INVENTION — pull ecosystem intel into proposals, rank, adopt.
