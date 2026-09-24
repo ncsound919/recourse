@@ -295,6 +295,7 @@ import { createBiotechRouter } from './src/routes/biotech.js';
 import { createAxiomRouter } from './src/routes/axiom.js';
 import { createProviderChatRouter } from './src/routes/providerChat.js';
 import { createBuilderRouter } from './src/routes/builder.js';
+import { createRuntimeOpsRouter } from './src/routes/runtimeOps.js';
 import { createSynergyRouter } from './src/routes/synergy.js';
 import { createFleetDogfoodRouter } from './src/routes/fleetDogfood.js';
 import { runFleetDogfoodCycle } from './src/lib/fleetDogfood.js';
@@ -2334,20 +2335,24 @@ function haltAllAutonomousLoops(reason: string): {
   };
 }
 
-
-app.post('/api/recourse/hyperparameters', (req, res) => {
-  const { hyperParams } = req.body;
-  if (hyperParams) {
-    status.hyperParams = { ...status.hyperParams, ...hyperParams };
-    appendProvenanceEvent('system_tick', {
-      action: 'hyperparameters_tuned',
-      hyperParams: status.hyperParams,
-      generation: status.generation
-    });
-    saveStateToDisk();
-  }
-  res.json({ success: true, hyperParams: status.hyperParams });
-});
+// =========================================================================
+// OPS — hyperparameters, chaos injection, server tick, tick autopilot.
+// =========================================================================
+app.use('/api/recourse', createRuntimeOpsRouter({
+  statusRef: () => status,
+  anomaliesRef: () => anomalies,
+  registryRef: () => registry,
+  genesisSuites: () => GENESIS_SUITES,
+  appendProvenance: (eventType, data) => appendProvenanceEvent(eventType as ProvenanceEvent['type'], data),
+  saveState: saveStateToDisk,
+  runServerTick,
+  recordFailure,
+  serverTickAutopilotRef: () => serverTickAutopilotOn,
+  setServerTickAutopilot: (on) => { serverTickAutopilotOn = on; },
+  ensureServerTickAutopilot,
+  stopServerTickAutopilot,
+  tickAutopilotIntervalMs: () => SERVER_TICK_AUTOPILOT_MS,
+}));
 
 // Self-repair routes (status/scan-heal/single/knowledge/auto-heal) moved to
 // src/routes/repair.ts; executeSelfRepair + anomaly/status state stay host-side.
@@ -2362,101 +2367,6 @@ app.use(
   }),
 );
 
-
-// Chaos Injection Route
-app.post('/api/recourse/chaos/inject', (req, res) => {
-  const { chaosType = 'vieta_sign_bug', targetToolName = 'quadratic_vieta_root_sum' } = req.body;
-
-  let brokenCode = '';
-  let errorDesc = '';
-  let domain: ToolDomain = 'math';
-  let testSuite: string | undefined;
-
-  if (chaosType === 'vieta_sign_bug') {
-    domain = 'math';
-    brokenCode = `export function sumOfRoots(a, b, c) {\n  return b / a; // INJECTED CHAOS: Vieta sign reversal\n}`;
-    errorDesc = 'Vieta formula sign defect injected';
-    testSuite = GENESIS_SUITES['quadratic_vieta_root_sum'];
-  } else if (chaosType === 'syntax_ast_error') {
-    domain = 'coding';
-    brokenCode = `export function execute() { \n  <<<SYNTAX_CORRUPT>>> invalid token fontFinally:\n}`;
-    errorDesc = 'AST token sequence syntax corruption';
-  } else if (chaosType === 'security_taint') {
-    domain = 'cyber_defense';
-    brokenCode = `export function processPayload(data) {\n  return eval(data); // INJECTED CHAOS: Dynamic eval vulnerability\n}`;
-    errorDesc = 'Zero-day eval injection security taint';
-  } else if (chaosType === 'quantum_decoherence') {
-    domain = 'quantum_sim';
-    brokenCode = `export function stateTransform() {\n  return { probabilities_sum: 1.45, state: 'decoherent' };\n}`;
-    errorDesc = 'Quantum unitarity state norm violation';
-  } else {
-    domain = 'biotech';
-    brokenCode = `{\n  "asset_name": "CHAOS_01",\n  "leg": "invalid",\n  "evidence_tier": 0\n}`;
-    errorDesc = 'Biotech Knowledge Graph invalid leg conflict';
-  }
-
-  const anomId = `anom_chaos_${Date.now()}`;
-  const anomaly: AnomalyReport = {
-    id: anomId,
-    timestamp: Date.now(),
-    toolName: targetToolName,
-    domain,
-    severity: 'critical',
-    errorType: chaosType as any,
-    description: errorDesc,
-    rootCause: `Synthetic Chaos Injection (${chaosType})`,
-    brokenCode,
-    test_suite_code: testSuite,
-    status: 'detected',
-    repairGen: status.generation
-  };
-
-  anomalies.unshift(anomaly);
-  if (anomalies.length > 100) {
-    anomalies.pop();
-  }
-  status.selfRepair.activeAnomaliesCount = anomalies.filter(a => a.status === 'detected').length;
-
-  const tool = registry.find(t => t.name === targetToolName);
-  if (tool) {
-    tool.healthStatus = 'corrupted';
-    tool.anomalyCount = (tool.anomalyCount || 0) + 1;
-    // Make the corruption REAL, not representational: push the broken code as a
-    // defective current version so self-repair / scan-heal operate on genuinely
-    // defective code and a heal is only counted when the repaired source passes
-    // its suite. (Previously chaos only flipped healthStatus, so the repair path
-    // "fixed" the still-correct stored source and could never genuinely demo a
-    // heal.)
-    if (brokenCode && domain !== 'biotech') {
-      const defHash = crypto.createHash('sha256').update(brokenCode).digest('hex').substring(0, 16);
-      const defVer = `1.0.0-corrupt.${Date.now().toString().slice(-4)}`;
-      const existingSuite = tool.versions.find((v) => v.test_suite_code)?.test_suite_code;
-      tool.versions.unshift({
-        version: defVer,
-        hash: defHash,
-        created_at: Date.now(),
-        passed_verifier: false,
-        score: 0,
-        promoted: true,
-        source_code: brokenCode,
-        test_suite_code: testSuite ?? existingSuite,
-        verifier_notes: `CHAOS: ${errorDesc} (synthetic corruption for repair test)`,
-      } as ToolEntry['versions'][number]);
-      tool.currentVersion = defVer;
-    }
-  }
-
-  appendProvenanceEvent('anomaly_injected', {
-    anomalyId: anomId,
-    tool: targetToolName,
-    chaosType,
-    errorDesc
-  });
-
-  saveStateToDisk();
-
-  res.json({ success: true, anomaly });
-});
 
 
 
@@ -5026,14 +4936,6 @@ async function solveNextMathProblem(): Promise<MathAttempt | { skipped: boolean;
 }
 
 
-app.post('/api/recourse/tick', async (_req, res) => {
-  try {
-    res.json(await runServerTick());
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
 // Server-resident heartbeat: advance /tick from a server timer so the core
 // loop does not stop when no browser tab is open. Off by default; persisted +
 // resumed on non-safe boots.
@@ -5083,17 +4985,6 @@ function ensureScienceAutopilot(): void {
   setJobEnabled('science', true);
 }
 
-app.post('/api/recourse/tick/autopilot/toggle', (req, res) => {
-  serverTickAutopilotOn = !serverTickAutopilotOn;
-  if (serverTickAutopilotOn) {
-    ensureServerTickAutopilot();
-    runServerTick().catch(e => recordFailure('server_tick_immediate', e));
-  } else {
-    stopServerTickAutopilot();
-  }
-  saveStateToDisk();
-  res.json({ success: true, serverTickAutopilot: serverTickAutopilotOn, intervalMs: SERVER_TICK_AUTOPILOT_MS });
-});
 
 
 // =========================================================================
