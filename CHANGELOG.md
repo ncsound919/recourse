@@ -52,15 +52,18 @@ about state, so entries describe what is real and what remains limited.
   self-repair, policy/autonomy, dream, AI-mutator, growth-decision/JEV,
   component-template, learn/evolution-op, operator-readout, and
   replay/OpenAPI/A2A/MCP, math conductor, biotech claim, axiom bridge, provider
-  chat/settings, builder-brain, runtime-ops, reports, and GitHub research route
-  clusters into `src/routes/*` (28 new routers, ~190 inline routes moved).
+  chat/settings, builder-brain, runtime-ops, reports, GitHub research, and
+  capability-runtime/telemetry route clusters into `src/routes/*` (29 new
+  routers, ~194 inline routes moved — the decomposition is complete; only the
+  two `GET *` SPA fallbacks remain inline).
   A static route-table snapshot (`scripts/route-snapshot.mjs`,
   `tests/fixtures/route-snapshot.json`) now guards all 496 routes against drift.
   See `docs/route-decomposition.md` for the remaining clusters and the pattern.
 
 ### Known limitations
-- `server.ts` remains a large monolith (decomposition is incremental); ~4
-  inline routes remain — tracked in `docs/route-decomposition.md`.
+- `server.ts` is still a large module (the route decomposition is complete:
+  `src/routes/*` routers now own every API route; only the two `GET *` SPA
+  fallbacks remain inline) — see `docs/route-decomposition.md`.
 - Serverless `api/recourse/{math,dream}` still hold module-level state.
 - The pre-merge gate refuses proposals that require sandbox verification but
   carry no machine-checkable suite (honest refusal, not a fabricated pass).

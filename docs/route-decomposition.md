@@ -58,19 +58,18 @@
 | `src/routes/runtimeOps.ts` | hyperparameters, chaos/inject, tick, tick/autopilot/toggle (host state/anomalies/registry + tick loop injected) |
 | `src/routes/reports.ts` | report/generate + reports (status, provenance chain, report list injected) |
 | `src/routes/github.ts` | github/catalog (live search) + github/import (candidate pipeline injected) |
+| `src/routes/capabilityRuntime.ts` | capabilities/serve, execute (sandbox), `/metrics` (app-root), perf |
 
 Harness: `scripts/route-snapshot.mjs` + `tests/fixtures/route-snapshot.json` +
 `tests/routeSnapshot.test.ts` guard the full 496-route table against drift.
 
-As of `github`/`reports`: `server.ts` is ~7.9k lines, 60 routers, 4 inline routes.
+As of `capabilityRuntime`: `server.ts` is ~7.8k lines, 61 routers, **0 inline
+API routes** (only the two intentional `GET *` SPA fallbacks remain).
 
 ## Remaining clusters (in descending value, roughly)
 
-All clusters named in this table have been extracted. The 4 inline routes
-that remain are grouped by domain but not yet scheduled:
-
-| Group | Approx. routes | Notes |
-| --- | --- | --- |
-| capabilities/serve, execute, perf, `GET /metrics` | 4 | capability dogfood + app-root paths |
+None. Every cluster in the original inventory has been extracted; the only
+inline handlers left are the two `GET *` frontend fallbacks, which are not API
+routes and stay host-side.
 | github catalog/import, report/generate + reports | 4 | provenance/save side effects |
 | capabilities/serve, execute, perf, `GET /metrics` | 4 | capability dogfood + app-root paths |
