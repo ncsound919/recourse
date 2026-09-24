@@ -11,6 +11,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { withSyncFileLock } from './fileLock';
 
 export type WalletEntryKind = 'budget' | 'credit' | 'debit';
 
@@ -114,7 +115,10 @@ function walletError(code: WalletError['code'], message: string): WalletError {
 }
 
 export function openWallet(file = walletLedgerFile()): Wallet {
-  const append = (
+  // Cross-process lock: a check-then-append under concurrent writers would
+  // otherwise fork the hash chain and let two debits both pass the budget check.
+  const lockFile = `${file}.lock`;
+  const appendUnlocked = (
     kind: WalletEntryKind,
     token: string,
     cents: number,
@@ -137,6 +141,13 @@ export function openWallet(file = walletLedgerFile()): Wallet {
     fs.appendFileSync(file, JSON.stringify(entry) + '\n', 'utf-8');
     return entry;
   };
+  const append = (
+    kind: WalletEntryKind,
+    token: string,
+    cents: number,
+    description: string,
+    at: number | undefined,
+  ): WalletEntry => withSyncFileLock(lockFile, () => appendUnlocked(kind, token, cents, description, at));
 
   const balance = (token: string): TokenBalance => {
     return computeBalances(readWallet(file)).get(token) ?? { token, capCents: 0, creditedCents: 0, spentCents: 0, remainingCents: 0 };
@@ -160,11 +171,16 @@ export function openWallet(file = walletLedgerFile()): Wallet {
     debit(token, cents, description = 'debit', at) {
       if (!Number.isInteger(cents) || cents <= 0) throw walletError('invalid_amount', 'debit must be a positive integer of cents');
       if (!token) throw walletError('invalid_amount', 'token is required');
-      const b = balance(token);
-      if (b.remainingCents < cents) {
-        throw walletError('insufficient', `debit ${cents}c exceeds remaining ${b.remainingCents}c for budget "${token}"`);
-      }
-      return append('debit', token, cents, description, at);
+      // Budget check and append happen under the SAME cross-process lock so two
+      // concurrent debits cannot both observe the same remaining balance.
+      return withSyncFileLock(lockFile, () => {
+        const b = computeBalances(readWallet(file)).get(token)
+          ?? { token, capCents: 0, creditedCents: 0, spentCents: 0, remainingCents: 0 };
+        if (b.remainingCents < cents) {
+          throw walletError('insufficient', `debit ${cents}c exceeds remaining ${b.remainingCents}c for budget "${token}"`);
+        }
+        return appendUnlocked('debit', token, cents, description, at);
+      });
     },
     reconcile() {
       const entries = readWallet(file);

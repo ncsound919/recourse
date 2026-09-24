@@ -9,7 +9,11 @@
  * corpus text) into the prompts that produce this code, so prompt-injected
  * payloads are a realistic threat.
  *
- * This screen is DEFENSE IN DEPTH, not a sandbox. It rejects the known escape
+ * This screen is DEFENSE IN DEPTH, not a sandbox, and it is known to be
+ * incomplete (a key built at runtime, `o[k]`, cannot be caught by any regex).
+ * In-process evaluation is therefore refused by default; see isolationRequired.
+ *
+ * Screen rules: It rejects the known escape
  * vocabulary (host globals, dynamic code construction, prototype-chain
  * walking, identifier/string obfuscation primitives). Pure algorithmic code —
  * what the forge, dream engine and math loop are supposed to produce — never
@@ -36,6 +40,9 @@ const RULES: Array<{ re: RegExp; why: string }> = [
   // Class method declarations (`constructor(x) {`) are fine; property access
   // (`fn.constructor`, `o['constructor']`) is the classic vm escape.
   { re: /\.\s*constructor\b|['"`]constructor['"`]/, why: '`constructor` property access (prototype-chain escape)' },
+  // Destructuring reaches the same property without a dot or a quoted key:
+  // `const {constructor: C} = () => 0` then `C('return process')()`.
+  { re: /[{,]\s*constructor\s*[:,}=]/, why: '`constructor` destructured (prototype-chain escape)' },
   { re: /__proto__|__defineGetter__|__defineSetter__|__lookupGetter__/, why: 'legacy prototype accessors' },
   { re: /\b(?:getPrototypeOf|setPrototypeOf|getOwnPropertyDescriptors?)\b/, why: 'prototype introspection' },
   { re: /\bReflect\b/, why: '`Reflect`' },
@@ -82,17 +89,30 @@ export function assertInProcessSafe(source: string): void {
   if (!v.ok) throw new UnsafeCodeError(v.violations);
 }
 
-/** Strict mode: refuse the in-process fallback entirely when isolated-vm is
- *  unavailable (RECOURSE_REQUIRE_ISOLATION=1). Default: screen, then run. */
+/** Env flag that explicitly opts back into in-process evaluation. */
+export const ALLOW_INPROCESS_ENV = 'RECOURSE_ALLOW_INPROCESS_EVAL';
+
+/**
+ * Whether in-process evaluation is refused when isolated-vm is unavailable.
+ *
+ * Default: REFUSED. This screen was bypassed with plain destructuring
+ * (`const {constructor: C} = () => 0`) and a string-built key defeats any
+ * regex, so a screen-then-run default meant model-written code could reach
+ * `process`. Set RECOURSE_ALLOW_INPROCESS_EVAL=1 to accept that risk on a host
+ * without the native addon. RECOURSE_REQUIRE_ISOLATION=1 always wins.
+ */
 export function isolationRequired(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.RECOURSE_REQUIRE_ISOLATION === '1';
+  if (env.RECOURSE_REQUIRE_ISOLATION === '1') return true;
+  return env[ALLOW_INPROCESS_ENV] !== '1';
 }
 
 /** Combined gate for an in-process fallback run. Returns an error string when
  *  the run must not happen, or null when it may proceed. */
 export function inProcessFallbackRefusal(...sources: string[]): string | null {
   if (isolationRequired()) {
-    return 'isolated-vm is unavailable and RECOURSE_REQUIRE_ISOLATION=1 forbids the in-process fallback';
+    return process.env.RECOURSE_REQUIRE_ISOLATION === '1'
+      ? 'isolated-vm is unavailable and RECOURSE_REQUIRE_ISOLATION=1 forbids the in-process fallback'
+      : `isolated-vm is unavailable; in-process evaluation of generated code is refused (set ${ALLOW_INPROCESS_ENV}=1 to accept the risk)`;
   }
   const violations = sources.flatMap((s) => screenInProcessCode(s).violations);
   if (violations.length) {

@@ -238,7 +238,9 @@ export class QuickJsRuntime implements SandboxRuntime {
         const setupError = dumpError(vm, setup)
         if (setupError) {
           this.dropContext(key)
-          return { ok: false, value: undefined, error: `guest setup error: ${setupError}` }
+          // The guest program threw while evaluating its own top level. This is
+          // guest-controlled and must never be read as host unavailability.
+          return { ok: false, value: undefined, error: `guest top-level error: ${setupError}` }
         }
         setup.value?.dispose?.()
         entry.ready = true

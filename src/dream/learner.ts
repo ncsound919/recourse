@@ -29,6 +29,7 @@ import { hashString } from './engine';
 import { scoreGeneWithProperties } from './property-harness';
 import { pruneLearnerBeliefs, type BeliefPruneReport, type PruneOptions } from '../lib/openEnded/gates.js';
 import { createGeneRegistryStore } from './mutator';
+import { AsyncMutex } from '../lib/asyncMutex';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { GeneRegistryStore } from './mutator';
@@ -231,6 +232,11 @@ export class RecursiveLearner {
    *  value on the first tick after a process restart. */
   lastReport: EpisodeReport | null = null;
 
+  /** Serializes every read-modify-write of the durable store: without it two
+   *  concurrent episodes both load the same snapshot and the ledger dedupe
+   *  drops the loser. */
+  private readonly mutex = new AsyncMutex();
+
   constructor(
     private store: LearnerStore,
     private geneRegistry: GeneRegistryStore = createGeneRegistryStore(),
@@ -245,14 +251,16 @@ export class RecursiveLearner {
    *  verifier pass rate, readiness score, etc. Omit it when there is none;
    *  it is never silently defaulted. */
   async runEpisode(externalScore?: number): Promise<EpisodeReport> {
-    const state = await this.loadOrDefault();
-    const genes = await this.activeGenes();
-    const next = this.execute(state, genes, externalScore);
-    await this.store.saveState(next.state);
-    await this.store.appendLedger(next.entry);
-    const report = this.toReport(next.state, next.entry, genes.length);
-    this.lastReport = report;
-    return report;
+    return this.mutex.runExclusive(async () => {
+      const state = await this.loadOrDefault();
+      const genes = await this.activeGenes();
+      const next = this.execute(state, genes, externalScore);
+      await this.store.saveState(next.state);
+      await this.store.appendLedger(next.entry);
+      const report = this.toReport(next.state, next.entry, genes.length);
+      this.lastReport = report;
+      return report;
+    });
   }
 
   async runEpisodes(n: number): Promise<EpisodeReport[]> {
@@ -272,6 +280,12 @@ export class RecursiveLearner {
    *  name-variant of one capability compounds onto a single belief. When absent
    *  the raw `name` is used, preserving the original behavior. */
   async learnRealTools(
+    tools: Array<{ name: string; domain?: string; reward: number; key?: string }>,
+  ): Promise<Record<string, number>> {
+    return this.mutex.runExclusive(() => this.learnRealToolsUnlocked(tools));
+  }
+
+  private async learnRealToolsUnlocked(
     tools: Array<{ name: string; domain?: string; reward: number; key?: string }>,
   ): Promise<Record<string, number>> {
     if (tools.length === 0) return {};
@@ -326,6 +340,10 @@ export class RecursiveLearner {
    *  report. Nothing is dropped unless it is provably a duplicate or clears the
    *  supplied floor. */
   async pruneBeliefs(opts: PruneOptions = {}): Promise<BeliefPruneReport> {
+    return this.mutex.runExclusive(() => this.pruneBeliefsUnlocked(opts));
+  }
+
+  private async pruneBeliefsUnlocked(opts: PruneOptions = {}): Promise<BeliefPruneReport> {
     const state = await this.loadOrDefault();
     const { state: next, report } = pruneLearnerBeliefs(state as unknown as Parameters<typeof pruneLearnerBeliefs>[0], opts);
     await this.store.saveState(next as unknown as LearnerState);
@@ -337,6 +355,10 @@ export class RecursiveLearner {
    *  Each episode re-runs against the exact external input recorded in its
    *  own ledger entry, so the replay is a true reproduction — not a mock. */
   async replayFromGenesis(): Promise<ReplayReport> {
+    return this.mutex.runExclusive(() => this.replayFromGenesisUnlocked());
+  }
+
+  private async replayFromGenesisUnlocked(): Promise<ReplayReport> {
     const entries = await this.store.listLedger(MAX_REPLAY);
     const stored = await this.loadOrDefault();
     const storedHead = stored.ledgerHead;

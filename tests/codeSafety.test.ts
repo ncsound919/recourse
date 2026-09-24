@@ -43,18 +43,38 @@ describe('screenInProcessCode', () => {
 
 describe('inProcessFallbackRefusal', () => {
   const ORIG = process.env.RECOURSE_REQUIRE_ISOLATION;
+  const ORIG_ALLOW = process.env.RECOURSE_ALLOW_INPROCESS_EVAL;
   afterEach(() => {
     if (ORIG === undefined) delete process.env.RECOURSE_REQUIRE_ISOLATION; else process.env.RECOURSE_REQUIRE_ISOLATION = ORIG;
+    if (ORIG_ALLOW === undefined) delete process.env.RECOURSE_ALLOW_INPROCESS_EVAL; else process.env.RECOURSE_ALLOW_INPROCESS_EVAL = ORIG_ALLOW;
   });
 
-  it('allows safe code by default and refuses unsafe code', () => {
+  it('refuses in-process evaluation by default (the screen is not a boundary)', () => {
     delete process.env.RECOURSE_REQUIRE_ISOLATION;
+    delete process.env.RECOURSE_ALLOW_INPROCESS_EVAL;
+    expect(inProcessFallbackRefusal('export function f(x) { return x + 1; }')).toMatch(/RECOURSE_ALLOW_INPROCESS_EVAL/);
+  });
+
+  it('with the explicit opt-in, allows safe code and still refuses unsafe code', () => {
+    delete process.env.RECOURSE_REQUIRE_ISOLATION;
+    process.env.RECOURSE_ALLOW_INPROCESS_EVAL = '1';
     expect(inProcessFallbackRefusal('export function f(x) { return x + 1; }')).toBeNull();
     expect(inProcessFallbackRefusal('export function f() { return process; }')).toMatch(/unsafe code/);
   });
 
-  it('refuses everything in strict isolation mode', () => {
+  it('strict isolation mode wins over the opt-in', () => {
     process.env.RECOURSE_REQUIRE_ISOLATION = '1';
+    process.env.RECOURSE_ALLOW_INPROCESS_EVAL = '1';
     expect(inProcessFallbackRefusal('export function f(x) { return x; }')).toMatch(/RECOURSE_REQUIRE_ISOLATION/);
+  });
+});
+
+describe('screen: destructuring escape (regression)', () => {
+  it('flags `{constructor: C}` and shorthand `{constructor}`', () => {
+    expect(screenInProcessCode("const {constructor: C} = () => 0; C('return pro' + 'cess')();").ok).toBe(false);
+    expect(screenInProcessCode('const { constructor } = [];').ok).toBe(false);
+  });
+  it('still allows class constructors', () => {
+    expect(screenInProcessCode('class A { constructor(x) { this.x = x; } }').ok).toBe(true);
   });
 });

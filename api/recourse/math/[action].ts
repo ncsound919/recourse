@@ -6,6 +6,9 @@
 //   POST /api/recourse/math/configure -> { success: true, state: RecursiveLoopState }
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { z } from 'zod';
 import {
   createInitialLoopState,
@@ -13,6 +16,7 @@ import {
   DEFAULT_LOOP_CONFIG,
 } from '../../../src/lib/recursiveMathEngine';
 import type { RecursiveLoopState } from '../../../src/types';
+import { AsyncMutex } from '../../../src/lib/asyncMutex';
 import { requireMutationAuth, serverError } from '../_guard';
 
 // Validate the configure payload before it can touch engine state. Unknown
@@ -33,7 +37,35 @@ const LOOP_CONFIG_SCHEMA = z
   })
   .strict();
 
-let globalMathState: RecursiveLoopState = createInitialLoopState();
+// State is serialized per warm instance and persisted best-effort to a durable
+// file so a cold start does not silently reset the loop. Point
+// RECOURSE_MATH_STATE_FILE at shared storage (e.g. a mounted volume) to share
+// state across serverless instances; the default is instance-local.
+const MATH_STATE_FILE = process.env.RECOURSE_MATH_STATE_FILE || path.join(os.tmpdir(), 'recourse-math-state.json');
+const mutex = new AsyncMutex();
+
+function loadMathState(): RecursiveLoopState {
+  try {
+    const raw = fs.readFileSync(MATH_STATE_FILE, 'utf-8');
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && parsed.config) return parsed as RecursiveLoopState;
+  } catch {
+    /* first run or unreadable — fall through */
+  }
+  return createInitialLoopState();
+}
+
+function saveMathState(state: RecursiveLoopState): void {
+  try {
+    const tmp = `${MATH_STATE_FILE}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(state), 'utf-8');
+    fs.renameSync(tmp, MATH_STATE_FILE);
+  } catch {
+    /* read-only fs: keep the in-memory copy for this warm instance */
+  }
+}
+
+let globalMathState: RecursiveLoopState = loadMathState();
 
 export default async function handler(
   req: VercelRequest,
@@ -45,7 +77,8 @@ export default async function handler(
   if (!requireMutationAuth(req, res)) return;
 
   try {
-    switch (action) {
+    return await mutex.runExclusive(async () => {
+      switch (action) {
       case 'state': {
         if (req.method !== 'GET') {
           return res.status(405).json({ success: false, error: 'GET only' });
@@ -61,6 +94,7 @@ export default async function handler(
           return res.status(405).json({ success: false, error: 'POST only' });
         }
         const result = executeRecursiveStep(globalMathState);
+        saveMathState(globalMathState);
         return res.status(200).json({
           success: true,
           result,
@@ -73,6 +107,7 @@ export default async function handler(
           return res.status(405).json({ success: false, error: 'POST only' });
         }
         globalMathState = createInitialLoopState(globalMathState.config || DEFAULT_LOOP_CONFIG);
+        saveMathState(globalMathState);
         return res.status(200).json({
           success: true,
           state: globalMathState,
@@ -99,6 +134,7 @@ export default async function handler(
           ...globalMathState.config,
           ...parsed.data,
         };
+        saveMathState(globalMathState);
         return res.status(200).json({
           success: true,
           state: globalMathState,
@@ -110,7 +146,8 @@ export default async function handler(
           success: false,
           error: `unknown math action: ${action}`,
         });
-    }
+      }
+    });
   } catch (err: any) {
     return serverError(res, err, `math:${action}`);
   }

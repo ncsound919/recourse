@@ -24,6 +24,7 @@ import {
   verifyGenome,
 } from './genomes';
 import { executeTestSuite } from '../lib/executionSandbox';
+import { AsyncMutex } from '../lib/asyncMutex';
 import type { DreamStore } from './store';
 
 /** A request to the dream model generator. */
@@ -201,6 +202,10 @@ function pickWeightedByIntensity(thoughts: DreamThought[], rng: () => number): D
 /* ------------------------------- engine ----------------------------- */
 
 export class DreamingEngine {
+  /** Serializes read-modify-write of the dream store so concurrent ticks
+   *  (HTTP, cron, heartbeat) cannot clobber one another. */
+  private readonly mutex = new AsyncMutex();
+
   constructor(
     private store: DreamStore,
     private baseSeed = 0x5eed0001 >>> 0,
@@ -213,6 +218,10 @@ export class DreamingEngine {
   }
 
   async toggle(): Promise<boolean> {
+    return this.mutex.runExclusive(() => this.toggleUnlocked());
+  }
+
+  private async toggleUnlocked(): Promise<boolean> {
     const s = await this.loadOrDefault();
     s.isDreamingActive = !s.isDreamingActive;
     await this.store.save(s);
@@ -221,6 +230,10 @@ export class DreamingEngine {
 
   /** Advance the engine exactly one phase. Deterministic given (seed, tick). */
   async tick(): Promise<TickResult> {
+    return this.mutex.runExclusive(() => this.tickUnlocked());
+  }
+
+  private async tickUnlocked(): Promise<TickResult> {
     const s = await this.loadOrDefault();
     s.tick += 1;
     const rng = mulberry32((this.baseSeed ^ Math.imul(s.tick, 0x9e3779b1)) >>> 0);
@@ -298,6 +311,10 @@ export class DreamingEngine {
   /** Catch-up driver for cron: run however many ticks elapsed since the
    *  last one (capped), so infrequent schedulers still advance the dream. */
   async runCatchUpTicks(maxTicks: number): Promise<{ ticks: number; reports: string[]; dreamState: DreamState }> {
+    return this.mutex.runExclusive(() => this.runCatchUpTicksUnlocked(maxTicks));
+  }
+
+  private async runCatchUpTicksUnlocked(maxTicks: number): Promise<{ ticks: number; reports: string[]; dreamState: DreamState }> {
     const s = await this.loadOrDefault();
     if (!s.isDreamingActive) return { ticks: 0, reports: ['dreaming inactive — skipped'], dreamState: s };
     const elapsedMin = s.lastTickAt ? (Date.now() - Date.parse(s.lastTickAt)) / 60000 : 1;
@@ -305,7 +322,7 @@ export class DreamingEngine {
     const reports: string[] = [];
     let last: TickResult | null = null;
     for (let i = 0; i < ticks; i++) {
-      last = await this.tick();
+      last = await this.tickUnlocked();
       reports.push(`tick ${last.dreamState.tick}: ${last.phaseReport}`);
     }
     return { ticks, reports, dreamState: (last ?? { dreamState: s }).dreamState };
@@ -313,6 +330,12 @@ export class DreamingEngine {
 
   /** Manual lucid crystallization — the UI's "crystallize" button. */
   async crystallize(
+    thoughtId: string,
+  ): Promise<{ success: boolean; crystallizedTool?: CrystallizedTool; error?: string; dreamState: DreamState }> {
+    return this.mutex.runExclusive(() => this.crystallizeUnlocked(thoughtId));
+  }
+
+  private async crystallizeUnlocked(
     thoughtId: string,
   ): Promise<{ success: boolean; crystallizedTool?: CrystallizedTool; error?: string; dreamState: DreamState }> {
     const s = await this.loadOrDefault();

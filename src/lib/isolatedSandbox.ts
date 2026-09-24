@@ -366,3 +366,165 @@ export function executeTestSuiteInIsolate(
     if (isolate) { try { isolate.dispose(); } catch { /* already gone */ } }
   }
 }
+
+export interface IsolatedBodyResult {
+  /** False when isolated-vm is not loadable — nothing ran. */
+  available: boolean;
+  /** True when the body returned without throwing. */
+  ok: boolean;
+  /** The body's return value, round-tripped through JSON (undefined → null). */
+  value?: unknown;
+  error?: string;
+  timedOut?: boolean;
+}
+
+/**
+ * Run a function BODY (statements that end in `return <json-safe value>`)
+ * inside a fresh isolate with no host globals. This is the shared primitive
+ * for callers that evaluate model-written code for a verdict and need only a
+ * JSON result back (dream mutator probes, math acceptance suites) — the code
+ * never runs in the server's own realm, so `process`, `require` and the
+ * `Function`-constructor escape chain simply do not exist for it.
+ */
+export function runBodyInIsolate(
+  body: string,
+  opts: { memoryLimitMb?: number; timeoutMs?: number } = {},
+): IsolatedBodyResult {
+  const memoryLimitMb = opts.memoryLimitMb ?? 64;
+  const timeoutMs = opts.timeoutMs ?? 2000;
+  if (!isIsolateAvailable()) {
+    return { available: false, ok: false, error: 'isolated-vm not loadable' };
+  }
+  const ivm = _ivm;
+  let isolate: any = null;
+  try {
+    isolate = new ivm.Isolate({ memoryLimit: memoryLimitMb });
+    const context = isolate.createContextSync();
+    const src =
+      `(function () {\n` +
+      `  let __r;\n` +
+      `  try { __r = (function () {\n${body}\n})(); }\n` +
+      `  catch (e) { return JSON.stringify({ threw: true, message: (e && e.message) ? String(e.message) : String(e) }); }\n` +
+      `  let __s;\n` +
+      `  try { __s = JSON.stringify({ threw: false, value: __r === undefined ? null : __r }); }\n` +
+      `  catch (e) { return JSON.stringify({ threw: true, message: 'result is not JSON-serializable' }); }\n` +
+      `  return __s;\n` +
+      `})()`;
+    let raw: unknown;
+    try {
+      raw = isolate.compileScriptSync(src).runSync(context, { timeout: timeoutMs });
+    } catch (e: any) {
+      const msg = (e && e.message) || String(e);
+      if (/timed out/i.test(msg)) {
+        return { available: true, ok: false, timedOut: true, error: `Execution timed out after ${timeoutMs}ms (isolated, mem ${memoryLimitMb}MB)` };
+      }
+      return { available: true, ok: false, error: msg };
+    }
+    if (typeof raw !== 'string') return { available: true, ok: false, error: 'isolate returned no payload' };
+    let parsed: any;
+    try { parsed = JSON.parse(raw); } catch { return { available: true, ok: false, error: 'isolate payload was not valid JSON' }; }
+    if (parsed?.threw) return { available: true, ok: false, error: String(parsed.message ?? 'threw') };
+    return { available: true, ok: true, value: parsed?.value };
+  } finally {
+    if (isolate) { try { isolate.dispose(); } catch { /* already gone */ } }
+  }
+}
+
+export interface IsolatedCallResult {
+  /** True when the call executed and produced a JSON payload. */
+  ok: boolean;
+  /** True when the guest function threw (or the call was cut off). */
+  threw: boolean;
+  /** True when the guest function mutated its own argument. */
+  mutated: boolean;
+  /** Parsed first-call return value (undefined when absent/unserializable). */
+  value?: unknown;
+  error?: string;
+  timedOut?: boolean;
+}
+
+export interface IsolatedCallable {
+  /** Run the gene on one JSON-serializable input. Never throws. */
+  call(input: unknown): IsolatedCallResult;
+  dispose(): void;
+}
+
+/**
+ * Compile a function EXPRESSION (`function f(x){…}`, `(x)=>x`, …) into a
+ * persistent isolate and return a reusable synchronous caller. Unlike
+ * `runBodyInIsolate`, the isolate/context are created once, so property-based
+ * harnesses can invoke the gene thousands of times without recompiling.
+ *
+ * The guest sees no host globals (`process`, `require`, `global`). Throws when
+ * isolated-vm is unavailable or the code does not compile; callers choose the
+ * fallback policy and must never silently run this code in-process.
+ */
+export function createIsolatedCallable(
+  code: string,
+  opts: { memoryLimitMb?: number; timeoutMs?: number; callTimeoutMs?: number } = {},
+): IsolatedCallable {
+  const memoryLimitMb = opts.memoryLimitMb ?? 64;
+  const timeoutMs = opts.timeoutMs ?? 1500;
+  const callTimeoutMs = opts.callTimeoutMs ?? 500;
+  if (!isIsolateAvailable()) throw new Error('isolated-vm not loadable');
+  const ivm = _ivm;
+  const isolate = new ivm.Isolate({ memoryLimit: memoryLimitMb });
+  let context: any;
+  try {
+    context = isolate.createContextSync();
+    // Setup only constructs the function VALUE; a syntax/type error throws here
+    // so callers can retry after transpiling TS to JS.
+    isolate.compileScriptSync(`globalThis.__gene = (${code});`).runSync(context, { timeout: timeoutMs });
+  } catch (err) {
+    try { isolate.dispose(); } catch { /* noop */ }
+    throw err;
+  }
+  const callScript = isolate.compileScriptSync(
+    `(() => {
+      const __raw = globalThis.__input;
+      const __a = JSON.parse(__raw);
+      const __before = JSON.stringify(__a);
+      let __r, __threw = false, __message = null;
+      try { __r = globalThis.__gene(__a); }
+      catch (e) { __threw = true; __message = (e && e.message) ? String(e.message) : String(e); }
+      const __mutated = JSON.stringify(__a) !== __before;
+      let __out;
+      try { __out = JSON.stringify(__r); } catch (e) { __out = '__unserializable__'; }
+      return JSON.stringify({ threw: __threw, message: __message, out: __out === undefined ? null : __out, mutated: __mutated });
+    })()`,
+  );
+  let disposed = false;
+  return {
+    call(input: unknown): IsolatedCallResult {
+      if (disposed) return { ok: false, threw: true, mutated: false, error: 'callable disposed' };
+      let json: string;
+      try {
+        const s = JSON.stringify(input);
+        json = s === undefined ? 'null' : s;
+      } catch {
+        json = 'null';
+      }
+      try {
+        context.global.setSync('__input', json);
+        const raw = callScript.runSync(context, { timeout: callTimeoutMs });
+        if (typeof raw !== 'string') return { ok: false, threw: true, mutated: false, error: 'isolate returned no payload' };
+        const p = JSON.parse(raw);
+        let value: unknown;
+        if (p.out === '__unserializable__') value = undefined;
+        else { try { value = p.out === null ? null : JSON.parse(p.out); } catch { value = undefined; } }
+        return { ok: true, threw: !!p.threw, mutated: !!p.mutated, value, error: p.message ?? undefined };
+      } catch (e: any) {
+        const msg = (e && e.message) || String(e);
+        if (/timed out/i.test(msg)) {
+          return { ok: false, threw: true, mutated: false, timedOut: true, error: `gene call timed out after ${callTimeoutMs}ms` };
+        }
+        return { ok: false, threw: true, mutated: false, error: msg };
+      }
+    },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      try { isolate.dispose(); } catch { /* already gone */ }
+    },
+  };
+}

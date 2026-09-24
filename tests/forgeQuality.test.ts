@@ -91,12 +91,41 @@ describe('assessForgeCandidate', () => {
     const mutating = 'export function sortNums(a) { return a.sort((x, y) => x - y); }';
     const r1 = assessForgeCandidate({ name: 'sortNums', refSuite: suite }, mutating);
     expect(r1.robustness!.mutatesInput).toBe(true);
+    expect(r1.gate.ok).toBe(false);
+    expect(r1.gate.reasons.join(' ')).toMatch(/mutates the caller/);
     expect(isSubstantivelyClean(r1)).toBe(false);
 
     const random = 'export function sortNums(a) { const c = [...a].sort((x, y) => x - y); if (Math.random() > 2) c.push(0); return c; }';
     const r2 = assessForgeCandidate({ name: 'sortNums', refSuite: suite }, random);
     expect(r2.gate.ok).toBe(false);
     expect(r2.static.nondeterministicApis).toContain('Math.random');
+  });
+
+  it('rejects a candidate that special-cases even one suite literal', () => {
+    const suite = 'assert pick(7) === 1;';
+    const oneLiteral = 'export function pick(x) { if (x === 7) return 1; return 0; }';
+    const r = assessForgeCandidate({ name: 'pick', refSuite: suite }, oneLiteral);
+    expect(r.static.hardcodedSuiteLiterals).toContain('7');
+    expect(r.gate.ok).toBe(false);
+    expect(r.gate.reasons.join(' ')).toMatch(/special-cases suite inputs/);
+  });
+
+  it('never scores a throwing reference oracle as agreement', () => {
+    const suite = 'assert f(2) === 4;';
+    const brokenRef = 'export function f(x) { throw new Error("reference is broken"); }';
+    const candidate = 'export function f(x) { return x * x; }';
+    const r = assessForgeCandidate({ name: 'f', refSuite: suite, reference: brokenRef }, candidate);
+    // The throwing reference must not be counted as a passing comparison.
+    expect(r.differential?.agreed ?? 0).toBe(0);
+  });
+
+  it('refuses a candidate with no behavioral evidence at all', () => {
+    // Unquoted object key is not JSON-safe → no seeds, and there is no reference.
+    const suite = 'assert f({ a: 1 }) === 1;';
+    const candidate = 'export function f(o) { return o.a; }';
+    const r = assessForgeCandidate({ name: 'f', refSuite: suite }, candidate);
+    expect(r.gate.ok).toBe(false);
+    expect(r.gate.reasons.join(' ')).toMatch(/no behavioral verification/);
   });
 });
 

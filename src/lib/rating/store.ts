@@ -16,6 +16,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { withSyncFileLock } from '../fileLock.js';
 import { chainHash, GENESIS_HASH, hashParams } from './hash.js';
 import { computeStandings, type StandingsOptions } from './elo.js';
 import type { DimensionTags, LedgerRecord, PairChoice, Standing, VariationDescriptor } from './types.js';
@@ -192,14 +193,39 @@ export class RatingStore {
 
   private append(kind: LedgerRecord['kind'], payload: { variation: VariationDescriptor } | { choice: Omit<PairChoice, 'seq' | 'prevHash' | 'hash'> }): void {
     const body = { kind, ...payload };
-    const prevHash = this.head;
-    const hash = chainHash(prevHash, body);
-    const record = { kind, seq: this.seq, prevHash, hash, ...payload } as LedgerRecord;
-    fs.mkdirSync(path.dirname(this.file), { recursive: true });
-    fs.appendFileSync(this.file, `${JSON.stringify(record)}\n`, 'utf-8');
-    this.headBeforeLast = prevHash;
-    this.head = hash;
-    this.seq += 1;
+    // Re-derive the authoritative tail from the file under a cross-process
+    // lock: this instance's cached head/seq may be stale if another process
+    // appended since load(), and two appends from the same cached head would
+    // fork the chain.
+    withSyncFileLock(`${this.file}.lock`, () => {
+      let prevHash = this.head;
+      let seq = this.seq;
+      try {
+        if (fs.existsSync(this.file)) {
+          const lines = fs.readFileSync(this.file, 'utf-8').split('\n').filter((l) => l.trim());
+          const last = lines[lines.length - 1];
+          if (last) {
+            const rec = JSON.parse(last) as LedgerRecord;
+            if (typeof rec.hash === 'string' && typeof rec.seq === 'number') {
+              prevHash = rec.hash;
+              seq = rec.seq + 1;
+            }
+          }
+        }
+      } catch {
+        // Unreadable/unparsable tail: never risk a fork — fall back to the
+        // cached head rather than guessing.
+        prevHash = this.head;
+        seq = this.seq;
+      }
+      const hash = chainHash(prevHash, body);
+      const record = { kind, seq, prevHash, hash, ...payload } as LedgerRecord;
+      fs.mkdirSync(path.dirname(this.file), { recursive: true });
+      fs.appendFileSync(this.file, `${JSON.stringify(record)}\n`, 'utf-8');
+      this.headBeforeLast = prevHash;
+      this.head = hash;
+      this.seq = seq + 1;
+    });
   }
 
   private load(): void {

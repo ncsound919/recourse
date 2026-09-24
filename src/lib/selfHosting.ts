@@ -652,19 +652,15 @@ export async function executeSelfHostedTool(
     return executeSelfHostedDirect(entry, op, root);
   }
 
+  // The runtime is available and the entry compiled into a guest program
+  // (both checked host-side, above). Everything the guest does from here —
+  // throwing during top-level setup, a runtime error, a grant denial — is
+  // authoritative and must NEVER escalate to the full-privilege direct import.
+  // Classifying on the guest's own error text would let a generated tool opt
+  // out of the sandbox it is running inside (e.g. `throw new Error('guest
+  // setup error')`). A grant denial or a tool error stays a failure.
   const result = await runSandbox();
-  if ('error' in result) {
-    // A grant denial or a tool error is authoritative — do not escalate.
-    const isSetupOrUnavailable =
-      /guest setup error/.test(result.error) ||
-      /not installed|not expose getQuickJS|Cannot find module|sandbox runtime module unavailable/.test(result.error);
-    if (isSetupOrUnavailable) {
-      RESOLVED_EXECUTION_MODE.set(cacheKey, 'direct');
-      return executeSelfHostedDirect(entry, op, root);
-    }
-    return result;
-  }
-  RESOLVED_EXECUTION_MODE.set(cacheKey, 'sandbox');
+  if (result.success) RESOLVED_EXECUTION_MODE.set(cacheKey, 'sandbox');
   return result;
 }
 

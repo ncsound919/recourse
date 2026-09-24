@@ -149,9 +149,11 @@ export function buildGuestProgramFromEntry(entry: SelfHostedManifestEntry): { pr
 
 function classifyFailure(error: string | undefined): SandboxFailureKind {
   if (!error) return 'tool_error';
+  // Only a grant denial has a distinct host-side meaning here. Guest-thrown
+  // errors are `tool_error`; host unavailability is determined BEFORE any guest
+  // runs (isSandboxRuntimeAvailable / buildGuestProgramFromEntry), never by
+  // matching text the guest could have written.
   if (/denied:/.test(error)) return 'denied';
-  if (/guest setup error/.test(error)) return 'setup';
-  if (/not installed|not expose getQuickJS|Cannot find module/.test(error)) return 'unavailable';
   return 'tool_error';
 }
 

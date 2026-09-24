@@ -4,6 +4,8 @@
 // isolated `node:vm` context (with a Function fallback for bundlers).
 
 import type { GenomeSpec, InvariantCheck, ToolDomain } from './types';
+import { inProcessFallbackRefusal } from '../lib/codeSafety';
+import { createIsolatedCallable, isIsolateAvailable, type IsolatedCallable } from '../lib/isolatedSandbox';
 
 const fmt = (n: number): number => Number(n.toPrecision(8));
 
@@ -282,20 +284,36 @@ export function compileGenome(spec: GenomeSpec): string {
 /* Sandbox verification                                                */
 /* ------------------------------------------------------------------ */
 
-/** Evaluate a gene in an isolated context. Uses node:vm when available
- *  (real isolation + timeout), falls back to Function for edge/bundlers. */
-function sandboxEval(source: string): (input: unknown) => unknown {
-  try {
+/** Evaluate a gene in a real isolate (no host globals). The node:vm/Function
+ *  path is reachable only under the explicit RECOURSE_ALLOW_INPROCESS_EVAL=1
+ *  opt-in — it is not a security boundary, so it is refused by default. */
+function createGeneCallable(source: string): IsolatedCallable {
+  if (isIsolateAvailable()) return createIsolatedCallable(source);
+  const refusal = inProcessFallbackRefusal(source);
+  if (refusal) throw new Error(refusal);
+
+  const evalOnce = (code: string): ((input: unknown) => unknown) => {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const vm: any = typeof require === 'function' ? require('node:vm') : null;
     if (vm && vm.Script) {
-      const script = new vm.Script(`(${source})`);
+      const script = new vm.Script(`(${code})`);
       return script.runInContext(vm.createContext({}), { timeout: 250 });
     }
-  } catch (err) {
-    if (err instanceof SyntaxError) throw err;
-  }
-  return new Function(`return (${source})`)();
+    return new Function(`return (${code})`)();
+  };
+  const fn = evalOnce(source);
+  return {
+    call(input: unknown) {
+      let a: unknown;
+      try { a = JSON.parse(JSON.stringify(input)); } catch { return { ok: false, threw: true, mutated: false }; }
+      const before = JSON.stringify(a);
+      let value: unknown;
+      let threw = false;
+      try { value = fn(a); } catch { threw = true; }
+      return { ok: true, threw, mutated: JSON.stringify(a) !== before, value };
+    },
+    dispose() { /* nothing to release */ },
+  };
 }
 
 export interface VerifyResult {
@@ -317,9 +335,9 @@ export function verifyGenome(spec: GenomeSpec): VerifyResult {
   }
   const source = compileGenome(spec);
   const checks: InvariantCheck[] = [];
-  let fn: (input: unknown) => unknown;
+  let callable: IsolatedCallable;
   try {
-    fn = sandboxEval(source) as (input: unknown) => unknown;
+    callable = createGeneCallable(source);
     checks.push({ name: 'SandboxSyntaxValid', passed: true });
   } catch (err) {
     return {
@@ -330,19 +348,26 @@ export function verifyGenome(spec: GenomeSpec): VerifyResult {
   }
 
   const vectors = kind.vectors();
+  const run = (v: unknown): unknown => {
+    const r = callable.call(v);
+    if (!r.ok || r.threw) throw new Error(r.error || 'gene threw during sandbox execution');
+    return r.value;
+  };
   let out1: unknown[];
   let out2: unknown[];
   try {
-    out1 = vectors.map((v) => fn(v));
-    out2 = vectors.map((v) => fn(v));
+    out1 = vectors.map((v) => run(v));
+    out2 = vectors.map((v) => run(v));
     checks.push({ name: 'SandboxExecutionClean', passed: true });
   } catch (err) {
+    callable.dispose();
     return {
       verified: false,
       checks: [...checks, { name: 'SandboxExecutionClean', passed: false, detail: String(err) }],
       summary: 'gene threw during sandbox execution',
     };
   }
+  callable.dispose();
 
   checks.push({
     name: 'DeterminismUnderReplay',

@@ -5,6 +5,10 @@ import { describe, it, expect, vi } from 'vitest';
 // assert rewriting, honest failure reporting) — the native isolate backend is
 // simply reported unavailable, which is a legitimate runtime condition the
 // module is explicitly designed to degrade to.
+// In-process evaluation is refused by default (codeSafety.isolationRequired);
+// these tests cover the explicit opt-in path.
+process.env.RECOURSE_ALLOW_INPROCESS_EVAL = '1';
+
 vi.mock('../src/lib/isolatedSandbox', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/lib/isolatedSandbox')>();
   return { ...actual, isIsolateAvailable: () => false };
@@ -15,6 +19,20 @@ import {
   executeTestSuite,
   prepareExecutableCode,
 } from '../src/lib/executionSandbox';
+
+describe('executionSandbox — refuses the in-process path without the opt-in', () => {
+  it('fails closed with a clear reason', () => {
+    const prev = process.env.RECOURSE_ALLOW_INPROCESS_EVAL;
+    delete process.env.RECOURSE_ALLOW_INPROCESS_EVAL;
+    try {
+      const r = executeToolFunction('function area(l, w) { return l * w; }', 'area', [3, 4]);
+      expect(r.success).toBe(false);
+      expect(String(r.error)).toMatch(/RECOURSE_ALLOW_INPROCESS_EVAL/);
+    } finally {
+      process.env.RECOURSE_ALLOW_INPROCESS_EVAL = prev;
+    }
+  });
+});
 
 describe('executionSandbox — in-process fallback path (isolated-vm unavailable)', () => {
   it('prepares code and executes a named function', () => {

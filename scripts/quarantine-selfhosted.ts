@@ -75,7 +75,7 @@ export function planQuarantine(root: string, opts: { quality?: boolean } = {}): 
       continue;
     }
     if (opts.quality !== false && e.entrypointKind !== 'class' && /^[A-Za-z_$][\w$]*$/.test(e.name)) {
-      const q = assessForgeCandidate({ name: e.name, refSuite: e.testSuiteCode }, e.sourceCode);
+      const q = assessForgeCandidate({ name: e.name, refSuite: e.testSuiteCode }, e.sourceCode, { requireBehavioral: false });
       // Only hard, objective failures quarantine an existing tool; a missing
       // JSDoc (low score) alone does not.
       const hard = q.gate.reasons.filter((r) => !r.startsWith('quality score'));

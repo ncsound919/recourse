@@ -8,6 +8,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 import { sha256Hex } from '../benchmarkLedger.js';
+import { withSyncFileLock } from '../fileLock.js';
 import type { PipelineId } from './types.js';
 
 export interface PipelineBenchmarkRecord {
@@ -61,22 +62,24 @@ export function appendPipelineBenchmark(
   record: Omit<PipelineBenchmarkRecord, 'id' | 'prevHash' | 'hash' | 'at'> & { at?: number },
   file = pipelineLedgerFile(),
 ): PipelineBenchmarkRecord {
-  const ledger = readPipelineLedger(file);
-  const prev = ledger[ledger.length - 1];
-  const base: Omit<PipelineBenchmarkRecord, 'hash'> = {
-    ...record,
-    at: record.at ?? Date.now(),
-    id: `pipe_${ledger.length + 1}`,
-    prevHash: prev ? prev.hash : GENESIS,
-  };
-  const full: PipelineBenchmarkRecord = { ...base, hash: hashRecord(base) };
-  try {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.appendFileSync(file, JSON.stringify(full) + '\n', 'utf-8');
-  } catch (err) {
-    console.warn('[pipelineLedger] append failed:', err instanceof Error ? err.message : String(err));
-  }
-  return full;
+  return withSyncFileLock(`${file}.lock`, () => {
+    const ledger = readPipelineLedger(file);
+    const prev = ledger[ledger.length - 1];
+    const base: Omit<PipelineBenchmarkRecord, 'hash'> = {
+      ...record,
+      at: record.at ?? Date.now(),
+      id: `pipe_${ledger.length + 1}`,
+      prevHash: prev ? prev.hash : GENESIS,
+    };
+    const full: PipelineBenchmarkRecord = { ...base, hash: hashRecord(base) };
+    try {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.appendFileSync(file, JSON.stringify(full) + '\n', 'utf-8');
+    } catch (err) {
+      console.warn('[pipelineLedger] append failed:', err instanceof Error ? err.message : String(err));
+    }
+    return full;
+  });
 }
 
 export function verifyPipelineRecords(records: PipelineBenchmarkRecord[]): { valid: boolean; brokenAt?: number } {

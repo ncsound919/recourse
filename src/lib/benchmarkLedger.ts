@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { allBenchmarkProblems } from '../benchmark/benchmark.js';
+import { withSyncFileLock } from './fileLock.js';
 import type { BenchmarkRun } from '../intake/types.js';
 
 export interface BenchmarkRecord {
@@ -75,28 +76,30 @@ export function appendBenchmarkRun(
   opts: { registryHash?: string; file?: string; at?: number } = {},
 ): BenchmarkRecord {
   const file = opts.file ?? benchmarkLedgerFile();
-  const ledger = readBenchmarkLedger(file);
-  const prev = ledger[ledger.length - 1];
-  const prevHash = prev ? prev.hash : GENESIS;
-  const base: Omit<BenchmarkRecord, 'hash'> = {
-    id: `bench_${ledger.length + 1}`,
-    at: opts.at ?? run.at ?? Date.now(),
-    solved: run.solved,
-    total: run.total,
-    solvedIds: [...run.solvedIds].sort(),
-    benchmarkHash: run.problemSetHash ?? benchmarkSetHash(),
-    registryHash: opts.registryHash ?? '',
-    deltaSolved: prev ? run.solved - prev.solved : null,
-    prevHash,
-  };
-  const record: BenchmarkRecord = { ...base, hash: hashRecord(base) };
-  try {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.appendFileSync(file, JSON.stringify(record) + '\n', 'utf-8');
-  } catch (err) {
-    console.warn('[benchmarkLedger] append failed:', err instanceof Error ? err.message : String(err));
-  }
-  return record;
+  return withSyncFileLock(`${file}.lock`, () => {
+    const ledger = readBenchmarkLedger(file);
+    const prev = ledger[ledger.length - 1];
+    const prevHash = prev ? prev.hash : GENESIS;
+    const base: Omit<BenchmarkRecord, 'hash'> = {
+      id: `bench_${ledger.length + 1}`,
+      at: opts.at ?? run.at ?? Date.now(),
+      solved: run.solved,
+      total: run.total,
+      solvedIds: [...run.solvedIds].sort(),
+      benchmarkHash: run.problemSetHash ?? benchmarkSetHash(),
+      registryHash: opts.registryHash ?? '',
+      deltaSolved: prev ? run.solved - prev.solved : null,
+      prevHash,
+    };
+    const record: BenchmarkRecord = { ...base, hash: hashRecord(base) };
+    try {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.appendFileSync(file, JSON.stringify(record) + '\n', 'utf-8');
+    } catch (err) {
+      console.warn('[benchmarkLedger] append failed:', err instanceof Error ? err.message : String(err));
+    }
+    return record;
+  });
 }
 
 /** Recompute the chain from raw records (pure, no filesystem). */

@@ -9,7 +9,7 @@ has a real sandboxed test suite behind it.
 
 1. `npm install`
 2. Copy `.env.example` to `.env` and set `MODEL_BASE_URL` and `MODEL_NAME`.
-3. Start your model server. Prerequisites: Node.js 18+, and (for generative
+3. Start your model server. Prerequisites: Node.js 24+ (isolated-vm 7 requires it), and (for generative
    features) any OpenAI-compatible model server. The default local target is
 MiniCPM5-1B served by llama.cpp's `llama-server` — use `start-local.ps1`, which
 enables tool-call reliability and CPU speed:

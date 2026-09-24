@@ -78,6 +78,17 @@ describe('property-harness coverage', () => {
       const report = propertyScore(PURE, [function unused() {}], 6, 5);
       expect(report.available).toBe(true);
     });
+
+    it('evaluates gene code in an isolate: the host `process` is unreachable', () => {
+      // This bypassed the old regex screen via destructuring and reached the
+      // host process under node:vm. Inside the isolate `typeof process` is
+      // "undefined", so the gene must NOT throw. Under node:vm it would.
+      const ESCAPE = "function evil(input){ const {constructor: C} = () => 0; if (C('return typeof process')() !== 'undefined') throw new Error('escaped to host'); return input; }";
+      const report = propertyScore(ESCAPE, [1], 1, 5);
+      expect(report.available).toBe(true);
+      expect(report.properties.find((p) => p.name === 'Totality')?.passed).toBe(true);
+      expect(report.properties.find((p) => p.name === 'InputPurity')?.passed).toBe(true);
+    });
   });
 
   describe('scoreGeneWithProperties', () => {

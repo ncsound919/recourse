@@ -7,7 +7,8 @@ import crypto from 'crypto';
 import { extractJsonBlock } from '../lib/modelProvider';
 import { skillAwareChat } from '../lib/skillContext';
 import { lintSource } from '../lib/lintGate';
-import { assertInProcessSafe } from '../lib/codeSafety';
+import { inProcessFallbackRefusal } from '../lib/codeSafety';
+import { isIsolateAvailable, runBodyInIsolate } from '../lib/isolatedSandbox';
 import {
   avoidGuidance,
   biasWeightForGene,
@@ -252,55 +253,103 @@ export function runSandboxVerification(candidate: MutationCandidate): SandboxVer
   }
   checks.push({ name: 'code_integrity', passed: true, detail: 'Source code structure non-empty and well-formed' });
 
-  // Check 2: Sandbox execution of function
-  let fn: Function | null = null;
-  try {
-    // Strip export keywords for in-memory Function constructor evaluation
-    const cleanedCode = candidate.source
-      .replace(/export\s+default\s+/g, '')
-      .replace(/export\s+(async\s+)?function\s+([a-zA-Z0-9_$]+)/g, 'function $2')
-      .replace(/export\s+const\s+([a-zA-Z0-9_$]+)\s*=/g, 'const $1 =');
+  // Checks 2-4 run the model's code. Primary path: a fresh isolated-vm
+  // isolate (no process/require/host realm), so a prompt-injected candidate
+  // cannot reach the server. The in-process `new Function` path exists only
+  // for hosts without the native addon, and codeSafety refuses it by default
+  // (a regex screen is not a boundary — see codeSafety.ts).
+  const cleanedCode = candidate.source
+    .replace(/export\s+default\s+/g, '')
+    .replace(/export\s+(async\s+)?function\s+([a-zA-Z0-9_$]+)/g, 'function $2')
+    .replace(/export\s+const\s+([a-zA-Z0-9_$]+)\s*=/g, 'const $1 =');
+  // The entrypoint name is interpolated into code: accept identifiers only.
+  const entryName = /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(candidate.toolName || '') ? candidate.toolName : 'run';
+  const vectors = Array.isArray(candidate.testVectors) && candidate.testVectors.length > 0
+    ? candidate.testVectors
+    : ['test_input_alpha', 'test_input_beta', 42];
 
-    // `new Function` runs with full host privileges: screen the model's code.
-    assertInProcessSafe(cleanedCode);
-    const wrapper = new Function(
-      `${cleanedCode};
-      const candidateFn = typeof ${candidate.toolName} === 'function' ? ${candidate.toolName} : (typeof run === 'function' ? run : null);
-      if (!candidateFn) throw new Error("Entrypoint function '${candidate.toolName}' not exported or defined");
-      return candidateFn;`,
-    );
+  type VectorOutcome = { s1?: string | null; s2?: string | null; undef?: boolean; threw?: string };
+  let outcomes: VectorOutcome[] = [];
+  let boundary: string;
 
-    fn = wrapper();
-    checks.push({ name: 'executable_syntax', passed: true, detail: `Exported function ${candidate.toolName} callable` });
-  } catch (err: any) {
-    checks.push({ name: 'executable_syntax', passed: false, detail: `Execution error: ${err.message}` });
-    return { verified: false, summary: `Syntax / runtime error: ${err.message}`, checks };
+  if (isIsolateAvailable()) {
+    let vectorsJson = '[]';
+    try { vectorsJson = JSON.stringify(vectors); } catch { vectorsJson = '[]'; }
+    const probe = `${cleanedCode};
+      const candidateFn = typeof ${entryName} === 'function' ? ${entryName} : (typeof run === 'function' ? run : null);
+      if (!candidateFn) throw new Error("Entrypoint function '${entryName}' not exported or defined");
+      const __vectors = ${vectorsJson};
+      const __res = [];
+      for (const v of __vectors) {
+        try {
+          const r1 = candidateFn(v);
+          const r2 = candidateFn(v);
+          const s1 = JSON.stringify(r1);
+          const s2 = JSON.stringify(r2);
+          __res.push({ s1: s1 === undefined ? null : s1, s2: s2 === undefined ? null : s2, undef: r1 === undefined });
+        } catch (e) {
+          __res.push({ threw: (e && e.message) ? String(e.message) : String(e) });
+          break;
+        }
+      }
+      return __res;`;
+    const run = runBodyInIsolate(probe, { timeoutMs: 2000, memoryLimitMb: 64 });
+    if (!run.ok) {
+      const msg = run.error || 'isolate run failed';
+      checks.push({ name: 'executable_syntax', passed: false, detail: `Execution error: ${msg}` });
+      return { verified: false, summary: `Syntax / runtime error: ${msg}`, checks };
+    }
+    checks.push({ name: 'executable_syntax', passed: true, detail: `Exported function ${entryName} callable` });
+    outcomes = Array.isArray(run.value) ? (run.value as VectorOutcome[]) : [];
+    boundary = 'Executed inside an isolated-vm V8 isolate (no process/require/host globals, 64MB, 2s)';
+  } else {
+    const refusal = inProcessFallbackRefusal(cleanedCode);
+    if (refusal) {
+      checks.push({ name: 'executable_syntax', passed: false, detail: refusal });
+      return { verified: false, summary: refusal, checks };
+    }
+    let fn: Function | null = null;
+    try {
+      const wrapper = new Function(
+        `${cleanedCode};
+        const candidateFn = typeof ${entryName} === 'function' ? ${entryName} : (typeof run === 'function' ? run : null);
+        if (!candidateFn) throw new Error("Entrypoint function '${entryName}' not exported or defined");
+        return candidateFn;`,
+      );
+      fn = wrapper();
+      checks.push({ name: 'executable_syntax', passed: true, detail: `Exported function ${entryName} callable` });
+    } catch (err: any) {
+      checks.push({ name: 'executable_syntax', passed: false, detail: `Execution error: ${err.message}` });
+      return { verified: false, summary: `Syntax / runtime error: ${err.message}`, checks };
+    }
+    for (const v of vectors) {
+      try {
+        const r1 = (fn as Function)(v);
+        const r2 = (fn as Function)(v);
+        const s1 = JSON.stringify(r1);
+        const s2 = JSON.stringify(r2);
+        outcomes.push({ s1: s1 === undefined ? null : s1, s2: s2 === undefined ? null : s2, undef: r1 === undefined });
+      } catch (err: any) {
+        outcomes.push({ threw: err?.message ?? String(err) });
+        break;
+      }
+    }
+    boundary = 'Executed IN-PROCESS via new Function (isolated-vm unavailable; explicitly allowed by RECOURSE_ALLOW_INPROCESS_EVAL) — NOT a security boundary';
   }
 
   // Check 3: Deterministic purity and execution on test vectors
   try {
-    const vectors = Array.isArray(candidate.testVectors) && candidate.testVectors.length > 0
-      ? candidate.testVectors
-      : ['test_input_alpha', 'test_input_beta', 42];
-
     let passedVectors = 0;
-    for (const vector of vectors) {
-      if (typeof fn !== 'function') break;
-      const res1 = fn(vector);
-      const res2 = fn(vector);
-
-      // Verify determinism
-      const s1 = JSON.stringify(res1);
-      const s2 = JSON.stringify(res2);
-      if (s1 !== s2) {
-        throw new Error(`Non-deterministic output for vector ${JSON.stringify(vector)}: ${s1} vs ${s2}`);
+    for (let i = 0; i < outcomes.length; i++) {
+      const o = outcomes[i];
+      const vector = vectors[i];
+      if (o.threw !== undefined) throw new Error(o.threw);
+      if (o.s1 !== o.s2) {
+        throw new Error(`Non-deterministic output for vector ${JSON.stringify(vector)}: ${o.s1} vs ${o.s2}`);
       }
-
-      // Verify non-crashing / defined
-      if (res1 === undefined) {
+      if (o.undef) {
         throw new Error(`Undefined result for vector ${JSON.stringify(vector)}`);
       }
-
       passedVectors++;
     }
 
@@ -314,12 +363,11 @@ export function runSandboxVerification(candidate: MutationCandidate): SandboxVer
     return { verified: false, summary: `Purity verification failed: ${err.message}`, checks };
   }
 
-  // Check 4: Bounded execution & no side effects - ran inside an isolated
-  // Function scope with no access to the module globals.
+  // Check 4: report the execution boundary that was ACTUALLY used.
   checks.push({
     name: 'sandbox_boundary_isolation',
     passed: true,
-    detail: 'Executed inside an isolated Function scope (no module globals, no require)',
+    detail: boundary,
   });
 
   // Check 5: Real open-source lint gate (oxlint) on the candidate source.

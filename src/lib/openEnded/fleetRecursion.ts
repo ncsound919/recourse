@@ -19,6 +19,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { withSyncFileLock } from '../fileLock.js';
 import { canonicalToolKey } from './gates.js';
 
 export interface FleetOutcome {
@@ -202,26 +203,28 @@ export class FleetRecursionLedger {
   /** Append a real outcome. Re-appending the same canonicalId at the same or
    *  lower iteration is a no-op (returns the existing entry) — no double count. */
   append(outcome: FleetOutcome, now: number = Date.now()): FleetRecursionEntry {
-    const entries = this.read();
-    const last = entries[entries.length - 1];
-    const o = normalize(outcome);
-    const existing = [...entries].reverse().find((e) => e.canonicalId === o.canonicalId);
-    if (existing && o.iteration <= existing.iteration) return existing;
+    return withSyncFileLock(`${this.file}.lock`, () => {
+      const entries = this.read();
+      const last = entries[entries.length - 1];
+      const o = normalize(outcome);
+      const existing = [...entries].reverse().find((e) => e.canonicalId === o.canonicalId);
+      if (existing && o.iteration <= existing.iteration) return existing;
 
-    const base: Omit<FleetRecursionEntry, 'hash'> = {
-      ...o,
-      seq: (last?.seq ?? 0) + 1,
-      prevHash: last?.hash ?? 'genesis',
-      at: now,
-    };
-    const entry: FleetRecursionEntry = { ...base, hash: hashEntry(base) };
-    try {
-      fs.mkdirSync(path.dirname(this.file), { recursive: true });
-      fs.appendFileSync(this.file, JSON.stringify(entry) + '\n', 'utf-8');
-    } catch (err) {
-      console.warn('[fleetRecursion] append failed:', err instanceof Error ? err.message : String(err));
-    }
-    return entry;
+      const base: Omit<FleetRecursionEntry, 'hash'> = {
+        ...o,
+        seq: (last?.seq ?? 0) + 1,
+        prevHash: last?.hash ?? 'genesis',
+        at: now,
+      };
+      const entry: FleetRecursionEntry = { ...base, hash: hashEntry(base) };
+      try {
+        fs.mkdirSync(path.dirname(this.file), { recursive: true });
+        fs.appendFileSync(this.file, JSON.stringify(entry) + '\n', 'utf-8');
+      } catch (err) {
+        console.warn('[fleetRecursion] append failed:', err instanceof Error ? err.message : String(err));
+      }
+      return entry;
+    });
   }
 
   /** Recompute the hash chain; report the first divergence (or valid). */

@@ -12,7 +12,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node-version: [20, 22]
+        # isolated-vm@7 requires Node >=24; testing on older lines would either
+        # fail to build the native addon or silently fall back off the sandbox.
+        node-version: [24]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v7
@@ -32,7 +34,7 @@ jobs:
       # Coverage gates run only on the primary Node version to save CI time; the
       # thresholds live in vitest.config.ts (80/80/80/60).
       - name: Coverage (gated)
-        if: matrix.node-version == 20
+        if: matrix.node-version == 24
         run: npm run test:coverage
 
   docker-smoke:

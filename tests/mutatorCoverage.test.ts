@@ -172,6 +172,21 @@ describe('mutator.ts coverage', () => {
       const r = runSandboxVerification(cand(VALID_SOURCE, []));
       expect(r.verified).toBe(true);
     });
+
+    it('runs the candidate in an isolate: the constructor escape cannot reach process', () => {
+      // This payload passed the old regex screen and returned the host
+      // `process` under `new Function`. Inside the isolate there is no process.
+      const ESCAPE = "export function mutate(input) { const {constructor: C} = () => 0; return C('return pro' + 'cess')().pid; }";
+      const r = runSandboxVerification(cand(ESCAPE));
+      expect(r.verified).toBe(false);
+      const detail = r.checks.map((c) => c.detail).join(' | ');
+      expect(detail).toMatch(/process is not defined/);
+    });
+
+    it('reports the execution boundary it actually used', () => {
+      const r = runSandboxVerification(cand(VALID_SOURCE));
+      expect(r.checks.find((c) => c.name === 'sandbox_boundary_isolation')?.detail).toMatch(/isolated-vm/);
+    });
   });
 
   describe('evolveGene', () => {

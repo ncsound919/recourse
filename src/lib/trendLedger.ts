@@ -12,6 +12,7 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import { withSyncFileLock } from './fileLock';
 
 export interface LedgerInsight {
   id: string;
@@ -69,8 +70,8 @@ export function readLedger(): LedgerInsight[] {
 
 /**
  * Append an insight, chaining to the previous record's hash. Returns the
- * persisted record. Rejects (returns null) if `prevHash` doesn't match the
- * actual tail — detects concurrent writers / tampering.
+ * persisted record. The tail read and the append happen under a cross-process
+ * file lock, so two writers cannot fork the chain.
  */
 export function appendInsight(input: {
   createdRun: string;
@@ -81,17 +82,20 @@ export function appendInsight(input: {
   provenanceRoot: string;
   payload: Record<string, unknown>;
 }): LedgerInsight | null {
-  const ledger = readLedger();
-  const prevInsightHash = ledger.length ? ledger[ledger.length - 1].hash : GENESIS;
-  // Deterministic, position-based id (no random bytes): same append sequence
-  // yields the same id, so the chain is reproducible bit-for-bit.
-  const id = `ins_${ledger.length + 1}`;
-  const rec: Omit<LedgerInsight, 'hash'> = { ...input, id, prevInsightHash };
-  const hash = hashInsightRecord(rec);
-  const full: LedgerInsight = { ...rec, hash };
-  ensureDir();
-  fs.appendFileSync(ledgerFilePath(), JSON.stringify(full) + '\n', 'utf-8');
-  return full;
+  const file = ledgerFilePath();
+  return withSyncFileLock(`${file}.lock`, () => {
+    const ledger = readLedger();
+    const prevInsightHash = ledger.length ? ledger[ledger.length - 1].hash : GENESIS;
+    // Deterministic, position-based id (no random bytes): same append sequence
+    // yields the same id, so the chain is reproducible bit-for-bit.
+    const id = `ins_${ledger.length + 1}`;
+    const rec: Omit<LedgerInsight, 'hash'> = { ...input, id, prevInsightHash };
+    const hash = hashInsightRecord(rec);
+    const full: LedgerInsight = { ...rec, hash };
+    ensureDir();
+    fs.appendFileSync(file, JSON.stringify(full) + '\n', 'utf-8');
+    return full;
+  });
 }
 
 /** Verify the whole chain is intact. Returns { valid, brokenAt? }. */

@@ -375,11 +375,13 @@ function __forge_call(fn) {
 }
 function __forge_same(cand, ref) {
   var r = __forge_call(ref);
-  if (!r.ok) return true;
+  // A reference that throws on a probe says NOTHING about the candidate — it
+  // must never be scored as agreement (that let broken oracles pass everything).
+  if (!r.ok) return false;
   var c = __forge_call(cand);
   return c.ok && c.out === r.out;
 }
-function __forge_terminates(fn) { __forge_call(fn); return true; }
+function __forge_terminates(fn) { return __forge_call(fn).ok; }
 function __forge_det(fn) {
   var a = __forge_call(fn); var b = __forge_call(fn);
   return a.ok === b.ok && a.out === b.out;
@@ -457,10 +459,13 @@ function differential(
 function robustness(input: ForgeQualityInput, candidate: string, seeds: unknown[][]): NonNullable<ForgeQualityReport['robustness']> {
   if (!seeds.length) return { checked: 0, deterministic: true, mutatesInput: false, notes: ['no JSON-safe suite inputs to probe'] };
   const src = `${candidate}\n${HELPERS}`;
-  const det = seeds.map((a) => `assert __forge_det(() => ${input.name}(...${JSON.stringify(a)}));`).join('\n');
+  // Class entrypoints must be constructed; function entrypoints are called.
+  const call = (argsExpr: string) =>
+    input.kind === 'class' ? `new ${input.name}(${argsExpr})` : `${input.name}(${argsExpr})`;
+  const det = seeds.map((a) => `assert __forge_det(() => ${call(`...${JSON.stringify(a)}`)});`).join('\n');
   const mut = seeds
     .filter((a) => a.some((x) => typeof x === 'object' && x !== null))
-    .map((a) => `assert __forge_nomut(${JSON.stringify(JSON.stringify(a))}, (args) => ${input.name}(...args));`)
+    .map((a) => `assert __forge_nomut(${JSON.stringify(JSON.stringify(a))}, (args) => ${call('...args')});`)
     .join('\n');
   const detRun = runSuite(src, det, 3000);
   const notes: string[] = [];
@@ -483,7 +488,11 @@ function robustness(input: ForgeQualityInput, candidate: string, seeds: unknown[
  * Score a candidate that ALREADY passed the full reference suite. Pure w.r.t.
  * inputs (all execution happens in the sandbox); never throws.
  */
-export function assessForgeCandidate(input: ForgeQualityInput, candidate: string): ForgeQualityReport {
+export function assessForgeCandidate(
+  input: ForgeQualityInput,
+  candidate: string,
+  opts: { requireBehavioral?: boolean } = {},
+): ForgeQualityReport {
   const t = forgeQualityThresholds();
   const reasons: string[] = [];
   const code = stripComments(candidate);
@@ -494,17 +503,19 @@ export function assessForgeCandidate(input: ForgeQualityInput, candidate: string
 
   let diff: ForgeQualityReport['differential'] = null;
   let rob: ForgeQualityReport['robustness'] = null;
-  if (input.kind !== 'class' && IDENT.test(input.name)) {
+  if (IDENT.test(input.name)) {
     const seedSet = new Map<string, unknown[]>();
     for (const v of suiteVectors(input.refSuite, input.name)) seedSet.set(JSON.stringify(v), v);
     for (const v of input.vectors ?? []) {
       if (Array.isArray(v)) seedSet.set(JSON.stringify(v), v);
     }
     const seeds = [...seedSet.values()].slice(0, 16);
-    try {
-      if (input.reference && input.reference.trim()) diff = differential(input, candidate, seeds);
-    } catch (e) {
-      diff = { available: false, checked: 0, agreed: 0, mismatches: [`differential harness error: ${(e as Error).message}`] };
+    if (input.kind !== 'class') {
+      try {
+        if (input.reference && input.reference.trim()) diff = differential(input, candidate, seeds);
+      } catch (e) {
+        diff = { available: false, checked: 0, agreed: 0, mismatches: [`differential harness error: ${(e as Error).message}`] };
+      }
     }
     try {
       rob = robustness(input, candidate, seeds);
@@ -514,9 +525,21 @@ export function assessForgeCandidate(input: ForgeQualityInput, candidate: string
   }
 
   // ---- hard gate -----------------------------------------------------------
-  if (hardcoded.length >= 2) reasons.push(`special-cases suite inputs (${hardcoded.slice(0, 4).join(', ')})`);
+  // Any special-cased suite literal is overfitting; a tool that mutates its
+  // caller's arguments violates the purity contract. Both are hard failures,
+  // not mere score penalties.
+  if (hardcoded.length >= 1) reasons.push(`special-cases suite inputs (${hardcoded.slice(0, 4).join(', ')})`);
   if (nondeterministicApis.length) reasons.push(`nondeterministic API use: ${nondeterministicApis.join(', ')}`);
   if (rob && !rob.deterministic) reasons.push('nondeterministic output on suite inputs');
+  if (rob && rob.mutatesInput) reasons.push("mutates the caller's arguments");
+  // A candidate with no reference oracle and no JSON-safe suite inputs gets no
+  // behavioral check at all — static signals alone must not promote a tool.
+  // Existing-tool triage (quarantine) opts out: a `typeof`-only suite is weak
+  // evidence, not a reason to retire a live tool.
+  const behavioral = (diff && diff.checked > 0) || (rob && rob.checked > 0);
+  if (opts.requireBehavioral !== false && !behavioral) {
+    reasons.push('no behavioral verification: suite inputs are not JSON-safe and no reference oracle was provided');
+  }
   const agreement = diff && diff.checked > 0 ? diff.agreed / diff.checked : null;
   if (agreement !== null && agreement < t.minAgreement) {
     reasons.push(`disagrees with the reference on ${diff!.checked - diff!.agreed}/${diff!.checked} inputs`);
@@ -528,7 +551,7 @@ export function assessForgeCandidate(input: ForgeQualityInput, candidate: string
   if (rob && rob.checked > 0) parts.push([0.2, (rob.deterministic ? 0.6 : 0) + (rob.mutatesInput ? 0 : 0.4)]);
   parts.push([0.1, jsdoc ? 1 : 0]);
   parts.push([0.1, nondeterministicApis.length ? 0 : 1]);
-  parts.push([0.1, hardcoded.length === 0 ? 1 : hardcoded.length === 1 ? 0.5 : 0]);
+  parts.push([0.1, hardcoded.length === 0 ? 1 : 0]);
   parts.push([0.05, lines > 0 && lines <= 200 ? 1 : 0.3]);
   const wsum = parts.reduce((s, [w]) => s + w, 0);
   const score = Math.round((parts.reduce((s, [w, v]) => s + w * v, 0) / wsum) * 1000) / 1000;

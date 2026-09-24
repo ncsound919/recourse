@@ -27,7 +27,8 @@
 
 import { createRequire } from 'node:module';
 import { mulberry32 } from './engine';
-import { assertInProcessSafe } from '../lib/codeSafety';
+import { assertInProcessSafe, inProcessFallbackRefusal } from '../lib/codeSafety';
+import { createIsolatedCallable, isIsolateAvailable, type IsolatedCallable } from '../lib/isolatedSandbox';
 
 /* ------------------------- module bootstrap ------------------------ */
 
@@ -62,10 +63,30 @@ function getFc(): any | null {
 
 /* --------------------------- sandbox utils ------------------------- */
 
-function sandboxEval(source: string): (input: unknown) => unknown {
-  // node:vm / Function are not security boundaries; screen model code first.
+/** Thrown when policy forbids in-process evaluation and no isolate exists. */
+export class PropertyEvalUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PropertyEvalUnavailableError';
+  }
+}
+
+/** Transpile TS gene source to JS via the shared execution-sandbox path. */
+function transpile(source: string): string | null {
+  const req = resolveRequire();
+  if (!req) return null;
+  try {
+    const { prepareExecutableCode } = req('../lib/executionSandbox');
+    return prepareExecutableCode(source);
+  } catch {
+    return null;
+  }
+}
+
+/** In-process evaluator — reachable only under the explicit opt-in. */
+function createInProcessCallable(source: string): IsolatedCallable {
   assertInProcessSafe(source);
-  const tryCompile = (code: string) => {
+  const compile = (code: string): ((input: unknown) => unknown) => {
     const req = resolveRequire();
     const vm: any = req ? req('node:vm') : null;
     if (vm && vm.Script) {
@@ -74,19 +95,51 @@ function sandboxEval(source: string): (input: unknown) => unknown {
     }
     return new Function(`return (${code})`)();
   };
+  let fn: (input: unknown) => unknown;
   try {
-    return tryCompile(source);
+    fn = compile(source);
   } catch (err) {
-    if (err instanceof SyntaxError) {
-      // TypeScript genes are transpiled with esbuild (same honest path as the
-      // execution sandbox) before the property harness evaluates them.
-      const req = resolveRequire();
-      if (!req) throw err;
-      const { prepareExecutableCode } = req('../lib/executionSandbox');
-      return tryCompile(prepareExecutableCode(source));
-    }
-    throw err;
+    if (!(err instanceof SyntaxError)) throw err;
+    const prepared = transpile(source);
+    if (prepared === null) throw err;
+    fn = compile(prepared);
   }
+  const clonev = (v: unknown) => JSON.parse(JSON.stringify(v));
+  return {
+    call(input: unknown) {
+      let a: unknown;
+      try { a = clonev(input); } catch { return { ok: false, threw: true, mutated: false }; }
+      const before = safeStringify(a);
+      let value: unknown;
+      let threw = false;
+      try { value = fn(a); } catch { threw = true; }
+      return { ok: true, threw, mutated: safeStringify(a) !== before, value };
+    },
+    dispose() { /* nothing to release */ },
+  };
+}
+
+/**
+ * Compile model-written gene code for evaluation. Prefers a real isolate; the
+ * in-process evaluator is reachable only when isolation is unavailable AND the
+ * operator explicitly opted in — it is refused by default. `node:vm` is not a
+ * security boundary, so it must never be the silent default.
+ */
+function sandboxEval(source: string): IsolatedCallable {
+  if (isIsolateAvailable()) {
+    try {
+      return createIsolatedCallable(source);
+    } catch (err) {
+      const prepared = transpile(source);
+      if (prepared !== null) {
+        try { return createIsolatedCallable(prepared); } catch { /* report original */ }
+      }
+      throw err;
+    }
+  }
+  const refusal = inProcessFallbackRefusal(source);
+  if (refusal) throw new PropertyEvalUnavailableError(refusal);
+  return createInProcessCallable(source);
 }
 
 function collectNumbers(value: unknown, out: number[] = []): number[] {
@@ -97,7 +150,6 @@ function collectNumbers(value: unknown, out: number[] = []): number[] {
   return out;
 }
 
-const clone = (v: unknown): unknown => JSON.parse(JSON.stringify(v));
 const round4 = (n: number) => Math.round(n * 10000) / 10000;
 
 function safeStringify(value: unknown): string {
@@ -171,10 +223,13 @@ export function propertyScore(
   const fc = getFc();
   if (!fc) return { available: false, runsPerProperty: 0, properties: [], score: 0 };
 
-  let fn: (input: unknown) => unknown;
+  let handle: IsolatedCallable;
   try {
-    fn = sandboxEval(code);
-  } catch {
+    handle = sandboxEval(code);
+  } catch (err) {
+    if (err instanceof PropertyEvalUnavailableError) {
+      return { available: false, runsPerProperty: 0, properties: [], score: 0 };
+    }
     return {
       available: true,
       runsPerProperty,
@@ -184,6 +239,27 @@ export function propertyScore(
   }
 
   try {
+    return evaluateProperties(handle, vectors, seed, runsPerProperty);
+  } finally {
+    handle.dispose();
+  }
+}
+
+/**
+ * Run the four properties against an already-compiled gene. The gene executes
+ * only inside the (isolated or explicitly opted-in in-process) handle — the
+ * harness itself never evaluates the code.
+ */
+function evaluateProperties(
+  handle: IsolatedCallable,
+  vectors: unknown[],
+  seed: number,
+  runsPerProperty: number,
+): PropertyReport {
+  const fc = getFc();
+  if (!fc) return { available: false, runsPerProperty: 0, properties: [], score: 0 };
+
+  try {
     const shapes = uniqueShapes(vectors).slice(0, 3);
     const arbitrary =
       shapes.length === 1
@@ -191,10 +267,20 @@ export function propertyScore(
         : fc.oneof(...(shapes.length ? shapes : [null]).map((s) => inferArbitrary(fc, s)));
 
     const properties: { name: string; predicate: (v: unknown) => boolean }[] = [
-      { name: 'Totality', predicate: (v) => { fn(clone(v)); return true; } },
-      { name: 'DeterminismUnderReplay', predicate: (v) => JSON.stringify(fn(clone(v))) === JSON.stringify(fn(clone(v))) },
-      { name: 'InputPurity', predicate: (v) => { const before = safeStringify(v); fn(v); return safeStringify(v) === before; } },
-      { name: 'FiniteOutputs', predicate: (v) => collectNumbers(fn(clone(v))).every((n) => Number.isFinite(n)) },
+      { name: 'Totality', predicate: (v) => { const r = handle.call(v); return r.ok && !r.threw; } },
+      {
+        name: 'DeterminismUnderReplay',
+        predicate: (v) => {
+          const a = handle.call(v);
+          const b = handle.call(v);
+          return a.ok && b.ok && !a.threw && !b.threw && JSON.stringify(a.value) === JSON.stringify(b.value);
+        },
+      },
+      { name: 'InputPurity', predicate: (v) => { const r = handle.call(v); return r.ok && !r.threw && !r.mutated; } },
+      {
+        name: 'FiniteOutputs',
+        predicate: (v) => { const r = handle.call(v); return r.ok && !r.threw && collectNumbers(r.value).every((n) => Number.isFinite(n)); },
+      },
     ];
 
     const results: PropertyResult[] = properties.map((p) => {
@@ -245,44 +331,38 @@ export function scoreGeneWithProperties(
 ): { reward: number; propertyReport: PropertyReport } {
   const rng = mulberry32(seed >>> 0);
 
-  let fn: (input: unknown) => unknown;
+  let handle: IsolatedCallable;
   try {
-    fn = sandboxEval(code);
+    handle = sandboxEval(code);
   } catch {
     return { reward: 0, propertyReport: { available: false, runsPerProperty: 0, properties: [], score: 0 } };
   }
-  const clean = (o: unknown) => collectNumbers(o).every((n) => Number.isFinite(n));
+  try {
+    const clean = (o: unknown) => collectNumbers(o).every((n) => Number.isFinite(n));
+    const stableAndClean = (v: unknown): boolean => {
+      const a = handle.call(v);
+      const b = handle.call(v);
+      return a.ok && b.ok && !a.threw && !b.threw && JSON.stringify(a.value) === JSON.stringify(b.value) && clean(a.value);
+    };
 
-  let baseOk = 0;
-  for (const v of vectors) {
-    try {
-      const a = fn(clone(v));
-      const b = fn(clone(v));
-      if (JSON.stringify(a) === JSON.stringify(b) && clean(a)) baseOk++;
-    } catch {
-      /* failure */
+    let baseOk = 0;
+    for (const v of vectors) if (stableAndClean(v)) baseOk++;
+    const baseFrac = vectors.length ? baseOk / vectors.length : 0;
+
+    const stressRuns = Math.min(12, Math.max(3, vectors.length * 3));
+    let stressOk = 0;
+    for (let i = 0; i < stressRuns; i++) {
+      if (stableAndClean(stressVector(vectors[i % vectors.length], rng, 1.2))) stressOk++;
     }
+    const stressFrac = stressOk / stressRuns;
+
+    const report = evaluateProperties(handle, vectors, seed, 50);
+    const reward = report.available
+      ? round4(0.35 * baseFrac + 0.25 * stressFrac + 0.4 * report.score)
+      : round4(0.5 * baseFrac + 0.5 * stressFrac);
+
+    return { reward, propertyReport: report };
+  } finally {
+    handle.dispose();
   }
-  const baseFrac = vectors.length ? baseOk / vectors.length : 0;
-
-  const stressRuns = Math.min(12, Math.max(3, vectors.length * 3));
-  let stressOk = 0;
-  for (let i = 0; i < stressRuns; i++) {
-    const v = stressVector(vectors[i % vectors.length], rng, 1.2);
-    try {
-      const a = fn(clone(v));
-      const b = fn(clone(v));
-      if (JSON.stringify(a) === JSON.stringify(b) && clean(a)) stressOk++;
-    } catch {
-      /* failure */
-    }
-  }
-  const stressFrac = stressOk / stressRuns;
-
-  const report = propertyScore(code, vectors, seed);
-  const reward = report.available
-    ? round4(0.35 * baseFrac + 0.25 * stressFrac + 0.4 * report.score)
-    : round4(0.5 * baseFrac + 0.5 * stressFrac);
-
-  return { reward, propertyReport: report };
 }

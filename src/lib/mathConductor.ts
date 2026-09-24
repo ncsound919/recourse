@@ -51,7 +51,8 @@ import {
   getMathAttempts,
 } from './goalLedger.js';
 import { keywireHealth } from './keywireBridge.js';
-import { assertInProcessSafe } from './codeSafety.js';
+import { assertInProcessSafe, inProcessFallbackRefusal } from './codeSafety.js';
+import { isIsolateAvailable, runBodyInIsolate } from './isolatedSandbox.js';
 import {
   chatCompleteRoute,
   type ChatMessage,
@@ -356,8 +357,22 @@ const runnable = sourceCode.replace(/^export\s+(?:default\s+)?/gm, '');
       `"use strict";\n` +
       `function assert(cond, msg) { if (!cond) { throw new Error('AssertionError' + (msg ? ': ' + msg : '')); } }\n` +
       `${runnable}\n${suite}\nreturn true;`;
-    // In-process evaluation of model-written code: screen it first.
-    assertInProcessSafe(trustedSource ? suite : `${runnable}\n${suite}`);
+    if (!trustedSource) {
+      // Model-written candidate: evaluate in a fresh isolate. It gets no host
+      // realm and no reference registry — a candidate must compute its answer
+      // itself, it cannot delegate to Recourse's own library-backed impls.
+      if (isIsolateAvailable()) {
+        const r = runBodyInIsolate(wrapped, { timeoutMs: 5000, memoryLimitMb: 128 });
+        if (!r.ok) throw new Error(r.error || 'isolated acceptance run failed');
+        return { passed: true, score: 1, error: null };
+      }
+      const refusal = inProcessFallbackRefusal(`${runnable}\n${suite}`);
+      if (refusal) throw new Error(refusal);
+    } else {
+      // Recourse's own reference source is trusted; only the suite text is
+      // screened. It needs the in-realm reference registry, so it stays here.
+      assertInProcessSafe(suite);
+    }
     const fn = new Function(wrapped);
     fn();
     return { passed: true, score: 1, error: null };

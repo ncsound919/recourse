@@ -68,6 +68,18 @@ function belief(id: string, opts: Partial<GeneBelief> = {}): GeneBelief {
 }
 
 describe('learner.ts coverage', () => {
+  it('serializes concurrent episodes so none is lost or forked', async () => {
+    const registry = new MockRegistry([makeGene('g1', 'Gene', 'coding')]);
+    const learner = freshLearner(registry);
+    const [a, b] = await Promise.all([learner.runEpisode(0.5), learner.runEpisode(0.5)]);
+    expect(a.episode).not.toBe(b.episode);
+    expect(new Set([a.episode, b.episode])).toEqual(new Set([1, 2]));
+    const state = await learner.status();
+    expect(state.episode).toBe(2);
+    const replay = await learner.replayFromGenesis();
+    expect(replay.replayed).toBe(2);
+    expect(replay.matchesHead).toBe(true);
+  });
   describe('InMemoryLearnerStore', () => {
     it('load/save state and append/list ledger', async () => {
       (globalThis as unknown as Record<string, unknown>).__learnerState = undefined;

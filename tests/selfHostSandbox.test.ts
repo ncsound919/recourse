@@ -176,6 +176,48 @@ describe('default-deny grants are enforced (adversarial)', () => {
     }
   });
 
+  it('a guest-thrown "guest setup error" never escalates to the direct import', async () => {
+    if (!available) return;
+    const root = freshRoot();
+    // The source throws at its own top level with text crafted to match the
+    // old string-based fallback. Under the old code this escalated to (and
+    // cached) the full-privilege direct import; it must now stay a sandbox
+    // failure.
+    const write = writeStatelessSelfHostedTool(
+      {
+        name: 'sb_escalate_setup', domain: 'coding', entrypointName: 'noop',
+        sourceCode: "throw new Error('guest setup error');\nexport function noop(x){ return x; }",
+        testSuiteCode: 'assert true;',
+        summary: 'escalation probe',
+      },
+      root,
+    );
+    expect(write.success).toBe(true);
+    if (!write.success) return;
+    const res = await executeSelfHostedTool('sb_escalate_setup', { method: 'noop', args: [1] }, root, { mode: 'auto' });
+    expect(res.success).toBe(false);
+    expect(res.mode).toBe('sandbox');
+  });
+
+  it('a guest runtime error naming a module never escalates either', async () => {
+    if (!available) return;
+    const root = freshRoot();
+    const write = writeStatelessSelfHostedTool(
+      {
+        name: 'sb_escalate_runtime', domain: 'coding', entrypointName: 'boom',
+        sourceCode: "export function boom(){ throw new Error('Cannot find module evil'); }",
+        testSuiteCode: 'assert true;',
+        summary: 'escalation probe',
+      },
+      root,
+    );
+    expect(write.success).toBe(true);
+    if (!write.success) return;
+    const res = await executeSelfHostedTool('sb_escalate_runtime', { method: 'boom', args: [] }, root, { mode: 'auto' });
+    expect(res.success).toBe(false);
+    expect(res.mode).toBe('sandbox');
+  });
+
   it('allows a granted fs read confined to the sandbox root, and rejects escapes', async () => {
     if (!available) return;
     const root = freshRoot();

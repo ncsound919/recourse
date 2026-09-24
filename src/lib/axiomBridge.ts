@@ -3,6 +3,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { executeTestSuite } from './executionSandbox.js';
 import { writeStatelessSelfHostedTool, verifySelfHostedEntry } from './selfHosting.js';
+import { assessForgeCandidate } from './forgeQuality.js';
 import type { ToolDomain } from '../types.js';
 
 const AXIOM_URL = process.env.AXIOM_URL || 'http://127.0.0.1:3198';
@@ -107,6 +108,17 @@ export async function integrateAxiomTool(
     return { ok: true, sourceCode: build.sourceCode };
   }
 
+  // The ref suite is caller/Axiom-supplied, so a passing suite alone is not
+  // enough to materialize a live module — run the quality gate first. Judge
+  // against the function the source actually EXPORTS (Axiom's builder does not
+  // always name it exactly like the tool), falling back to the tool name.
+  const exported = /export\s+(?:default\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/.exec(build.sourceCode);
+  const gateName = exported ? exported[1] : name;
+  const quality = assessForgeCandidate({ name: gateName, refSuite }, build.sourceCode);
+  if (!quality.gate.ok) {
+    return { ok: false, error: `Quality gate: ${quality.gate.reasons.join('; ')}` };
+  }
+
   // 3. Write self-hosted tool
   const writeRes = writeStatelessSelfHostedTool({
     name,
@@ -118,8 +130,13 @@ export async function integrateAxiomTool(
   });
   if (writeRes.success === false) return { ok: false, error: writeRes.error };
 
-  // 4. Final verify-entry check
-  await verifySelfHostedEntry(writeRes.entry);
+  // 4. Final verify-entry check. A module that fails its own live re-verify
+  //    (missing file, import error, suite failure) must NOT be reported as a
+  //    successful self-hosted integration.
+  const verdict = await verifySelfHostedEntry(writeRes.entry);
+  if (!verdict.passed) {
+    return { ok: false, error: `self-hosted verification failed: ${verdict.detail}` };
+  }
   return { ok: true, selfHosted: writeRes.entry, sourceCode: build.sourceCode };
 }
 
