@@ -39,17 +39,17 @@
 | `src/routes/corpus.ts` | ecosystem corpus + local cancer library (datasets/PDFs/literature KG) |
 | `src/routes/skills.ts` | skill catalog + Phase-4 skill export/import |
 | `src/routes/develop.ts` | stuck-issue loop, repair-team report/deep/intake, brain/council, patch gate, autopilot toggle, patch ledger |
+| `src/routes/forge.ts` | forge snapshot/plan/mint/run + autopilot toggle |
 
 Harness: `scripts/route-snapshot.mjs` + `tests/fixtures/route-snapshot.json` +
 `tests/routeSnapshot.test.ts` guard the full 496-route table against drift.
 
-As of `develop`: `server.ts` is ~10.5k lines, 41 routers, 108 inline routes.
+As of `forge`: `server.ts` is ~10.4k lines, 42 routers, ~103 inline routes.
 
 ## Remaining clusters (in descending value, roughly)
 
 | Cluster | Approx. routes | Notes / likely deps to inject |
 | --- | --- | --- |
-| `forge.ts` | 8 | `forgeSnapshot`, `runForgeCycle`, `mintForgeSpecFromLearnerPlan`, `forgeAutopilotOn` |
 | `openEnded.ts` | 8 | open-ended archive state, `runOpenEndedEngineCycle`, `fleetRecursion` |
 | `repair.ts` | 5 | `executeSelfRepair`, anomaly state, `haltAllAutonomousLoops` |
 | `policy.ts` | 6 | `status`, `autonomySettings`, `applyPromotionPolicy`, `haltAllAutonomousLoops` |
