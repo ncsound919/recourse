@@ -42,17 +42,18 @@
 | `src/routes/forge.ts` | forge snapshot/plan/mint/run + autopilot toggle |
 | `src/routes/openEnded.ts` | QD archive view, open-ended snapshot/run/archive/hygiene/patch, fleet-recursion ledger |
 | `src/routes/repair.ts` | self-repair status/scan-heal/single/knowledge/auto-heal |
+| `src/routes/policy.ts` | promotion policy, toggle-auto, autonomy snapshot/safe-boot/halt (the big `GET /status` readout stays for the core cluster) |
 
 Harness: `scripts/route-snapshot.mjs` + `tests/fixtures/route-snapshot.json` +
 `tests/routeSnapshot.test.ts` guard the full 496-route table against drift.
 
-As of `repair`: `server.ts` is ~10.2k lines, 44 routers, 90 inline routes.
+As of `policy`: `server.ts` is ~10.2k lines, 45 routers, 85 inline routes.
 
 ## Remaining clusters (in descending value, roughly)
 
 | Cluster | Approx. routes | Notes / likely deps to inject |
 | --- | --- | --- |
-| `policy.ts` | 6 | `status`, `autonomySettings`, `applyPromotionPolicy`, `haltAllAutonomousLoops` |
+| `dream.ts` | 4 | `dreamEngine`, `dreamState`, crystallize/mirror helpers |
 | `policy.ts` | 6 | `status`, `autonomySettings`, `applyPromotionPolicy`, `haltAllAutonomousLoops` |
 | `dream.ts` | 4 | `dreamEngine`, `dreamState`, crystallize/mirror helpers |
 | `mutate.ts` | 4 | `geneRegistryStore`, mutator helpers |
