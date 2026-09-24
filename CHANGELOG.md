@@ -48,14 +48,15 @@ about state, so entries describe what is real and what remains limited.
   `node esbuild.config.mjs`.
 - `server.ts` decomposition (incremental): extracted the research/agenda,
   orchestration, music-therapy, memory, LEGO, intake/benchmark, corpus,
-  skills, develop (stuck/repair/brain/council/patch), forge, and open-ended
-  route clusters into `src/routes/*` (11 new routers, ~99 inline routes moved).
+  skills, develop (stuck/repair/brain/council/patch), forge, open-ended, and
+  self-repair route clusters into `src/routes/*` (12 new routers, ~104 inline
+  routes moved).
   A static route-table snapshot (`scripts/route-snapshot.mjs`,
   `tests/fixtures/route-snapshot.json`) now guards all 496 routes against drift.
   See `docs/route-decomposition.md` for the remaining clusters and the pattern.
 
 ### Known limitations
-- `server.ts` remains a large monolith (decomposition is incremental); ~95
+- `server.ts` remains a large monolith (decomposition is incremental); ~90
   inline routes remain — tracked in `docs/route-decomposition.md`.
 - Serverless `api/recourse/{math,dream}` still hold module-level state.
 - The pre-merge gate refuses proposals that require sandbox verification but

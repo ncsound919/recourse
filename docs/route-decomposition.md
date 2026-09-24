@@ -41,17 +41,18 @@
 | `src/routes/develop.ts` | stuck-issue loop, repair-team report/deep/intake, brain/council, patch gate, autopilot toggle, patch ledger |
 | `src/routes/forge.ts` | forge snapshot/plan/mint/run + autopilot toggle |
 | `src/routes/openEnded.ts` | QD archive view, open-ended snapshot/run/archive/hygiene/patch, fleet-recursion ledger |
+| `src/routes/repair.ts` | self-repair status/scan-heal/single/knowledge/auto-heal |
 
 Harness: `scripts/route-snapshot.mjs` + `tests/fixtures/route-snapshot.json` +
 `tests/routeSnapshot.test.ts` guard the full 496-route table against drift.
 
-As of `openEnded`: `server.ts` is ~10.3k lines, 43 routers, 95 inline routes.
+As of `repair`: `server.ts` is ~10.2k lines, 44 routers, 90 inline routes.
 
 ## Remaining clusters (in descending value, roughly)
 
 | Cluster | Approx. routes | Notes / likely deps to inject |
 | --- | --- | --- |
-| `repair.ts` | 5 | `executeSelfRepair`, anomaly state, `haltAllAutonomousLoops` |
+| `policy.ts` | 6 | `status`, `autonomySettings`, `applyPromotionPolicy`, `haltAllAutonomousLoops` |
 | `policy.ts` | 6 | `status`, `autonomySettings`, `applyPromotionPolicy`, `haltAllAutonomousLoops` |
 | `dream.ts` | 4 | `dreamEngine`, `dreamState`, crystallize/mirror helpers |
 | `mutate.ts` | 4 | `geneRegistryStore`, mutator helpers |
