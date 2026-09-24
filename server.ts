@@ -189,7 +189,6 @@ import {
   getFleetDriver,
   callDevBrain,
   applyDriverProposal,
-  revertAppliedPatch,
   listFleetPatches,
   fleetBackupDir,
 } from './src/lib/fleetDevelopment.js';
@@ -313,6 +312,7 @@ import { createLegoRouter } from './src/routes/lego.js';
 import { createIntakeRouter } from './src/routes/intake.js';
 import { createCorpusRouter } from './src/routes/corpus.js';
 import { createSkillsRouter } from './src/routes/skills.js';
+import { createDevelopRouter } from './src/routes/develop.js';
 import { createSynergyRouter } from './src/routes/synergy.js';
 import { createFleetDogfoodRouter } from './src/routes/fleetDogfood.js';
 import { runFleetDogfoodCycle } from './src/lib/fleetDogfood.js';
@@ -375,7 +375,6 @@ import { openNightlyStore, runNightlyCycle } from './src/lib/nightlyLoop.js';
 import type { Snapshot as UpgradeSnapshot } from './src/lib/upgradeReport.js';
 import { openApprovalStore } from './src/lib/approvals.js';
 import { createSelfModGuard, makeHarnessGate } from './src/lib/selfModification.js';
-import { resolveFleetRepo, createFleetRepairGuard, fleetSecret, fleetRepos } from './src/lib/fleetRepos.js';
 import { createSelfImprovementRouter } from './src/routes/selfImprovement.js';
 import { openPolicyEngine } from './src/lib/policy.js';
 import { attemptRemediation, resolveRemediationService, parseRemediationMap } from './src/lib/remediation.js';
@@ -9636,314 +9635,60 @@ async function runStuckRepairPass(force = false): Promise<Record<string, unknown
   }
 }
 
-app.get('/api/recourse/develop/stuck', (_req, res) => {
-  res.json({
-    success: true,
-    enabled: devAutopilotOn,
-    applyEnabled: SELF_REPAIR_APPLY,
-    backoffMs: SELF_REPAIR_BACKOFF_MS,
-    band: SELF_REPAIR_BAND,
-    snapshot: stuckSnapshot(stuckIssues),
-    ledger: stuckRepairLedger.slice(-50),
-  });
-});
 
-app.post('/api/recourse/develop/stuck/run', async (req, res) => {
-  try {
-    const force = req.body?.force === true;
-    res.json({ success: true, ...(await runStuckRepairPass(force)) });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-/** Operator escape hatch: clear a stuck issue (mark recovered, stop escalation). */
-app.post('/api/recourse/develop/stuck/clear', (req, res) => {
-  const id = typeof req.body?.id === 'string' ? req.body.id : '';
-  if (!id) return res.status(400).json({ success: false, error: 'id required' });
-  const before = stuckIssues.length;
-  stuckIssues = stuckIssues.filter((i) => i.id !== id);
-  stuckRepairLedger.push({
-    issueId: id, at: Date.now(),
-    dispatchedRepairTeam: false, repairTeamDetail: 'cleared by operator',
-    brainAsked: false, brainDetail: '',
-    proposalsApplied: 0, proposalsRejected: 0, proposalsSkipped: 0,
-  });
-  saveStateToDisk();
-  res.json({ success: true, removed: before - stuckIssues.length, remaining: stuckIssues.length });
-});
-
-app.get('/api/recourse/develop', async (req, res) => {
-  try {
-    res.json({ success: true, ...(await devSnapshot()) });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-/** Outbound: report Recourse's weaknesses to the repair team (auto-fix dispatch). */
-app.post('/api/recourse/develop/report', async (req, res) => {
-  try {
-    const force = req.body?.force === true;
-    const result = await runRepairReport(force);
-    res.json({ success: result.ok, ...result, dev: await devSnapshot() });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-/** Outbound: ask the Deep to analyze Recourse and propose concrete repairs. */
-app.post('/api/recourse/develop/deep', async (req, res) => {
-  try {
-    const result = await runDeepAnalyze();
-    res.json({ success: result.ok, ...result });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-/** Inbound: run a fleet driver's full-text proposal through the verified
- *  patch-intake gate. Candidate patches (JSON fence blocks) are parsed
- *  deterministically and each is applied ONLY after it passes Recourse's own
- *  sandbox verifier + lint. This is how a driver actually "drives" Recourse:
- *  analysis becomes code, and only gate-verified code. */
-app.post('/api/recourse/develop/intake', async (req, res) => {
-  try {
-    const { driverId, output, query: _query } = req.body ?? {};
-    if (typeof driverId !== 'string' || !getFleetDriver(driverId)) {
-      return res.status(400).json({ success: false, error: 'a registered driverId is required' });
-    }
-    if (typeof output !== 'string') {
-      return res.status(400).json({ success: false, error: 'output must be the driver response text' });
-    }
-    const result = await applyDriverProposal({
-      driverId,
-      output,
-      root: devRepoRoot(),
-      bootGreen: HARNESS_CI_GATE ? makeHarnessBootGreenGate() : undefined,
-      guard: selfModGuard,
-    });
-    const detail = result.applied
-      ? `intake applied ${result.appliedCount} verified patch(es), rejected ${result.rejectedCount}, skipped ${result.skippedCount}`
-      : `intake applied none (rejected ${result.rejectedCount}, skipped ${result.skippedCount})`;
-    recordDev('intake', result.applied, detail, { driver: driverId });
-    if (result.applied) {
-      for (const r of result.results) {
-        if (r.applied) {
-          appendProvenanceEvent('capability_adopted', {
-            driverId,
-            file: r.file,
-            hash: r.hash,
-            revertToken: r.revertToken,
-            note: 'verified patch intake',
-          });
-        }
-      }
-    }
-    res.json({ success: result.applied, ...result });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-/** Brain gateway: ask Dev-Brain or the deterministic brain to decide / rank /
- *  triage Recourse's next action or analyze deeply. Called by Recourse itself
- *  when it needs a decision, or on demand. */
-app.post('/api/recourse/develop/brain', async (req, res) => {
-  try {
-    const { brain, action, problem, candidates, strategy } = req.body ?? {};
-    const result = await runBrainGateway({
-      brain: typeof brain === 'string' ? brain : undefined,
-      action: (['decide', 'triage', 'fusion', 'deep'] as string[]).includes(action) ? action as DevBrainAction | 'deep' : undefined,
-      problem: typeof problem === 'string' ? problem : undefined,
-      candidates: Array.isArray(candidates) ? candidates as DevBrainCandidate[] : undefined,
-      strategy: strategy as DevBrainStrategy | undefined,
-    });
-    res.json(result);
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-/** Genome council: consult the deterministic brain's council over a problem. */
-app.post('/api/recourse/develop/council', async (req, res) => {
-  try {
-    const { problem, selectedGenomes, activeSectors } = req.body ?? {};
-    const result = await runCouncilDecide({
-      problem: typeof problem === 'string' ? problem : undefined,
-      selectedGenomes: Array.isArray(selectedGenomes) ? selectedGenomes as string[] : undefined,
-      activeSectors: Array.isArray(activeSectors) ? activeSectors as string[] : undefined,
-    });
-    res.json(result);
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-/** Genome council: read the brain's learned believability ledger. */
-app.get('/api/recourse/develop/council/state', async (_req, res) => {
-  try {
-    res.json(await runCouncilState());
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-/** Genome council: read lessons the brain has learned from recorded outcomes. */
-app.get('/api/recourse/develop/council/lessons', async (req, res) => {
-  try {
-    const limit = Number(req.query.limit);
-    res.json(await runCouncilLessons(Number.isFinite(limit) ? limit : undefined));
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-/** Genome council: record a real Recourse outcome so the brain compounds. */
-app.post('/api/recourse/develop/council/post-mortem', async (req, res) => {
-  try {
-    const b = (req.body ?? {}) as Record<string, unknown>;
-    const result = await runCouncilPostMortem({
-      decisionTitle: typeof b.decisionTitle === 'string' ? b.decisionTitle : undefined,
-      sector: typeof b.sector === 'string' ? b.sector : undefined,
-      chosenOption: typeof b.chosenOption === 'string' ? b.chosenOption : undefined,
-      predictedProbability: typeof b.predictedProbability === 'number' ? b.predictedProbability : undefined,
-      actualOutcome: typeof b.actualOutcome === 'string' ? b.actualOutcome : undefined,
-      leaderIds: Array.isArray(b.leaderIds) ? (b.leaderIds as string[]) : undefined,
-      rootCauses: Array.isArray(b.rootCauses) ? (b.rootCauses as string[]) : undefined,
-      keyLessons: Array.isArray(b.keyLessons) ? (b.keyLessons as string[]) : undefined,
-      retrospectiveSummary: typeof b.retrospectiveSummary === 'string' ? b.retrospectiveSummary : undefined,
-    });
-    res.json(result);
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-/** Inbound: apply a repair-team patch, but only after it passes Recourse's own
- *  sandbox verifier + lint gate. This is the safe autonomous-development gate. */
-app.post('/api/recourse/develop/patch', async (req, res) => {
-  // This route writes source to disk and runs a caller-supplied suite. It sat
-  // unauthenticated next to /develop/revert, which required the secret — so the
-  // destructive-but-reversible action was gated and the write-and-execute action
-  // was not. The server binds 0.0.0.0, so that was reachable from the LAN.
-  if (!requireMutationAuth(req, res)) return;
-  try {
-    const { driverId, file, source = '', suite, domain, note, repo, authorization } = req.body ?? {};
-    if (typeof driverId !== 'string' || typeof file !== 'string') {
-      return res.status(400).json({ success: false, error: 'driverId and file are required' });
-    }
-    if (typeof source !== 'string') {
-      return res.status(400).json({ success: false, error: 'source must be a string' });
-    }
-
-    // Fleet target: an allowlisted sibling repo (Axiom, OpenHub). Absent or
-    // 'self' keeps the original own-repo behavior exactly.
-    const target = resolveFleetRepo(repo);
-    if (repo && repo !== 'self' && !target) {
-      return res.status(400).json({ success: false, error: `unknown fleet repo "${String(repo)}"` });
-    }
-
-    const root = target ? target.root : devRepoRoot();
-    // Whose policy decides: for our own repo, our own self-mod rules; for a
-    // sibling, the proof that ITS trust core already allowed this exact content.
-    const guard = target
-      ? createFleetRepairGuard({ repo: target.slug, source, authorization, secret: fleetSecret() })
-      : selfModGuard;
-    // Boot-green runs the TARGET repo's own checks, in the target repo.
-    const bootGreen = target
-      ? makeHarnessGate({ cwd: target.root })
-      : bootGreenForPatch(file);
-
-    const result = await verifyAndApplyPatch(
-      { driverId, file, source, suite: typeof suite === 'string' ? suite : undefined, domain, note },
-      { root, bootGreen, guard },
-    );
-    const detail = result.applied
-      ? `applied ${result.file} (${result.verified})${'revertToken' in result && result.revertToken ? ` [rollback ${result.revertToken}]` : ''}`
-      : `rejected ${result.file}: ${'error' in result ? result.error : ''}`;
-    const hash = 'hash' in result && result.applied ? result.hash : undefined;
-    recordDev('patch', result.applied, detail, { driver: driverId, file: result.file, hash });
-    if (result.applied) {
-      appendProvenanceEvent('capability_adopted', {
-        driverId,
-        file: result.file,
-        hash: 'hash' in result ? result.hash : undefined,
-        revertToken: 'revertToken' in result ? result.revertToken : undefined,
-        note: note ?? null,
+// Autonomous-development (stuck loop / repair-team / brain / council / patch)
+// routes moved to src/routes/develop.ts. Host state + engines are injected.
+app.use(
+  '/api/recourse',
+  createDevelopRouter({
+    appendProvenance: (eventType, data) => appendProvenanceEvent(eventType as ProvenanceEvent['type'], data),
+    saveState: saveStateToDisk,
+    recordDev,
+    isAutopilotOn: () => devAutopilotOn,
+    applyEnabled: () => SELF_REPAIR_APPLY,
+    backoffMs: () => SELF_REPAIR_BACKOFF_MS,
+    band: () => SELF_REPAIR_BAND,
+    stuckSnapshot: () => stuckSnapshot(stuckIssues),
+    stuckLedger: () => stuckRepairLedger,
+    clearStuck: (id) => {
+      const before = stuckIssues.length;
+      stuckIssues = stuckIssues.filter((i) => i.id !== id);
+      stuckRepairLedger.push({
+        issueId: id, at: Date.now(),
+        dispatchedRepairTeam: false, repairTeamDetail: 'cleared by operator',
+        brainAsked: false, brainDetail: '',
+        proposalsApplied: 0, proposalsRejected: 0, proposalsSkipped: 0,
       });
-    }
-    res.json({ success: result.applied, ...result });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-app.post('/api/recourse/develop/autopilot/toggle', (req, res) => {
-  devAutopilotOn = !devAutopilotOn;
-  if (devAutopilotOn) {
-    ensureDevAutopilot();
-    runRepairReport(false).catch(() => {});
-  } else {
-    stopDevAutopilot();
-  }
-  saveStateToDisk();
-  res.json({ success: true, autopilot: devAutopilotOn });
-});
-
-/** Harness-evolution ledger (Phase 5 item 16): applied patches + their one-click
- *  rollback tokens. Read-only; mirrors the persisted journal under the repo. */
-app.get('/api/recourse/develop/patches', (_req, res) => {
-  try {
-    const ledgerTarget = resolveFleetRepo(_req.query?.repo);
-    const root = ledgerTarget ? ledgerTarget.root : devRepoRoot();
-    const patches = listFleetPatches(root);
-    res.json({
-      success: true,
-      root,
-      backupDir: fleetBackupDir(root),
-      applied: patches.filter((p) => !p.reverted).length,
-      reverted: patches.filter((p) => p.reverted).length,
-      harnessCiGate: HARNESS_CI_GATE,
-      patches: patches.slice(0, 200),
-    });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-/** One-click rollback: restore the pre-patch source for an applied fleet patch.
- *  Destructive, so it requires RECOURSE_API_SECRET (fail-closed). Reverts are
- *  provenance-tracked as capability_reverted. */
-app.post('/api/recourse/develop/revert', async (req, res) => {
-  if (!requireMutationAuth(req, res)) return;
-  try {
-    const { token } = req.body ?? {};
-    if (typeof token !== 'string' || !token) {
-      return res.status(400).json({ success: false, error: 'token is required' });
-    }
-    // A patch applied to a fleet repo is journalled under THAT repo, so the
-    // revert has to look there too — otherwise the token is simply not found and
-    // the change is unrollbackable.
-    const revertTarget = resolveFleetRepo((req.body ?? {}).repo);
-    const revertRoot = revertTarget ? revertTarget.root : devRepoRoot();
-    const result = await revertAppliedPatch(token, revertRoot);
-    if (!result.ok) {
-      return res.status(404).json({ success: false, error: result.error || 'revert failed' });
-    }
-    const entry = listFleetPatches(revertRoot).find((p) => p.token === token);
-    appendProvenanceEvent('capability_reverted', {
-      token,
-      file: result.file,
-      driverId: entry?.driverId,
-      appliedHash: entry?.appliedHash,
-    });
-    recordDev('revert', true, `rolled back ${result.file} (${token})`);
-    res.json({ success: true, ...result });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err?.message ?? String(err) });
-  }
-});
+      saveStateToDisk();
+      return { removed: before - stuckIssues.length, remaining: stuckIssues.length };
+    },
+    runStuckRepairPass,
+    devSnapshot,
+    runRepairReport,
+    runDeepAnalyze,
+    devRepoRoot,
+    selfModGuard,
+    bootGreenForPatch,
+    makeHarnessBootGreenGate,
+    harnessCiGate: HARNESS_CI_GATE,
+    runBrainGateway,
+    runCouncilDecide,
+    runCouncilState,
+    runCouncilLessons,
+    runCouncilPostMortem,
+    toggleAutopilot: () => {
+      devAutopilotOn = !devAutopilotOn;
+      if (devAutopilotOn) {
+        ensureDevAutopilot();
+        runRepairReport(false).catch(() => {});
+      } else {
+        stopDevAutopilot();
+      }
+      saveStateToDisk();
+      return devAutopilotOn;
+    },
+  }),
+);
 
 // =========================================================================
 // AGENTBROWSER WEB CHANNEL — download from the web via the real browser
