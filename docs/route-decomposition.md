@@ -47,23 +47,17 @@
 | `src/routes/mutate.ts` | AI mutator gene status/evolve/approve + mutate-scoped policy |
 | `src/routes/decision.ts` | growth decision evaluate/weights/execute + JEV status/public/evaluate/noul/promotion |
 | `src/routes/templates.ts` | component template list/detail/build/benchmark |
+| `src/routes/learn.ts` | learn/synthesize-directive, crossover, approve, verify, evolve + learn/status\|episode\|run\|replay\|directives |
 
 Harness: `scripts/route-snapshot.mjs` + `tests/fixtures/route-snapshot.json` +
 `tests/routeSnapshot.test.ts` guard the full 496-route table against drift.
 
-As of `templates`: `server.ts` is ~9.3k lines, 49 routers, 64 inline routes.
+As of `learn`: `server.ts` is ~8.7k lines, 50 routers, 53 inline routes.
 
 ## Remaining clusters (in descending value, roughly)
 
 | Cluster | Approx. routes | Notes / likely deps to inject |
 | --- | --- | --- |
-| `learn.ts` | 6 | learner, crossover/verify/evolve helpers |
-| `policy.ts` | 6 | `status`, `autonomySettings`, `applyPromotionPolicy`, `haltAllAutonomousLoops` |
-| `dream.ts` | 4 | `dreamEngine`, `dreamState`, crystallize/mirror helpers |
-| `mutate.ts` | 4 | `geneRegistryStore`, mutator helpers |
-| `decision.ts` | 7 | `registry`, `anomalies`, `growthWeights`, JEV client |
-| `templates.ts` | 4 | component templates + generation ledger |
-| `learn.ts` | 6 | learner, crossover/verify/evolve helpers |
 | `readout.ts` / `metrics` / core | ~10 | `verifyChainIntegrity`, `buildUpgradeReport`, `telemetryAuthorized` |
 | A2A / MCP / openapi / replay | ~7 | `a2aBaseUrl`, `internalApiCall`, `buildA2aOperations` |
 
