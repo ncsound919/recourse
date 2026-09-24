@@ -45,17 +45,18 @@
 | `src/routes/policy.ts` | promotion policy, toggle-auto, autonomy snapshot/safe-boot/halt (the big `GET /status` readout stays for the core cluster) |
 | `src/routes/dream.ts` | dream status/toggle/tick/crystallize/cron |
 | `src/routes/mutate.ts` | AI mutator gene status/evolve/approve + mutate-scoped policy |
+| `src/routes/decision.ts` | growth decision evaluate/weights/execute + JEV status/public/evaluate/noul/promotion |
 
 Harness: `scripts/route-snapshot.mjs` + `tests/fixtures/route-snapshot.json` +
 `tests/routeSnapshot.test.ts` guard the full 496-route table against drift.
 
-As of `mutate`: `server.ts` is ~9.9k lines, 47 routers, 76 inline routes.
+As of `decision`: `server.ts` is ~9.5k lines, 48 routers, 68 inline routes.
 
 ## Remaining clusters (in descending value, roughly)
 
 | Cluster | Approx. routes | Notes / likely deps to inject |
 | --- | --- | --- |
-| `decision.ts` | 7 | `registry`, `anomalies`, `growthWeights`, JEV client |
+| `templates.ts` | 4 | component templates + generation ledger |
 | `policy.ts` | 6 | `status`, `autonomySettings`, `applyPromotionPolicy`, `haltAllAutonomousLoops` |
 | `dream.ts` | 4 | `dreamEngine`, `dreamState`, crystallize/mirror helpers |
 | `mutate.ts` | 4 | `geneRegistryStore`, mutator helpers |
