@@ -184,9 +184,8 @@ import {
   buildBrainAnalyzeQuery,
   submitToRepairEndpoint,
   askDeterministicBrain,
-  verifyAndApplyPatch,
-  probeDriverOnline,
   getFleetDriver,
+  probeDriverOnline,
   callDevBrain,
   applyDriverProposal,
   listFleetPatches,
@@ -233,7 +232,7 @@ import {
 
 // AgentBrowser web-fetch connector (download from the web through the real browser).
 import { createWebChannelRouter } from './src/server/routes/webChannel.js';
-import { buildQDArchive, buildIslands } from './src/lib/qualityDiversity.js';
+
 import {
   CapabilityId,
   CapabilityBacking,
@@ -258,9 +257,8 @@ import { VectorMemory, openVectorMemory } from './src/lib/vectorMemory.js';
 // gates, patch-mode editing, and dedup-aware fleet recursion.
 import { OpenEndedArchive } from './src/lib/openEnded/archive.js';
 import { runOpenEndedCycle, rewardForResult, capabilityKeyFor, type OpenEndedCycleResult } from './src/lib/openEnded/engine.js';
-import { FleetRecursionLedger, summarizeFleetRecursion } from './src/lib/openEnded/fleetRecursion.js';
+import { FleetRecursionLedger } from './src/lib/openEnded/fleetRecursion.js';
 import { mintProblems } from './src/lib/openEnded/problemMint.js';
-import { runPatchAttempt } from './src/lib/openEnded/patchMode.js';
 import { inspire } from './src/lib/inspirationCrossover.js';
 
 // Intake / benchmark / readout subsystem
@@ -314,6 +312,7 @@ import { createCorpusRouter } from './src/routes/corpus.js';
 import { createSkillsRouter } from './src/routes/skills.js';
 import { createDevelopRouter } from './src/routes/develop.js';
 import { createForgeRouter } from './src/routes/forge.js';
+import { createOpenEndedRouter } from './src/routes/openEnded.js';
 import { createSynergyRouter } from './src/routes/synergy.js';
 import { createFleetDogfoodRouter } from './src/routes/fleetDogfood.js';
 import { runFleetDogfoodCycle } from './src/lib/fleetDogfood.js';
@@ -9652,189 +9651,23 @@ app.use(
 // Extracted to src/server/routes/webChannel.ts (Router + narrow deps pattern).
 app.use(createWebChannelRouter({ appendProvenanceEvent }));
 
-// Quality-Diversity archive over the live registry (MAP-Elites view). Read-only.
-app.get('/api/recourse/qd', (_req, res) => {
-  try {
-    res.json({ success: true, archive: buildQDArchive(registry, 8), islands: buildIslands(registry, 8).islands });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// =========================================================================
-// OPEN-ENDED CAPABILITY ENGINE ROUTES
-// =========================================================================
-app.get('/api/recourse/open-ended', (_req, res) => {
-  try {
-    res.json({ success: true, engine: openEndedSnapshot() });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-app.post('/api/recourse/open-ended/run', async (req, res) => {
-  if (!requireMutationAuthIfConfigured(req, res)) return;
-  try {
-    const count = Math.max(1, Math.min(5, Math.floor(Number(req.body?.count ?? 1) || 1)));
-    const results: any[] = [];
-    for (let i = 0; i < count; i++) {
-      const r = await runOpenEndedEngineCycle();
-      results.push(r);
-      if ((r as any).skipped) break;
-    }
-    res.json({ success: true, results, engine: openEndedSnapshot() });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-app.get('/api/recourse/open-ended/archive', (_req, res) => {
-  try {
-    const archive = getOpenEndedArchive();
-    res.json({
-      success: true,
-      snapshot: archive.snapshot(),
-      problems: archive.list().map((p) => ({
-        id: p.id,
-        domain: p.domain,
-        title: p.title,
-        statement: p.statement,
-        functionName: p.functionName,
-        solved: p.solved,
-        attempts: p.attempts,
-        cell: p.cell,
-      })),
-    });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-/** Gene-belief hygiene: merge behavioral duplicates (same capability under new
- *  hex suffixes) and optionally retire dead noise below an explicit floor. */
-app.post('/api/recourse/open-ended/hygiene', async (req, res) => {
-  if (!requireMutationAuthIfConfigured(req, res)) return;
-  try {
-    const minWeight = Number(req.body?.minWeight);
-    const minMeanReward = Number(req.body?.minMeanReward);
-    const maxAgeEpisodes = Number(req.body?.maxAgeEpisodes);
-    const report = await learner.pruneBeliefs({
-      ...(Number.isFinite(minWeight) ? { minWeight } : {}),
-      ...(Number.isFinite(minMeanReward) ? { minMeanReward } : {}),
-      ...(Number.isFinite(maxAgeEpisodes) ? { maxAgeEpisodes } : {}),
-    });
-    saveStateToDisk();
-    res.json({ success: true, report });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-/** Patch-mode editing: a model-proposed search/replace applied surgically to an
- *  existing file, then verified by the same sandbox + lint + self-mod gate as
- *  fleet patches. Preserves every byte the goal does not touch. */
-app.post('/api/recourse/open-ended/patch', async (req, res) => {
-  if (!requireMutationAuthIfConfigured(req, res)) return;
-  try {
-    const { driverId, file, goal, suite, apply } = req.body ?? {};
-    if (typeof driverId !== 'string' || !getFleetDriver(driverId)) {
-      return res.status(400).json({ success: false, error: 'a registered driverId is required' });
-    }
-    if (typeof file !== 'string' || !file) {
-      return res.status(400).json({ success: false, error: 'file is required' });
-    }
-    if (typeof goal !== 'string' || !goal) {
-      return res.status(400).json({ success: false, error: 'goal is required' });
-    }
-    const root = devRepoRoot();
-    const abs = path.resolve(root, file);
-    const rel = path.relative(root, abs);
-    if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel) || !fs.existsSync(abs)) {
-      return res.status(400).json({ success: false, error: 'file must be an existing file under the repo root' });
-    }
-    const original = fs.readFileSync(abs, 'utf-8');
-    const result = await runPatchAttempt({
-      file,
-      goal,
-      original,
-      draft: async (system, user) => {
-        const r = await chatComplete(
-          [
-            { role: 'system', content: system },
-            { role: 'user', content: user },
-          ],
-          { temperature: 0.1 },
-        );
-        if (!r.ok || r.content === null) throw new Error(r.error || 'model offline');
-        return r.content;
-      },
-      verify:
-        typeof suite === 'string' && suite.trim()
-          ? (output) => {
-              const run = executeTestSuite(output, suite);
-              return {
-                ok: run.passed,
-                detail: run.testDetails.filter((d) => d.startsWith('[FAIL')).slice(0, 2).join('; ') || 'acceptance passed',
-              };
-            }
-          : undefined,
-      apply:
-        apply === false
-          ? undefined
-          : async (patch) => {
-              const written = await verifyAndApplyPatch(
-                { driverId, file, source: patch.output, suite: typeof suite === 'string' ? suite : undefined, note: goal },
-                { root, guard: selfModGuard },
-              );
-              return {
-                applied: written.applied,
-                error: 'error' in written ? written.error : undefined,
-                revertToken: 'revertToken' in written ? written.revertToken : undefined,
-              };
-            },
-    });
-    appendProvenanceEvent('open_ended_patch', { file, ok: result.ok, applied: result.applied, attempts: result.attempts });
-    res.json({ success: result.ok, ...result });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-/** Dedup-aware fleet recursion ledger (Axiom/OpenHub loop outcomes). */
-app.get('/api/recourse/open-ended/fleet', (_req, res) => {
-  try {
-    const entries = fleetRecursion.read();
-    res.json({
-      success: true,
-      chain: fleetRecursion.verifyChain(),
-      summary: summarizeFleetRecursion(entries),
-      entries: entries.slice(-50),
-    });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-app.post('/api/recourse/open-ended/fleet', (req, res) => {
-  if (!requireMutationAuthIfConfigured(req, res)) return;
-  try {
-    const { source, goal, status, iteration, summary, score } = req.body ?? {};
-    if (typeof goal !== 'string' || !goal) {
-      return res.status(400).json({ success: false, error: 'goal is required' });
-    }
-    const entry = fleetRecursion.append({
-      source: typeof source === 'string' ? source : 'fleet',
-      goal,
-      ...(typeof status === 'string' ? { status } : {}),
-      ...(Number.isFinite(Number(iteration)) ? { iteration: Number(iteration) } : {}),
-      ...(typeof summary === 'string' ? { summary } : {}),
-      ...(Number.isFinite(Number(score)) ? { score: Number(score) } : {}),
-    });
-    res.json({ success: true, entry });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
+// Open-ended capability engine (QD view, snapshot/run/archive/hygiene/patch,
+// fleet-recursion ledger) moved to src/routes/openEnded.ts.
+app.use(
+  '/api/recourse',
+  createOpenEndedRouter({
+    openEndedSnapshot,
+    runOpenEndedEngineCycle,
+    getOpenEndedArchive,
+    registry: () => registry,
+    pruneBeliefs: (opts) => learner.pruneBeliefs(opts),
+    saveState: saveStateToDisk,
+    devRepoRoot,
+    selfModGuard,
+    appendProvenance: (eventType, data) => appendProvenanceEvent(eventType as ProvenanceEvent['type'], data),
+    fleetRecursion,
+  }),
+);
 
 // Initialize Express + Vite Server
 async function startServer() {
