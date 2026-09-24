@@ -313,6 +313,7 @@ import { createDevelopRouter } from './src/routes/develop.js';
 import { createForgeRouter } from './src/routes/forge.js';
 import { createOpenEndedRouter } from './src/routes/openEnded.js';
 import { createRepairRouter } from './src/routes/repair.js';
+import { createPolicyRouter } from './src/routes/policy.js';
 import { createSynergyRouter } from './src/routes/synergy.js';
 import { createFleetDogfoodRouter } from './src/routes/fleetDogfood.js';
 import { runFleetDogfoodCycle } from './src/lib/fleetDogfood.js';
@@ -2460,31 +2461,43 @@ app.post('/api/mcp', async (req, res) => {
 // /api/recourse/memory/recall, /fleet/memory, /fleet/signal moved to
 // src/routes/memory.ts (see the createMemoryRouter mount above).
 
-app.post('/api/recourse/policy', (req, res) => {
-  const applied = applyPromotionPolicy(req.body?.policy);
-  if ('error' in applied) {
-    return res.status(400).json({ error: applied.error, allowed: ['any_pass', 'non_regressing', 'strict_improve', 'human_approval'] });
-  }
-  appendProvenanceEvent('system_tick', {
-    action: 'policy_change',
-    newPolicy: applied.policy,
-    generation: status.generation,
-  });
-  saveStateToDisk();
-  res.json({ success: true, policy: applied.policy, ...(applied.note ? { note: applied.note } : {}) });
-});
-
-app.post('/api/recourse/toggle-auto', (req, res) => {
-  const { enabled } = req.body;
-  status.isAutoEvolving = Boolean(enabled);
-  appendProvenanceEvent('system_tick', {
-    action: 'auto_evolve_toggle',
-    isAutoEvolving: status.isAutoEvolving,
-    generation: status.generation
-  });
-  saveStateToDisk();
-  res.json({ success: true, isAutoEvolving: status.isAutoEvolving });
-});
+// Promotion policy + autonomy routes (policy/toggle-auto/autonomy/safe-boot/
+// halt) moved to src/routes/policy.ts; host state is injected as closures.
+app.use(
+  '/api/recourse',
+  createPolicyRouter({
+    autonomySnapshot: () => ({
+      safeBoot: autonomySettings.safeBoot,
+      autoEvolving: status.isAutoEvolving,
+      dreamActive: dreamState.isDreamingActive,
+      swarmAutopilot: swarmStatus.isSwarmAutopilotActive,
+      intakeAutopilot: intakeAutopilotOn,
+      forgeAutopilot: forgeAutopilotOn,
+      devAutopilot: devAutopilotOn,
+      serverTickAutopilot: serverTickAutopilotOn,
+    }),
+    setSafeBoot: (safeBoot) => {
+      autonomySettings.safeBoot = safeBoot;
+      saveStateToDisk();
+      return autonomySettings.safeBoot;
+    },
+    setAutoEvolving: (enabled) => {
+      status.isAutoEvolving = enabled;
+      appendProvenanceEvent('system_tick', {
+        action: 'auto_evolve_toggle',
+        isAutoEvolving: status.isAutoEvolving,
+        generation: status.generation,
+      });
+      saveStateToDisk();
+      return status.isAutoEvolving;
+    },
+    applyPromotionPolicy,
+    appendProvenance: (eventType, data) => appendProvenanceEvent(eventType as ProvenanceEvent['type'], data),
+    saveState: saveStateToDisk,
+    generation: () => status.generation,
+    haltAllAutonomousLoops,
+  }),
+);
 
 // =========================================================================
 // AUTONOMY / SAFE-BOOT SETTINGS + EMERGENCY HALT
@@ -2544,34 +2557,6 @@ function haltAllAutonomousLoops(reason: string): {
   };
 }
 
-app.get('/api/recourse/autonomy', (req, res) => {
-  res.json({
-    success: true,
-    autonomy: {
-      safeBoot: autonomySettings.safeBoot,
-      autoEvolving: status.isAutoEvolving,
-      dreamActive: dreamState.isDreamingActive,
-      swarmAutopilot: swarmStatus.isSwarmAutopilotActive,
-      intakeAutopilot: intakeAutopilotOn,
-      forgeAutopilot: forgeAutopilotOn,
-      devAutopilot: devAutopilotOn,
-      serverTickAutopilot: serverTickAutopilotOn,
-    },
-  });
-});
-
-app.post('/api/recourse/autonomy/safe-boot', (req, res) => {
-  const safeBoot = Boolean(req.body?.safeBoot);
-  autonomySettings.safeBoot = safeBoot;
-  saveStateToDisk();
-  res.json({ success: true, safeBoot: autonomySettings.safeBoot });
-});
-
-app.post('/api/recourse/autonomy/halt', (req, res) => {
-  const reason = typeof req.body?.reason === 'string' ? req.body.reason : 'operator_request';
-  const snapshot = haltAllAutonomousLoops(reason);
-  res.json({ success: true, ...snapshot });
-});
 
 app.post('/api/recourse/hyperparameters', (req, res) => {
   const { hyperParams } = req.body;
