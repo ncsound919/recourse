@@ -83,8 +83,7 @@ import * as jobSchedulerApi from './src/lib/jobScheduler.js';
 import { zod400, kgNeighborhoodReq, kgBridgesReq } from './src/lib/contracts.js';
 import helmet from 'helmet';
 import { rateLimit } from 'express-rate-limit';
-import { evaluateGrowthDecision, DEFAULT_GROWTH_WEIGHTS } from './src/lib/decisionEngine.js';
-import { decisionSynergyInputs } from './src/lib/synergy/decisionBridge.js';
+import { DEFAULT_GROWTH_WEIGHTS } from './src/lib/decisionEngine.js';
 import { DreamingEngine } from './src/dream/engine.js';
 import { createDreamStore } from './src/dream/store.js';
 import {
@@ -183,8 +182,6 @@ import {
 } from './src/lib/repairVerification.js';
 import {
   assessSourceSubstance,
-  domainHealth,
-  capabilityReadiness,
 } from './src/lib/honestyMetrics.js';
 
 // Genome-council client: Recourse -> deterministic-brain /genome-council/*.
@@ -241,8 +238,6 @@ import { pollAllSources } from './src/intake/poll.js';
 import { groundSignal } from './src/intake/grounding.js';
 import { runBenchmark, allBenchmarkProblems, appendedBenchmarkProblems, restoreBenchmarkProblems, registryAttestation } from './src/benchmark/benchmark.js';
 import { appendBenchmarkRun } from './src/lib/benchmarkLedger.js';
-import { buildDevelopmentReadout } from './src/intake/readout.js';
-import type { ReadoutContext } from './src/intake/readout.js';
 
 // Ecosystem research corpus (local sibling-project ingestion)
 import { scanCorpus } from './src/intake/corpus/scanner.js';
@@ -293,6 +288,7 @@ import { createMutateRouter } from './src/routes/mutate.js';
 import { createDecisionRouter } from './src/routes/decision.js';
 import { createTemplatesRouter } from './src/routes/templates.js';
 import { createLearnRouter } from './src/routes/learn.js';
+import { createReadoutRouter } from './src/routes/readout.js';
 import { createSynergyRouter } from './src/routes/synergy.js';
 import { createFleetDogfoodRouter } from './src/routes/fleetDogfood.js';
 import { runFleetDogfoodCycle } from './src/lib/fleetDogfood.js';
@@ -1967,131 +1963,43 @@ app.post('/api/recourse/axiom/build-tool', async (req, res) => {
 
 // Security / authorized-testing routes are mounted from src/routes/security.ts
 // (mode/status route below).
-app.get('/api/recourse/status', async (req, res) => {
-  const integrity = verifyChainIntegrity();
-  status.hashChainIntegrity = integrity.valid;
-  status.registeredToolsCount = registry.length;
-  let pending = 0;
-  registry.forEach(r => {
-    pending += (r.pendingVersions?.length || 0);
-  });
-  status.pendingApprovalsCount = pending;
 
-  // Live model provider status (probe both profiles independently).
-  const live = providerStatuses();
-  await modelCheckOnline(false, 'local');
-  await modelCheckOnline(false, 'api');
-  const cps = currentProviderStatus();
-  (status.providerStatus as any) = { ...cps, statuses: live };
-  status.aiStudioModel = cps.model;
-
-  // Update domain coverage from real verifier outcomes
-  const allDomains: ToolDomain[] = ['coding', 'math', 'biotech', 'systemic', 'neuro_symbolic', 'cyber_defense', 'quantum_sim'];
-  let passTotal = 0;
-  let passOk = 0;
-  allDomains.forEach(d => {
-    const domainTools = registry.filter(r => r.domain === d);
-    const live = domainTools.filter(t => {
-      const cur = t.currentVersion;
-      const v = t.versions.find(x => x.version === cur && x.promoted);
-      return v?.passed_verifier === true;
-    }).length;
-    const tried = domainTools.filter(t => {
-      const cur = t.currentVersion;
-      return t.versions.some(x => x.version === cur && x.promoted);
-    }).length;
-    if (!status.domainCoverage) status.domainCoverage = {} as any;
-    const passRate = tried > 0 ? Math.round((live / tried) * 100) / 100 : 0;
-    const health = domainHealth(live, passRate);
-    status.domainCoverage[d] = {
-      activeGenes: live,
-      passRate,
-      // P1.6: a domain with ~no genes / ~no pass rate is BROKEN, not covered.
-      broken: health.broken,
-      ...(health.note ? { note: health.note } : {}),
-    };
-    passTotal += tried;
-    passOk += live;
-  });
-  status.verifierPassRate = passTotal > 0 ? Math.round((passOk / passTotal) * 100) / 100 : 0;
-
-  // P1.7: capability readiness — a number that can move. The existing
-  // `readinessScore` is the recursive-math convergence, not capability; label
-  // its basis and expose a separate capability figure.
-  {
-    const lastBench = latestBenchmark ?? benchmarkHistory[benchmarkHistory.length - 1] ?? null;
-    const rv = repairVerificationStats(repairVerifications);
-    const cap = capabilityReadiness({
-      benchmarkSolved: lastBench?.solved ?? 0,
-      benchmarkTotal: lastBench?.total ?? 0,
-      verified: rv.verified,
-      regressed: rv.regressed,
-    });
-    status.capabilityReadiness = cap.score;
-    status.capabilityBasis = cap.basis;
-    status.readinessBasis = 'math-loop convergence (not a capability score)';
-  }
-
-  status.growthWeights = growthWeights;
-  dreamState = await dreamEngine.status();
-  status.dreamState = dreamState;
-  status.swarmStatus = swarmStatus;
-  status.lastDecision = lastGrowthDecision || evaluateGrowthDecision(
-    registry,
-    anomalies,
-    growthWeights,
-    status.generation,
-    dreamState.recentThoughts,
-    gitHubBlueprints,
-    decisionSynergyInputs().crossDomainSynergyByDomain
-  );
-
-  // Real, durable progress (not math-loop readiness). Measured artifacts only.
-  const liveSelfHosted = listSelfHostedEntries().filter((e) => e.lastVerified?.passed).length;
-  const lastBench = benchmarkHistory[benchmarkHistory.length - 1];
-  status.realProgress = {
-    registeredTools: registry.length,
-    liveSelfHostedTools: liveSelfHosted,
-    forgeMaterialized: forgeLedger.filter((l) => l.status === 'materialized').length,
-    healedTools: status.selfRepair?.totalHealedCount ?? 0,
-    benchmarkSolved: lastBench ? lastBench.solved : 0,
-    benchmarkTotal: lastBench ? lastBench.total : 0,
-    verifierPassRate: typeof status.verifierPassRate === 'number' ? status.verifierPassRate : 0,
-    openAnomalies: anomalies.filter((a) => a.status === 'detected').length,
-  };
-
-  // Surface learner state so the dashboard reports real episode count +
-  // calibration rather than a flat null. Read from the durable store the
-  // RecursiveLearner writes through, so the value reflects what survived
-  // the last restart — not what an in-memory learner would have.
-  try {
-    const persisted = await learnerStore.loadState();
-    if (persisted) {
-      (status as any).learner = {
-        episode: persisted.episode ?? 0,
-        calibrationError: persisted.calibrationError ?? 0,
-        selfScore: persisted.selfScore ?? 0,
-        lastUpdatedAt: persisted.updatedAt ?? null,
-      };
-    }
-  } catch { /* non-fatal: learner is optional status */ }
-
-  res.json({ status, chainIntegrity: integrity });
-});
-
-app.get('/api/recourse/provenance', async (req, res) => {
-  const integrity = verifyChainIntegrity();
-  const hashes = provenanceEvents.map((e) => e.hash);
-  const served = await serveCapability('provenance_merkle', { hashes });
-  res.json({
-    events: provenanceEvents,
-    integrity,
-    merkleRoot: served,
-    totalLeaves: hashes.length,
-    firstHash: hashes[0] ?? null,
-    lastHash: hashes[hashes.length - 1] ?? null,
-  });
-});
+// Operator readouts: big GET /status, provenance/registry/sandbox/failures/
+// benchmark/selfuse/snapshots/legacy-digest/upgrade-report/capabilities/
+// generations/readout. Mounted at the original position of GET /status.
+app.use('/api/recourse', createReadoutRouter({
+  verifyChainIntegrity,
+  statusRef: () => status,
+  registryRef: () => registry,
+  currentProviderStatus,
+  repairVerificationsRef: () => repairVerifications,
+  growthWeightsRef: () => growthWeights,
+  dreamEngine,
+  setDreamState: (s) => { dreamState = s; },
+  swarmStatusRef: () => swarmStatus,
+  lastGrowthDecisionRef: () => lastGrowthDecision,
+  anomaliesRef: () => anomalies,
+  gitHubBlueprintsRef: () => gitHubBlueprints,
+  forgeLedgerRef: () => forgeLedger,
+  benchmarkHistoryRef: () => benchmarkHistory,
+  latestBenchmarkRef: () => latestBenchmark,
+  learnerStore,
+  provenanceEventsRef: () => provenanceEvents,
+  serveCapability: (capId, ctx) => serveCapability(capId as any, ctx as any),
+  failureLedger,
+  outcomeLedger,
+  selfUseStatus,
+  systemSnapshotsRef: () => systemSnapshots,
+  systemBaselineRef: () => systemBaseline,
+  legacyDigestRef: () => legacyDigest,
+  buildUpgradeReport,
+  upgradeReport,
+  capabilitiesRef: () => CAPABILITIES,
+  capabilitiesState,
+  generationLedgerRef: () => generationLedger,
+  intakeSnapshot,
+  benchmarkState,
+}));
 
 // Serve every adopted capability against real runtime state. This is the
 // dogfood proof: each call routes through the adopted self-hosted tool when
@@ -2123,10 +2031,6 @@ app.get('/api/recourse/capabilities/serve', async (req, res) => {
     }
   }
 res.json({ success: true, results });
-});
-
-app.get('/api/recourse/registry', (req, res) => {
-  res.json({ registry });
 });
 
 // REAL Interactive Sandbox Tool Execution Endpoint
@@ -2177,16 +2081,6 @@ app.post('/api/recourse/execute', (req, res) => {
   }
 });
 
-// Sandbox backend status (isolated-vm availability + current mode).
-app.get('/api/recourse/sandbox', (req, res) => {
-  res.json({
-    success: true,
-    mode: process.env.RECOURSE_SANDBOX_MODE === 'isolated' ? 'isolated' : 'inproc',
-    isolatedAvailable: isIsolateAvailable(),
-    // Set RECOURSE_SANDBOX_MODE=isolated to run arbitrary/submitted code in a
-    // real memory- and time-bounded isolate with no host-global access.
-  });
-});
 
 // =========================================================================
 // DURABLE VECTOR MEMORY (LanceDB) — self-learning retrieval
@@ -2564,22 +2458,6 @@ app.use(
   }),
 );
 
-// Failures endpoint — surfaces the failure ledger so the operator can see
-// every silently-swallowed error across all autopilots instead of guessing.
-app.get('/api/recourse/failures', (_req, res) => {
-  const now = Date.now();
-  const recent = failureLedger.filter(e => now - e.at < 3600000); // last hour
-  const counts = failureLedger.reduce<Record<string, number>>((acc, f) => {
-    acc[f.source] = (acc[f.source] || 0) + 1;
-    return acc;
-  }, {});
-  res.json({
-    total: failureLedger.length,
-    lastHour: recent.length,
-    bySource: counts,
-    entries: failureLedger.slice(-50), // newest 50
-  });
-});
 
 // Chaos Injection Route
 app.post('/api/recourse/chaos/inject', (req, res) => {
@@ -2677,28 +2555,6 @@ app.post('/api/recourse/chaos/inject', (req, res) => {
 });
 
 
-// External capability benchmark telemetry (drives the learner reward at weight
-// 0.30). Surfaces the latest run + history + per-problem solved state so the
-// UI can show "is the registry actually more capable", not a self-report.
-app.get('/api/recourse/benchmark', (_req, res) => {
-  const last = latestBenchmark ?? benchmarkHistory[benchmarkHistory.length - 1] ?? null;
-  res.json({
-    success: true,
-    latest: last,
-    history: benchmarkHistory.slice(-30).map((r) => ({ at: r.at, solved: r.solved, total: r.total })),
-    totalProblems: allBenchmarkProblems().length,
-    problems: allBenchmarkProblems().map((p) => ({
-      id: p.id,
-      title: p.title,
-      domain: p.domain,
-      solved: last ? last.solvedIds.includes(p.id) : false,
-    })),
-    realProgress: status.realProgress ?? null,
-    rewardWeightBenchmark: 0.25,
-    rewardWeightOutcome: 0.15,
-    outcomeReward: outcomeLedger.reward(5) ?? null,
-  });
-});
 
 // ---------------------------------------------------------------------------
 // Python NetworkX Knowledge-Graph sidecar proxy + live evidence layer +
@@ -3662,32 +3518,6 @@ function selfUseStatus() {
   };
 }
 
-app.get('/api/recourse/selfuse', (req, res) => {
-  res.json({ success: true, selfuse: selfUseStatus() });
-});
-
-// System snapshot history (every materially distinct system state).
-app.get('/api/recourse/system/snapshots', (req, res) => {
-  res.json({ success: true, count: systemSnapshots.length, baseline: systemBaseline, snapshots: systemSnapshots });
-});
-
-// P2.9: the distilled legacy digest — a first-class artifact so old runs inform
-// new work (capability trend, registry/health trend, learner trend, repair
-// patterns, research topics, agenda themes) instead of being re-derived.
-app.get('/api/recourse/legacy-digest', (_req, res) => {
-  res.json({ success: true, available: legacyDigest !== null, digest: legacyDigest });
-});
-
-// Differential upgrade report: upgraded (current) system vs the boot baseline.
-app.get('/api/recourse/system/upgrade-report', async (req, res) => {
-  try {
-    const report = await buildUpgradeReport();
-    res.json({ success: true, ...report });
-  } catch {
-    // Never block the report on a model hiccup — fall back to deterministic.
-    res.json({ success: true, ...upgradeReport() });
-  }
-});
 
 // Warm the plain-language rephrase cache so the first report is not slow.
 void (async () => {
@@ -3698,19 +3528,6 @@ void (async () => {
   } catch { /* warm-up optional */ }
 })();
 
-// Capability adoption status (which generated tools back internal ops).
-app.get('/api/recourse/capabilities', (req, res) => {
-  res.json({
-    success: true,
-    capabilities: CAPABILITIES.map((c) => ({
-      id: c.id,
-      label: c.label,
-      backableTemplateId: c.backableTemplateId,
-      method: c.method,
-    })),
-    ...capabilitiesState(),
-  });
-});
 
 // Boot adoption sweep runs after boot self-hosted verification completes.
 void (async () => {
@@ -5660,15 +5477,6 @@ app.post('/api/recourse/tick/autopilot/toggle', (req, res) => {
   res.json({ success: true, serverTickAutopilot: serverTickAutopilotOn, intervalMs: SERVER_TICK_AUTOPILOT_MS });
 });
 
-// Real per-generation ledger endpoint (what each 24/7 generation actually did).
-app.get('/api/recourse/generations', (req, res) => {
-  res.json({
-    success: true,
-    generation: status.generation,
-    count: generationLedger.length,
-    entries: generationLedger
-  });
-});
 
 // =========================================================================
 // 8. LEGO COMPOSABLE ML & AUTONOMOUS SELF-ASSEMBLY ROUTES
@@ -5909,35 +5717,6 @@ app.get('/metrics', (req, res) => {
   res.send(metricsText());
 });
 
-app.get('/api/recourse/readout', async (req, res) => {
-  const chain = verifyChainIntegrity();
-  let upgrade: ReadoutContext['upgrade'] = undefined;
-  let plainUpgrade: string | null = null;
-  try {
-    const rep = await buildUpgradeReport();
-    upgrade = {
-      added: rep.diff.addedTools.length,
-      removed: rep.diff.removedTools.length,
-      upgraded: rep.diff.upgradedTools.length,
-      capabilityChanges: rep.diff.capabilityChanges.length,
-      netTools: rep.diff.totals.after - rep.diff.totals.before,
-    };
-    plainUpgrade = rep.plain ?? null;
-  } catch { /* upgrade section optional */ }
-  const ctx: ReadoutContext = {
-    status,
-    registry,
-    provenanceEvents,
-    intake: intakeSnapshot(),
-    benchmark: benchmarkState(),
-    generation: status.generation,
-    chainIntegrity: chain.valid,
-    upgrade,
-    plainUpgrade,
-    legacyDigest,
-  };
-  res.json({ success: true, markdown: buildDevelopmentReadout(ctx), plain: plainUpgrade, generatedAt: new Date().toISOString() });
-});
 
 // =========================================================================
 // ECOSYSTEM RESEARCH CORPUS — ingest research insights/papers produced by
