@@ -40,17 +40,17 @@
 | `src/routes/skills.ts` | skill catalog + Phase-4 skill export/import |
 | `src/routes/develop.ts` | stuck-issue loop, repair-team report/deep/intake, brain/council, patch gate, autopilot toggle, patch ledger |
 | `src/routes/forge.ts` | forge snapshot/plan/mint/run + autopilot toggle |
+| `src/routes/openEnded.ts` | QD archive view, open-ended snapshot/run/archive/hygiene/patch, fleet-recursion ledger |
 
 Harness: `scripts/route-snapshot.mjs` + `tests/fixtures/route-snapshot.json` +
 `tests/routeSnapshot.test.ts` guard the full 496-route table against drift.
 
-As of `forge`: `server.ts` is ~10.4k lines, 42 routers, ~103 inline routes.
+As of `openEnded`: `server.ts` is ~10.3k lines, 43 routers, 95 inline routes.
 
 ## Remaining clusters (in descending value, roughly)
 
 | Cluster | Approx. routes | Notes / likely deps to inject |
 | --- | --- | --- |
-| `openEnded.ts` | 8 | open-ended archive state, `runOpenEndedEngineCycle`, `fleetRecursion` |
 | `repair.ts` | 5 | `executeSelfRepair`, anomaly state, `haltAllAutonomousLoops` |
 | `policy.ts` | 6 | `status`, `autonomySettings`, `applyPromotionPolicy`, `haltAllAutonomousLoops` |
 | `dream.ts` | 4 | `dreamEngine`, `dreamState`, crystallize/mirror helpers |
