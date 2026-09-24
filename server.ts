@@ -6,7 +6,6 @@ import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import {
   ToolEntry,
-  ToolVersion,
   ProvenanceEvent,
   SystemStatus,
   HourlyReport,
@@ -289,15 +288,8 @@ import type {
 
 // Skill library accessor (catalog, search, read sibling skill repositories)
 import { scanSkillLibraries } from './src/skills/scanner.js';
-import { summarize as summarizeSkills, skillDigest, searchSkills, defaultSkillRoots } from './src/skills/index.js';
+import { summarize as summarizeSkills, defaultSkillRoots } from './src/skills/index.js';
 import type { SkillRoot, SkillDef, SkillSnapshot, SkillSummary } from './src/skills/types.js';
-// Skill exporter/importer (Phase 4 distribution — registry tools <-> SKILL.md)
-import {
-  exportSkillFiles,
-  candidateFromSkillText,
-  currentToolVersion,
-  isVerifiableVersion,
-} from './src/skills/exporter.js';
 // Composer (creative domain): the track routes live in src/routes/compose.ts;
 // the server still needs the style list + the learner for that router's mount.
 import { ComposerLearner, defaultLearnerFile } from './src/lib/composer/index.js';
@@ -320,6 +312,7 @@ import { createMemoryRouter } from './src/routes/memory.js';
 import { createLegoRouter } from './src/routes/lego.js';
 import { createIntakeRouter } from './src/routes/intake.js';
 import { createCorpusRouter } from './src/routes/corpus.js';
+import { createSkillsRouter } from './src/routes/skills.js';
 import { createSynergyRouter } from './src/routes/synergy.js';
 import { createFleetDogfoodRouter } from './src/routes/fleetDogfood.js';
 import { runFleetDogfoodCycle } from './src/lib/fleetDogfood.js';
@@ -7629,298 +7622,28 @@ async function runSkillScan(): Promise<SkillSnapshot> {
   return skillSnapshot();
 }
 
-app.get('/api/recourse/skills/status', (req, res) => {
-  res.json({ success: true, skills: skillSnapshot(), digest: skillDigest(skillSnapshot()) });
-});
-
-app.post('/api/recourse/skills/rescan', async (req, res) => {
-  try {
-    const bodyRoots = req.body?.roots;
-    if (Array.isArray(bodyRoots) && bodyRoots.length) {
-      const clean: SkillRoot[] = bodyRoots
-        .filter((r: any) => r && typeof r.id === 'string' && typeof r.root === 'string')
-        .map((r: any) => ({ id: String(r.id).trim(), root: String(r.root).trim() }));
-      if (clean.length) skillRoots = clean;
-    }
-    const snap = await runSkillScan();
-    res.json({ success: true, skills: snap, digest: skillDigest(snap) });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-app.get('/api/recourse/skills', (req, res) => {
-  const q = typeof req.query.q === 'string' ? req.query.q : '';
-  const rootId = typeof req.query.rootId === 'string' ? req.query.rootId : '';
-  const limit = Number(req.query.limit || 200);
-  let items = q ? searchSkills(skillCatalog, q, limit) : skillCatalog;
-  if (rootId) items = items.filter((s) => s.rootId === rootId);
-  res.json({ success: true, total: skillCatalog.length, filtered: items.length, skills: items.slice(0, limit) });
-});
-
-/** Read the full SKILL.md (and list its supporting files) for one skill.
- *  ?rootId=ecc&dir=skills/accessibility */
-app.get('/api/recourse/skills/skill', async (req, res) => {
-  try {
-    const rootId = typeof req.query.rootId === 'string' ? req.query.rootId : '';
-    const dir = typeof req.query.dir === 'string' ? req.query.dir : '';
-    const root = skillRoots.find((r) => r.id === rootId);
-    if (!root) return res.status(404).json({ success: false, error: `unknown skill library ${rootId}` });
-    const rel = dir.replace(/\\/g, '/');
-    if (!rel || rel.split('/').includes('..') || rel.startsWith('/')) {
-      return res.status(400).json({ success: false, error: 'invalid dir path' });
-    }
-    const skill = skillCatalog.find((s) => s.rootId === rootId && s.dir === rel);
-    const skillDirAbs = path.join(root.root, ...rel.split('/'));
-    const md = path.join(skillDirAbs, 'SKILL.md');
-    const text = await fs.promises.readFile(md, 'utf-8');
-    const cap = 100_000;
-    const truncated = text.length > cap;
-    res.json({ success: true, skill: skill ?? null, files: skill?.files ?? [], text: text.slice(0, cap), truncated, bytes: text.length });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-app.get('/api/recourse/skills/digest', (req, res) => {
-  res.json({ success: true, markdown: skillDigest(skillSnapshot()), generatedAt: new Date().toISOString() });
-});
-
-// =========================================================================
-// SKILL DISTRIBUTION (Phase 4) — verified registry tools <-> open SKILL.md
-// -------------------------------------------------------------------------
-// EXPORT: turn a verified registry tool into a rescanable SKILL.md folder.
-// IMPORT: ingest a foreign SKILL.md from a configured skill library as an
-//         UNVERIFIED candidate. Nothing foreign is trusted: only code + suite
-//         the skill explicitly embeds is run through the real domain gate +
-//         oxlint. A prose-only skill is recorded as pending and never fabricated
-//         into the registry.
-// Both mutate disk/registry, so both require RECOURSE_API_SECRET (fail-closed).
-// =========================================================================
-
-/** Run the real domain gate for a code-bearing skill import; returns null when
- *  the domain is not a plain source+suite code domain (math/biotech differ and
- *  cannot be honestly auto-verified from an arbitrary imported suite). */
-function verifyImportedCode(
-  domain: ToolDomain,
-  source: string,
-  suite: string,
-): VerifierResult | null {
-  switch (domain) {
-    case 'coding': return verifyCodingCode(source, suite);
-    case 'systemic': return verifySystemicCode(source, suite);
-    case 'neuro_symbolic': return verifyNeuroSymbolicCode(source, suite);
-    case 'cyber_defense': return verifyCyberDefenseCode(source, suite);
-    case 'quantum_sim': return verifyQuantumSimCode(source, suite);
-    default: return null; // math / biotech need structured extras we cannot infer
-  }
-}
-
-/** Register a verified imported tool into the registry (mirrors evolve). */
-function registerImportedTool(
-  name: string,
-  domain: ToolDomain,
-  source: string,
-  suite: string | undefined,
-  verifier: VerifierResult,
-  origin: { rootId: string; rel: string },
-): { tool: ToolEntry; version: ToolVersion } {
-  const versionHash = crypto.createHash('sha256').update(source).digest('hex').substring(0, 16);
-  const version = '1.0.0';
-  const versionObj: ToolVersion = {
-    version,
-    hash: versionHash,
-    created_at: Date.now(),
-    passed_verifier: verifier.passed,
-    score: verifier.score,
-    promoted: true,
-    verifier_notes: `${verifier.summary} | imported from ${origin.rootId}:${origin.rel}`,
-    source_code: source,
-    test_suite_code: suite,
-  };
-  let toolEntry = registry.find((r) => r.name === name);
-  if (!toolEntry) {
-    toolEntry = {
-      name,
-      domain,
-      entrypoint: `src/tools/${name.replace(/[^a-zA-Z0-9_]/g, '_')}.ts`,
-      description: '',
-      versions: [],
-      pendingVersions: [],
-      healthStatus: 'healthy',
-      anomalyCount: 0,
-    };
-    registry.push(toolEntry);
-  }
-  toolEntry.versions.push(versionObj);
-  toolEntry.currentVersion = version;
-  toolEntry.healthStatus = 'healthy';
-  status.totalUpgrades += 1;
-  return { tool: toolEntry, version: versionObj };
-}
-
-/** List which registry tools are exportable (they carry verified source). */
-app.get('/api/recourse/skills/exportable', (req, res) => {
-  const items = registry
-    .filter((t) => isVerifiableVersion(currentToolVersion(t)))
-    .map((t) => {
-      const v = currentToolVersion(t)!;
-      return { name: t.name, domain: t.domain, version: v.version, score: v.score, passed: v.passed_verifier, description: t.description };
-    });
-  res.json({ success: true, exportRoot: skillExportRoot, count: items.length, tools: items });
-});
-
-/** Export a verified registry tool as a SKILL.md folder. */
-app.post('/api/recourse/skills/export', async (req, res) => {
-  if (!requireMutationAuth(req, res)) return;
-  try {
-    const { toolName } = req.body ?? {};
-    const outRoot = typeof req.body?.outRoot === 'string' ? req.body.outRoot : skillExportRoot;
-    if (!toolName || typeof toolName !== 'string') {
-      return res.status(400).json({ success: false, error: 'toolName is required' });
-    }
-    const tool = registry.find((r) => r.name === toolName);
-    if (!tool) return res.status(404).json({ success: false, error: `no tool named ${toolName}` });
-    const version = currentToolVersion(tool);
-    if (!isVerifiableVersion(version)) {
-      return res.status(409).json({
-        success: false,
-        error: `${toolName} has no verified source in its active version — nothing honest to export. Verify a real implementation first.`,
-      });
-    }
-    const result = await exportSkillFiles(tool, version, outRoot);
-    if (!result.ok) {
-      return res.status(500).json({ success: false, error: result.error || 'export failed' });
-    }
-    skillExports += 1;
-    appendProvenanceEvent('skill_exported', {
-      tool: toolName,
-      version: version.version,
-      hash: version.hash,
-      outRoot,
-      dir: result.dir,
-      files: result.files.length,
-    });
-    saveStateToDisk();
-    res.json({ success: true, ...result, totalExports: skillExports });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err?.message ?? String(err) });
-  }
-});
-
-/** Ingest a foreign SKILL.md from a configured skill library as an UNVERIFIED
- *  candidate. Body: { rootId, rel, domain? }. When the skill embeds code + a
- *  suite in a code domain it is run through the real gate; otherwise it is
- *  recorded as a pending, unverified candidate that cannot be promoted yet. */
-app.post('/api/recourse/skills/import', async (req, res) => {
-  if (!requireMutationAuth(req, res)) return;
-  try {
-    const { rootId, rel, domain = 'coding' } = req.body ?? {};
-    const allowed = ['coding', 'math', 'biotech', 'systemic', 'neuro_symbolic', 'cyber_defense', 'quantum_sim'];
-    if (!allowed.includes(domain)) return res.status(400).json({ success: false, error: 'unknown domain: ' + domain });
-    if (typeof rootId !== 'string' || typeof rel !== 'string') {
-      return res.status(400).json({ success: false, error: 'rootId and rel are required' });
-    }
-    const root = skillRoots.find((r) => r.id === rootId);
-    if (!root) return res.status(404).json({ success: false, error: `unknown skill library ${rootId}` });
-    const cleanRel = rel.replace(/\\/g, '/').replace(/^\/+/, '');
-    if (!cleanRel || cleanRel.split('/').includes('..')) {
-      return res.status(400).json({ success: false, error: 'invalid rel path' });
-    }
-    const mdRel = /SKILL\.md$/i.test(cleanRel) ? cleanRel : `${cleanRel}/SKILL.md`;
-    const mdAbs = path.join(root.root, ...mdRel.replace(/^\.\//, '').split('/'));
-    const relCheck = path.relative(root.root, mdAbs);
-    if (relCheck.startsWith('..') || path.isAbsolute(relCheck)) {
-      return res.status(400).json({ success: false, error: 'path escapes skill library root' });
-    }
-    let text: string;
-    try {
-      text = await fs.promises.readFile(mdAbs, 'utf-8');
-    } catch (err: any) {
-      return res.status(404).json({ success: false, error: `cannot read ${mdRel}: ${err?.message ?? err}` });
-    }
-    const cand = candidateFromSkillText(text, { rootId, rel: mdRel }, domain as ToolDomain);
-    const domainT = domain as ToolDomain;
-
-    let outcome = 'pending';
-    let reason = cand.reason;
-    let registered: { tool: ToolEntry; version: ToolVersion } | null = null;
-
-    if (cand.runnable && cand.source && cand.suite) {
-      const verifier = verifyImportedCode(domainT, cand.source, cand.suite);
-      if (verifier) {
-        const gate = gateWithLint(cand.source);
-        let passed = verifier.passed && gate.allowed;
-        let qualityNote = '';
-        if (passed) {
-          // Imported code is judged by a suite embedded in the imported file;
-          // the quality gate catches mutation / nondeterminism / overfitting
-          // before it can enter the registry.
-          const quality = assessForgeCandidate({ name: cand.name, refSuite: cand.suite }, cand.source);
-          if (!quality.gate.ok) {
-            passed = false;
-            qualityNote = ` | quality: ${quality.gate.reasons.join('; ')}`;
-          }
-        }
-        if (passed) {
-          registered = registerImportedTool(cand.name, domainT, cand.source, cand.suite, verifier, { rootId, rel: mdRel });
-          outcome = 'promoted';
-          reason = `verified imported code (score ${verifier.score.toFixed(2)}) ${gate.allowed ? '' : lintVerdictNote(gate.lint)}`;
-        } else {
-          outcome = 'rejected';
-          reason = `${verifier.summary}${gate.allowed ? '' : ' | ' + lintVerdictNote(gate.lint)}${qualityNote}`;
-        }
-      } else {
-        // Code-domain gate not applicable (math/biotech). Honest pending.
-        reason = `${domain} import needs structured extras (math funcName/testCases, biotech claim) — held as unverified pending.`;
-      }
-    } else if (cand.runnable && !cand.suite) {
-      reason = `${reason} No test suite embedded — cannot pass the promotion gate.`;
-    }
-
-    skillImports += 1;
-    skillImportPending.unshift({
-      name: cand.name,
-      domain: domainT,
-      originRoot: rootId,
-      originRel: mdRel,
-      runnable: cand.runnable,
-      outcome,
-      importedAt: Date.now(),
-      reason,
-    });
-    if (skillImportPending.length > 200) skillImportPending.length = 200;
-    appendProvenanceEvent('skill_imported', {
-      skill: cand.name,
-      originRoot: rootId,
-      originRel: mdRel,
-      domain: domainT,
-      runnable: cand.runnable,
-      outcome,
-      reason,
-      registeredTool: registered ? registered.tool.name : undefined,
-    });
-    saveStateToDisk();
-    res.json({
-      success: true,
-      outcome,
-      candidate: {
-        name: cand.name,
-        description: cand.description,
-        domain: domainT,
-        runnable: cand.runnable,
-        license: cand.license,
-        origin: cand.origin,
-      },
-      reason,
-      registeredTool: registered ? { name: registered.tool.name, version: registered.version.version, score: registered.version.score } : null,
-      totalImports: skillImports,
-      recent: skillImportPending.slice(0, 20),
-    });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err?.message ?? String(err) });
-  }
-});
+// Skill library + Phase-4 distribution routes moved to src/routes/skills.ts.
+// Catalogs/roots/export counters stay host-owned (persisted) and are injected.
+app.use(
+  '/api/recourse',
+  createSkillsRouter({
+    snapshot: () => skillSnapshot(),
+    scan: () => runSkillScan(),
+    getRoots: () => skillRoots,
+    setRoots: (roots) => { skillRoots = roots; },
+    getCatalog: () => skillCatalog,
+    getRegistry: () => registry,
+    bumpUpgrades: () => { status.totalUpgrades += 1; },
+    getExportRoot: () => skillExportRoot,
+    incExports: () => ++skillExports,
+    incImports: () => ++skillImports,
+    getPending: () => skillImportPending,
+    appendProvenance: (eventType, data) => appendProvenanceEvent(eventType as ProvenanceEvent['type'], data),
+    saveState: saveStateToDisk,
+    gateWithLint,
+    lintVerdictNote,
+  }),
+);
 
 // Composer routes mounted from src/routes/compose.ts.
 const composeRouter = createComposeRouter({
