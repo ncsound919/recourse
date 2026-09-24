@@ -103,9 +103,6 @@ import { DreamingEngine } from './src/dream/engine.js';
 import { createDreamStore } from './src/dream/store.js';
 import {
   createGeneRegistryStore,
-  evolveGene,
-  approveGene,
-  getActiveModel,
   getActivePolicy,
   setActivePolicy,
   normalizePromotionPolicy,
@@ -315,6 +312,7 @@ import { createOpenEndedRouter } from './src/routes/openEnded.js';
 import { createRepairRouter } from './src/routes/repair.js';
 import { createPolicyRouter } from './src/routes/policy.js';
 import { createDreamRouter } from './src/routes/dream.js';
+import { createMutateRouter } from './src/routes/mutate.js';
 import { createSynergyRouter } from './src/routes/synergy.js';
 import { createFleetDogfoodRouter } from './src/routes/fleetDogfood.js';
 import { runFleetDogfoodCycle } from './src/lib/fleetDogfood.js';
@@ -5544,163 +5542,21 @@ function buildForgePromptFromGene(gene: { name: string; description?: string; co
 // =========================================================================
 const geneRegistryStore = createGeneRegistryStore();
 
-app.get('/api/recourse/mutate/status', async (req, res) => {
-  try {
-    const geneList = await geneRegistryStore.list();
-    res.json({
-      success: true,
-      activePolicy: getActivePolicy(),
-      model: getActiveModel(),
-      registry: geneList.map(g => ({
-        id: g.id,
-        name: g.name,
-        version: g.version,
-        generation: g.generation,
-        domain: g.domain,
-        status: g.status,
-        origin: g.origin,
-        description: g.description,
-        versionHash: g.versionHash,
-        createdAt: g.createdAt
-      }))
-    });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
+// AI architectural mutator routes moved to src/routes/mutate.ts; the gene
+// store instance + promotion/provenance side effects stay host-side.
+app.use(
+  '/api/recourse',
+  createMutateRouter({
+    geneRegistryStore,
+    promoteTool,
+    statusRef: () => status,
+    appendProvenance: (eventType, data) => appendProvenanceEvent(eventType as ProvenanceEvent['type'], data),
+    saveState: saveStateToDisk,
+    applyPromotionPolicy,
+    generation: () => status.generation,
+  }),
+);
 
-app.post('/api/recourse/mutate/evolve', async (req, res) => {
-  if (!requireMutationAuthIfConfigured(req, res)) return;
-  try {
-    const { domain, instructions, targetToolName } = req.body ?? {};
-    if (!domain) {
-      return res.status(400).json({ success: false, error: 'domain required' });
-    }
-    if (!instructions || typeof instructions !== 'string' || instructions.trim().length < 4) {
-      return res.status(400).json({ success: false, error: 'instructions required' });
-    }
-    const result = await evolveGene(geneRegistryStore, {
-      domain,
-      instructions: instructions.trim().slice(0, 4000),
-      targetToolName: typeof targetToolName === 'string' && targetToolName.trim() ? targetToolName.trim() : undefined
-    });
-
-    let promoted = false;
-    if (result.success && result.outcome === 'promoted') {
-      const version = '1.0.0';
-      const newTool: ToolEntry = {
-        name: result.toolName,
-        domain: domain,
-        entrypoint: `src/tools/${result.toolName}.ts`,
-        description: `AI Mutated (${result.engine}): ${instructions.slice(0, 60)}`,
-        currentVersion: version,
-        versions: [{
-          version,
-          hash: result.versionHash,
-          created_at: Date.now(),
-          passed_verifier: result.verifierResult.verified,
-          score: result.verifierResult.verified ? 1.0 : 0,
-          promoted: result.verifierResult.verified,
-          verifier_notes: `${result.verifierResult.summary} Engine: ${result.engine}.`,
-        }],
-        healthStatus: result.verifierResult.verified ? 'healthy' : 'degraded',
-        anomalyCount: 0
-      };
-    promoted = promoteTool(newTool, { origin: 'mutate' });
-    if (promoted) {
-      status.totalUpgrades += 1;
-      appendProvenanceEvent('ai_mutation', {
-        tool: result.toolName,
-        domain,
-        version,
-        hash: result.versionHash,
-        engine: result.engine,
-        generation: result.generation
-      });
-      saveStateToDisk();
-    }
-    }
-
-    res.json({ ...result, promoted });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-app.post('/api/recourse/mutate/approve', async (req, res) => {
-  if (!requireMutationAuthIfConfigured(req, res)) return;
-  try {
-    const { geneId } = req.body ?? {};
-    if (!geneId || typeof geneId !== 'string') {
-      return res.status(400).json({ success: false, error: 'geneId required' });
-    }
-    const result = await approveGene(geneRegistryStore, geneId);
-    let promoted = false;
-    if (result.success && result.gene) {
-      const g = result.gene;
-      const version = `${g.version}.0.0`;
-      const newTool: ToolEntry = {
-        name: g.name,
-        domain: g.domain,
-        entrypoint: `src/tools/${g.name}.ts`,
-        description: g.description,
-        currentVersion: version,
-        versions: [{
-          version,
-          hash: g.versionHash,
-          created_at: Date.now(),
-          passed_verifier: (g.verifierChecks || []).every(c => c.passed),
-          score: (g.verifierChecks || []).every(c => c.passed) ? 1.0 : 0,
-          promoted: true,
-          verifier_notes: 'Human approved AI Mutation Gene' + ((g.verifierChecks || []).every(c => c.passed) ? ' (gene invariant checks passed).' : ' (invariant checks NOT all passed).'),
-          source_code: g.code
-        }],
-        healthStatus: (g.verifierChecks || []).every(c => c.passed) ? 'healthy' : 'degraded',
-        anomalyCount: 0
-      };
-  promoted = promoteTool(newTool, { origin: 'mutate-approve' });
-  if (promoted) {
-      status.totalUpgrades += 1;
-      appendProvenanceEvent('tool_human_approved', {
-        tool: g.name,
-        geneId: g.id,
-        domain: g.domain,
-        version,
-        hash: g.versionHash
-      });
-      saveStateToDisk();
-  }
-    }
-    res.status(result.success ? 200 : 422).json({ ...result, promoted });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-app.post('/api/recourse/mutate/policy', async (req, res) => {
-  if (!requireMutationAuthIfConfigured(req, res)) return;
-  try {
-    // Same canonical vocabulary as /policy (legacy auto_promote/manual_approval
-    // still accepted and normalized).
-    const applied = applyPromotionPolicy(req.body?.policy);
-    if ('error' in applied) {
-      return res.status(400).json({
-        success: false,
-        error: applied.error,
-        allowed: ['any_pass', 'non_regressing', 'strict_improve', 'human_approval'],
-      });
-    }
-    appendProvenanceEvent('system_tick', {
-      action: 'policy_change',
-      newPolicy: applied.policy,
-      generation: status.generation,
-    });
-    saveStateToDisk();
-    res.json({ success: true, activePolicy: applied.policy, ...(applied.note ? { note: applied.note } : {}) });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
 
 // =========================================================================
 // 3. REAL GITHUB RESEARCH ROUTES
