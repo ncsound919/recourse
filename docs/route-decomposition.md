@@ -52,22 +52,22 @@
 | `src/routes/interop.ts` | replay, OpenAPI spec + operation index, agent card, A2A JSON-RPC, remote MCP (mounted at app root — paths span `/api/recourse`, `/api`, `/.well-known`) |
 | `src/routes/math.ts` | math conductor: state/step/reset/configure, problems/attempts/goals, solve (pairs with `solveNextMathProblem` hoisted to module level) |
 | `src/routes/biotech.ts` | oncology KG drugs, verify-claim, claims |
+| `src/routes/axiom.ts` | axiom/status, develop/axiom (repair dispatch), axiom/build-tool |
 
 Harness: `scripts/route-snapshot.mjs` + `tests/fixtures/route-snapshot.json` +
 `tests/routeSnapshot.test.ts` guard the full 496-route table against drift.
 
-As of `biotech`: `server.ts` is ~8.3k lines, 54 routers, 23 inline routes.
+As of `axiom`: `server.ts` is ~8.2k lines, 55 routers, 20 inline routes.
 
 ## Remaining clusters (in descending value, roughly)
 
-All clusters named in this table have been extracted. The 23 inline routes
+All clusters named in this table have been extracted. The 20 inline routes
 that remain are grouped by domain but not yet scheduled:
 
 | Group | Approx. routes | Notes |
 | --- | --- | --- |
 | builder (`/builder`, select/propose/step) | 4 | builder brain + forge coupling |
 | provider settings + chat (`provider/chat`, `/v1/chat/completions`, `settings/provider` GET/POST) | 4 | provider profile mutation |
-| axiom (`axiom/status`, `develop/axiom`, `axiom/build-tool`) | 3 | axiom bridge |
 | tick + autopilot toggle, hyperparameters, chaos/inject | 4 | host closures for flags |
 | github catalog/import, report/generate + reports | 4 | provenance/save side effects |
 | capabilities/serve, execute, perf, `GET /metrics` | 4 | capability dogfood + app-root paths |

@@ -292,6 +292,7 @@ import { createReadoutRouter } from './src/routes/readout.js';
 import { createInteropRouter } from './src/routes/interop.js';
 import { createMathRouter } from './src/routes/math.js';
 import { createBiotechRouter } from './src/routes/biotech.js';
+import { createAxiomRouter } from './src/routes/axiom.js';
 import { createSynergyRouter } from './src/routes/synergy.js';
 import { createFleetDogfoodRouter } from './src/routes/fleetDogfood.js';
 import { runFleetDogfoodCycle } from './src/lib/fleetDogfood.js';
@@ -1918,42 +1919,13 @@ function executeSelfRepair(
 }
 
 // API Routes
-import { axiomBridgeStatus, integrateAxiomTool, dispatchAxiomRepair, axiomReachable, axiomProjectLatest } from './src/lib/axiomBridge.js';
+import { axiomBridgeStatus, integrateAxiomTool, axiomReachable, axiomProjectLatest } from './src/lib/axiomBridge.js';
 // (hackingtool security routes extracted to src/routes/security.ts)
 
-app.get('/api/recourse/axiom/status', async (_req, res) => {
-  res.json(await axiomBridgeStatus());
-});
-
-/** Outbound: hand Recourse's weak findings to Axiom so it runs a real repair
- *  project loop against this repo. Axiom's patches still land only through
- *  Recourse's own verified patch-intake gate. */
-app.post('/api/recourse/develop/axiom', async (req, res) => {
-  try {
-    const body = req.body ?? {};
-    const dossier = computeHealthDossier(devDossierInput());
-    const findings = Array.isArray(body.findings) && body.findings.length
-      ? body.findings
-      : dossier.findings;
-    const result = await dispatchAxiomRepair({
-      findings,
-      targetDir: typeof body.targetDir === 'string' ? body.targetDir : undefined,
-      goal: typeof body.goal === 'string' ? body.goal : undefined,
-      maxIterations: Number(body.maxIterations) || undefined,
-    });
-    recordDev('axiom', result.ok, result.ok ? `axiom repair loop ${result.id ?? ''}` : `axiom failed: ${result.error}`, { driver: 'axiom' });
-    res.json({ success: result.ok, ...result });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-app.post('/api/recourse/axiom/build-tool', async (req, res) => {
-  const { name, domain, prompt, refSuite } = req.body || {};
-  if (!name || !prompt) return res.status(400).json({ error: "missing params" });
-  const result = await integrateAxiomTool(name, domain, prompt, refSuite);
-  res.json(result);
-});
+app.use('/api/recourse', createAxiomRouter({
+  healthDossier: () => computeHealthDossier(devDossierInput()),
+  recordDev: (action, ok, detail, extra) => recordDev(action, ok, detail, extra as any),
+}));
 
 // =========================================================================
 // hackingtool security bridge (Z4nzu/hackingtool, MIT) — authorized testing.
