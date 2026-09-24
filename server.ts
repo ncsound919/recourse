@@ -37,7 +37,7 @@ import {
 import { executeToolFunction, executeTestSuite } from './src/lib/executionSandbox.js';
 import { MerkleTree, auditCodeSecurity } from './src/lib/cyberDefenseEngine.js';
 import { transformSync } from 'esbuild';
-import { searchGitHubRepositories, fetchRepoSource, domainLabel } from './src/lib/githubResearchEngine.js';
+import { fetchRepoSource, domainLabel } from './src/lib/githubResearchEngine.js';
 import { validateBiotechClaimAgainstKG, CANONICAL_ONCOLOGY_KG } from './src/lib/biotechKnowledgeGraph.js';
 import { buildLiveOncologyGraph, liveEvidenceHealth } from './src/lib/liveOncologyGraph.js';
 import { synthesizeOdeKinetics } from './src/lib/odeKineticSynthesizer.js';
@@ -296,6 +296,8 @@ import { createAxiomRouter } from './src/routes/axiom.js';
 import { createProviderChatRouter } from './src/routes/providerChat.js';
 import { createBuilderRouter } from './src/routes/builder.js';
 import { createRuntimeOpsRouter } from './src/routes/runtimeOps.js';
+import { createReportsRouter } from './src/routes/reports.js';
+import { createGitHubRouter } from './src/routes/github.js';
 import { createSynergyRouter } from './src/routes/synergy.js';
 import { createFleetDogfoodRouter } from './src/routes/fleetDogfood.js';
 import { runFleetDogfoodCycle } from './src/lib/fleetDogfood.js';
@@ -3594,98 +3596,17 @@ app.use('/api/recourse', createLearnRouter({
   saveState: () => saveStateToDisk(),
 }));
 
-// Hourly Report Generator Route
-app.post('/api/recourse/report/generate', (req, res) => {
-  const reportId = `rep_hourly_${String(status.generation).padStart(3, '0')}_${Date.now()}`;
-  const now = Date.now();
-  const dateFormatted = new Date(now).toISOString().replace('T', ' ').substring(0, 16) + ' UTC';
-
-  let promoted = 0;
-  let rejected = 0;
-  let heldBack = 0;
-  let pending = 0;
-  let repaired = 0;
-
-  // Count REAL emitted event names. Promotions arrive via several honest
-  // pipelines, each with its own event (only success paths emit):
-  //  - 'tool_verification' with data.outcome 'promoted' (evolve/mutate routes)
-  //  - 'template_component_built' (Capability Forge materialization)
-  //  - 'signal_grounded' (intake grounding; emitted only when verified)
-  //  - 'dream_crystallized' with data.verified (or data.count for auto-mirror)
-  //  - 'ai_mutation' (emitted only on promotion), 'tool_human_approved',
-  //  - 'gene_crossover' with data.verified
-  // Legacy 'tool_promoted'/'tool_rejected'/... types are also honored.
-  // Repairs arrive as 'tool_repaired' or 'template_repair_synthesized'.
-  provenanceEvents.forEach(e => {
-    const d = (e as any)?.data ?? {};
-    if (e.type === 'tool_promoted' || (e.type === 'tool_verification' && d.outcome === 'promoted')) promoted++;
-    else if (e.type === 'template_component_built') promoted++;
-    else if (e.type === 'signal_grounded') promoted++;
-    else if (e.type === 'dream_crystallized') promoted += typeof d.count === 'number' ? d.count : (d.verified === false ? 0 : 1);
-    else if (e.type === 'ai_mutation') promoted++;
-    else if (e.type === 'tool_human_approved') promoted++;
-    else if (e.type === 'gene_crossover' && d.verified !== false) promoted++;
-    if (e.type === 'tool_rejected' || (e.type === 'tool_verification' && d.outcome === 'rejected')) rejected++;
-    if (e.type === 'tool_held_back' || (e.type === 'tool_verification' && d.outcome === 'held_back')) heldBack++;
-    if (e.type === 'tool_pending_approval' || (e.type === 'tool_verification' && d.outcome === 'pending_approval')) pending++;
-    if (e.type === 'tool_repaired' || e.type === 'template_repair_synthesized') repaired++;
-  });
-
-  const markdown = `## Hourly Report â€” Gen ${status.generation} (${dateFormatted})
-
-### Architectural Adjustments Summary
-- **${promoted} tool(s) promoted** across 7 frontier domains
-- **${repaired} autonomous self-repairs executed** (MTTR: ${status.selfRepair.meanTimeToRepairMs}ms)
-- **${pending} tool(s) pending human safety approval**
-- **${heldBack} tool(s) held back** (non-improving under policy \`${status.activePolicy}\`)
-- **${rejected} tool(s) rejected** by deterministic verifier matrix
-
-### Autonomous Self-Learning & Self-Healing Health
-- **Auto-Healing State:** ${status.selfRepair.isAutoHealingEnabled ? 'ACTIVE (Zero-Downtime Autonomous Patching)' : 'STANDBY'}
-- **Total Healed Genes:** ${status.selfRepair.totalHealedCount}
-- **Self-Repair Success Rate:** ${(status.selfRepair.repairSuccessRate * 100).toFixed(1)}%
-
-### Provenance Audit Integrity
-- **Total Immutable Hash Chain Entries:** ${provenanceEvents.length}
-- **Last Provenance Root Hash:** \`${getLastHash()}\`
-- **Tamper Status:** VERIFIED (100% cryptographic continuity)
-`;
-
-  const newReport: HourlyReport = {
-    id: reportId,
-    timestamp: now,
-    dateFormatted,
-    promotedCount: promoted,
-    rejectedCount: rejected,
-    heldBackCount: heldBack,
-    pendingCount: pending,
-    repairedCount: repaired,
-    summaryMarkdown: markdown,
-    eventsCount: provenanceEvents.length
-  };
-
-  reports.unshift(newReport);
-  if (reports.length > 50) {
-    reports.pop();
-  }
-
-  appendProvenanceEvent('report_generated', {
-    reportId,
-    generation: status.generation,
-    promoted,
-    pending,
-    rejected,
-    repaired
-  });
-
-  saveStateToDisk();
-
-  res.json({ success: true, report: newReport });
-});
-
-app.get('/api/recourse/reports', (req, res) => {
-  res.json({ reports });
-});
+// =========================================================================
+// HOURLY REPORTS — generate + list.
+// =========================================================================
+app.use('/api/recourse', createReportsRouter({
+  statusRef: () => status,
+  provenanceEventsRef: () => provenanceEvents,
+  reportsRef: () => reports,
+  getLastHash,
+  appendProvenance: (eventType, data) => appendProvenanceEvent(eventType as ProvenanceEvent['type'], data),
+  saveState: saveStateToDisk,
+}));
 
 // =========================================================================
 // 1. DETERMINISTIC GROWTH DECISION ENGINE + JEV ADVISORY ROUTES
@@ -4060,32 +3981,13 @@ async function importGitHubCandidate(repo: string, filePath?: string, domain?: T
   };
 }
 
-/** Real GitHub repository search. */
-app.get('/api/recourse/github/catalog', async (req, res) => {
-  const query = (req.query.q as string) || '';
-  try {
-    if (!query.trim()) return res.json({ success: true, repos: [], note: 'Type a search query to query the live GitHub API.' });
-    const repos = await searchGitHubRepositories(query);
-    res.json({ success: true, repos, note: 'Live GitHub search results. Choose a repository and click Import to fetch a real source file (never auto-promoted).' });
-  } catch (err: any) {
-    res.status(502).json({ success: false, error: err?.message || 'GitHub search failed' });
-  }
-});
 
-/** Fetch and register a real file as an unverified pending candidate. */
-app.post('/api/recourse/github/import', async (req, res) => {
-  const { repo, path, domain } = req.body ?? {};
-  if (!repo || typeof repo !== 'string') {
-    return res.status(400).json({ success: false, error: 'repo is required (owner/name or full GitHub URL)' });
-  }
-  try {
-    const result = await importGitHubCandidate(repo, typeof path === 'string' && path ? path : undefined, domain as ToolDomain);
-    res.json({ success: true, result });
-  } catch (err: any) {
-    const status = err?.kind === 'not_found' ? 404 : err?.kind === 'no_code_file' ? 422 : 502;
-    res.status(status).json({ success: false, error: err?.message || 'GitHub import failed', kind: err?.kind });
-  }
-});
+// =========================================================================
+// GITHUB RESEARCH — catalog search + candidate import.
+// =========================================================================
+app.use('/api/recourse', createGitHubRouter({
+  importCandidate: (repo, path, domain) => importGitHubCandidate(repo, path, domain),
+}));
 
 // =========================================================================
 // 4. AUTONOMOUS SUBAGENT SWARM - REAL EXECUTOR

@@ -56,20 +56,21 @@
 | `src/routes/providerChat.ts` | provider/chat, `/v1/chat/completions` (OpenAI shim), settings/provider GET/POST (app-root mount — `/v1` + `/api/recourse`) |
 | `src/routes/builder.ts` | builder GET, select/propose/step (generator meta-loop; state + `builderSnapshot`/`builderMetaStep` injected) |
 | `src/routes/runtimeOps.ts` | hyperparameters, chaos/inject, tick, tick/autopilot/toggle (host state/anomalies/registry + tick loop injected) |
+| `src/routes/reports.ts` | report/generate + reports (status, provenance chain, report list injected) |
+| `src/routes/github.ts` | github/catalog (live search) + github/import (candidate pipeline injected) |
 
 Harness: `scripts/route-snapshot.mjs` + `tests/fixtures/route-snapshot.json` +
 `tests/routeSnapshot.test.ts` guard the full 496-route table against drift.
 
-As of `runtimeOps`: `server.ts` is ~8.0k lines, 58 routers, 8 inline routes.
+As of `github`/`reports`: `server.ts` is ~7.9k lines, 60 routers, 4 inline routes.
 
 ## Remaining clusters (in descending value, roughly)
 
-All clusters named in this table have been extracted. The 8 inline routes
+All clusters named in this table have been extracted. The 4 inline routes
 that remain are grouped by domain but not yet scheduled:
 
 | Group | Approx. routes | Notes |
 | --- | --- | --- |
-| github catalog/import, report/generate + reports | 4 | provenance/save side effects |
 | capabilities/serve, execute, perf, `GET /metrics` | 4 | capability dogfood + app-root paths |
 | github catalog/import, report/generate + reports | 4 | provenance/save side effects |
 | capabilities/serve, execute, perf, `GET /metrics` | 4 | capability dogfood + app-root paths |
