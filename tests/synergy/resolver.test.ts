@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveTransfer, admit, applyTransferResult } from '../../src/lib/synergy/resolver.js';
+import { resolveTransfer, admit, applyTransferResult, acceptanceTestIsNonTrivial } from '../../src/lib/synergy/resolver.js';
 import { buildSynergyMap } from '../../src/lib/synergy/synergyMap.js';
 import type { TransferCandidate } from '../../src/lib/synergy/types.js';
 
@@ -38,5 +38,40 @@ describe('resolver + admission gate', () => {
     const edge = next.edges.find((e) => e.from === 'mathematics' && e.to === 'logistics' && e.kind === 'resolved');
     expect(edge?.passes).toBe(1);
     expect(edge?.attempts).toBe(1);
+  });
+
+  it('refuses a trivial acceptance test before execution', () => {
+    // A tautology (or a test with no assert) would pass against ANY
+    // implementation, so it is not admissible evidence.
+    for (const trivial of ['assert true;', 'assert(true);', 'const a = 1;']) {
+      const r = resolveTransfer(candidate, trivial, passing);
+      expect(r.outcome).toBe('error');
+      expect(r.detail).toContain('non-trivial');
+    }
+  });
+
+  it('refuses an empty acceptance test', () => {
+    const r = resolveTransfer(candidate, '', passing);
+    expect(r.outcome).toBe('error');
+    expect(r.detail).toContain('cannot be empty');
+  });
+});
+
+describe('acceptanceTestIsNonTrivial', () => {
+  it('accepts a substantive assertion', () => {
+    expect(acceptanceTestIsNonTrivial('const a = Mod.f([1,2,3]); assert a === 6;')).toBe(true);
+    expect(acceptanceTestIsNonTrivial('assert.equal(f(2), 3);')).toBe(true);
+  });
+
+  it('rejects empty, assertion-free, and purely tautological tests', () => {
+    expect(acceptanceTestIsNonTrivial('')).toBe(false);
+    expect(acceptanceTestIsNonTrivial('   ')).toBe(false);
+    expect(acceptanceTestIsNonTrivial('const a = 1;')).toBe(false);
+    expect(acceptanceTestIsNonTrivial('assert true;')).toBe(false);
+    expect(acceptanceTestIsNonTrivial('assert(true);')).toBe(false);
+  });
+
+  it('accepts a mix where at least one assertion is substantive', () => {
+    expect(acceptanceTestIsNonTrivial('assert true; assert f(2) === 3;')).toBe(true);
   });
 });

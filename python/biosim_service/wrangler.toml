@@ -1,0 +1,17 @@
+name = "biosim-sidecar"
+main = "cf-worker.ts"
+compatibility_date = "2025-06-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[containers]]
+class_name = "BioSim"
+image = "./Dockerfile"
+max_instances = 2
+
+[[durable_objects.bindings]]
+name = "BIOSIM"
+class_name = "BioSim"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["BioSim"]

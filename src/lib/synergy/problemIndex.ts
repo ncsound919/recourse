@@ -4,11 +4,16 @@
  * heuristic over the statement + acceptance test — never claimed as measured.
  * Limitation: text is lowercased before matching, so camelCase identifiers like
  * `LossFunction` do NOT match — a conservative, accepted false-negative.
+ *
+ * Real relational predicates are extracted from `@rel` annotations in the
+ * acceptance test or problem statement. When present, the problem's
+ * `relationBasis` is set to `'declared'` and SME alignment can fire.
  */
 import type { RecourseProblem } from '../problemArchive.js';
 import type { ProblemSignature } from './types.js';
 import { PRIMITIVES, canonicalizeTerm } from './vocabulary.js';
 import { relationsFromPrimitives } from './methodIndex.js';
+import { extractDeclaredRelations } from './relationExtract.js';
 import { sha256Hex } from './manifest.js';
 
 /** Heuristic controlled-primitive detector over free text. Word-boundary based. */
@@ -21,7 +26,10 @@ export function detectPrimitives(text: string): string[] {
 
 export function extractProblem(p: RecourseProblem): ProblemSignature {
   if (!p || !p.id) throw new Error('extractProblem: problem id is required');
-  const requiredPrimitives = detectPrimitives(`${p.title}\n${p.statement}\n${p.acceptanceTest}`);
+  const fullText = `${p.title}\n${p.statement}\n${p.acceptanceTest}`;
+  const requiredPrimitives = detectPrimitives(fullText);
+  const extracted = extractDeclaredRelations(p.acceptanceTest, p.domain);
+  const hasRealRelations = extracted.relations.length > 0;
   return {
     id: `problem:${canonicalizeTerm(p.id)}`,
     name: p.title,
@@ -29,9 +37,9 @@ export function extractProblem(p: RecourseProblem): ProblemSignature {
     requiredPrimitives,
     acceptanceTest: p.acceptanceTest,
     testHash: sha256Hex(p.acceptanceTest),
-    extraction: 'heuristic',
-    relations: relationsFromPrimitives(requiredPrimitives, p.domain),
-    relationBasis: 'placeholder',
+    extraction: hasRealRelations ? 'declared' : 'heuristic',
+    relations: hasRealRelations ? extracted.relations : relationsFromPrimitives(requiredPrimitives, p.domain),
+    relationBasis: hasRealRelations ? 'declared' : 'placeholder',
   };
 }
 

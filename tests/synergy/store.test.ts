@@ -1,10 +1,12 @@
 // tests/synergy/store.test.ts
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it, expect, beforeAll } from 'vitest';
 import fs from 'node:fs';
 import { synergyMapPath, readSynergyMap, writeSynergyMap } from '../../src/lib/synergy/store.js';
 import type { SynergyMap } from '../../src/lib/synergy/types.js';
 
-const TEST_FILE = `${process.cwd()}\\data\\test-synergy-map.json`;
+const TEST_FILE = join(tmpdir(), `recourse-test-synergy-map-${process.pid}.json`);
 
 beforeAll(() => {
   process.env.SYNERGY_MAP_FILE = TEST_FILE;

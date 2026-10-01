@@ -16,6 +16,8 @@ import { filterBridge, allPassed, type FilterContext } from './filters.js';
 import { manifestHash, sha256Hex, stableStringify } from './manifest.js';
 import { vocabularyHash } from './vocabulary.js';
 import { dgroupFromRelations, align as smeAlign, farTransfer } from './sme.js';
+import { grangerCausality, transferEntropy, stationarize } from './stats.js';
+import { macFac } from './macFac.js';
 
 export const SYNERGY_ENGINE_VERSION = '0.1.0';
 
@@ -28,6 +30,11 @@ export interface DiscoverOptions {
   stoplist?: string[];
   knownPairs?: string[];
   align?: boolean;
+  /** Time-series data for directional statistics (Granger, transfer entropy).
+   *  Keyed by `${fromDomain}:${toDomain}`. */
+  seriesData?: Record<string, { xs: number[]; ys: number[] }>;
+  /** Enable MAC/FAC prefilter for SME alignment. */
+  useMacFac?: boolean;
 }
 
 export const SYNERGY_CALIBRATION = {
@@ -82,6 +89,8 @@ export function discover(
 ): { candidates: TransferCandidate[]; graph: WeightedGraph; manifest: string } {
   const resolved = resolveOptions(opts);
   const { maxDocFrequency, minDocsPerLeg, topBridges, passThreshold, coverageExponent, stoplist, knownPairs } = resolved;
+  const seriesData = opts.seriesData ?? {};
+  const useMacFac = opts.useMacFac ?? false;
 
   const docs: GraphDoc[] = [
     ...methods.map((m) => ({ id: m.id, domain: m.domain, text: docText(m) })),
@@ -110,7 +119,28 @@ export function discover(
       const top = passing.slice(0, topBridges);
       const base = top.reduce((s, b) => s + b.score, 0) / top.length;
       const coverage = passing.length / bridges.length;
-      const score = Math.round(base * Math.pow(coverage, coverageExponent) * 1000) / 1000;
+      let score = Math.round(base * Math.pow(coverage, coverageExponent) * 1000) / 1000;
+
+      // Directional statistics: augment score with Granger/TE evidence
+      const seriesKey = `${m.domain}:${p.domain}`;
+      const series = seriesData[seriesKey];
+      let directionalStats;
+      if (series && series.xs.length >= 16 && series.ys.length >= 16) {
+        const station = stationarize(series.xs);
+        const xs = station.series;
+        const ys = series.ys.slice(0, xs.length);
+        const granger = grangerCausality(xs, ys);
+        const te = transferEntropy(xs, ys);
+        directionalStats = {
+          granger: { ok: granger.ok, bestLag: granger.bestLag, fStat: granger.fStat, p: granger.p, significant: granger.significant, n: granger.n, reason: granger.reason },
+          transferEntropy: { ok: te.ok, bits: te.bits, n: te.n, bins: te.bins, history: te.history, reason: te.reason },
+          stationarity: { transforms: station.transforms, wasNonStationary: station.transforms.length > 0 },
+        };
+        if (granger.ok && granger.significant) {
+          score = Math.round(score * 1.1 * 1000) / 1000;
+        }
+      }
+
       const useAlign = opts.align !== false;
       let alignment;
       let far;
@@ -118,7 +148,12 @@ export function discover(
       if (useAlign && relationsDeclared && m.relations.length > 0 && p.relations.length > 0) {
         const bd = dgroupFromRelations(m.domain, m.relations, [...new Set(m.relations.flatMap((r) => r.args))]);
         const td = dgroupFromRelations(p.domain, p.relations, [...new Set(p.relations.flatMap((r) => r.args))]);
-        alignment = smeAlign(bd, td);
+        if (useMacFac) {
+          const results = macFac(td, [bd], { k: 1 });
+          alignment = results[0];
+        } else {
+          alignment = smeAlign(bd, td);
+        }
         far = farTransfer(bd, td);
       }
       const id = `tc_${sha256Hex([
@@ -141,6 +176,7 @@ export function discover(
         falsification: `If a sandbox run of "${m.name}" against the acceptance test for "${p.name}" fails, this transfer is rejected (engine ${SYNERGY_ENGINE_VERSION}).`,
         filters: failed,
         engineVersion: SYNERGY_ENGINE_VERSION,
+        directionalStats,
       });
     }
   }

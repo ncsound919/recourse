@@ -104,7 +104,7 @@ export function poolMetaAnalysis(records: TrialEvidence[]): PooledEstimate | nul
   const poolable = records.filter((r) => r.se != null && Number.isFinite(r.se) && r.se > 0);
   if (poolable.length === 0) return null;
 
-  const w = poolable.map((r) => 1 / (r.se! * r.se));
+  const w = poolable.map((r) => 1 / (r.se! * r.se!));
   const wSum = w.reduce((a, b) => a + b, 0);
   const pooled = poolable.reduce((a, r, i) => a + w[i] * r.effect, 0) / wSum;
   const seFE = Math.sqrt(1 / wSum);

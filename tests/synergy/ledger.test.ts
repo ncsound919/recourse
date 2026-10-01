@@ -1,10 +1,12 @@
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it, expect, beforeAll } from 'vitest';
 import fs from 'node:fs';
 import { recordSynergyScan } from '../../src/lib/synergy/ledger.js';
 import { readLedger, verifyLedgerChain } from '../../src/lib/trendLedger.js';
 import type { SynergyMap } from '../../src/lib/synergy/types.js';
 
-const TEST_LEDGER = `${process.cwd()}\\data\\test-synergy-ledger.jsonl`;
+const TEST_LEDGER = join(tmpdir(), `recourse-test-synergy-ledger-${process.pid}.jsonl`);
 
 beforeAll(() => {
   process.env.TREND_LEDGER_FILE = TEST_LEDGER;

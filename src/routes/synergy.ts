@@ -13,11 +13,11 @@ import { discover } from '../lib/synergy/closedDiscovery.js';
 import { extractMethods, type RawMethod } from '../lib/synergy/methodIndex.js';
 import { extractProblems } from '../lib/synergy/problemIndex.js';
 import { recordSynergyScan } from '../lib/synergy/ledger.js';
-import { resolveTransfer, admit, applyTransferResult, recordTransferResult } from '../lib/synergy/resolver.js';
+import { resolveWithLadder, admit, applyTransferResult, recordTransferResult, acceptanceTestIsNonTrivial } from '../lib/synergy/resolver.js';
 import { requireMutationAuth } from '../lib/mutationAuth.js';
 import { readFleetDogfood } from '../lib/fleetDogfood.js';
 import type { RecourseProblem } from '../lib/problemArchive.js';
-import type { TransferCandidate, TransferResult } from '../lib/synergy/types.js';
+import type { TransferCandidate } from '../lib/synergy/types.js';
 
 const RAW_METHOD_SOURCES = new Set(['tool', 'brick', 'translation']);
 
@@ -155,25 +155,33 @@ export function createSynergyRouter(): Router {
     }
   });
 
-  router.post('/synergy/resolve', (req, res) => {
+  router.post('/synergy/resolve', async (req, res) => {
     if (!requireMutationAuth(req, res)) return;
-    const body = (req.body ?? {}) as { candidate?: unknown; acceptanceTest?: unknown; sourceCode?: unknown; adaptedBy?: unknown };
+    const body = (req.body ?? {}) as { candidate?: unknown; acceptanceTest?: unknown; sourceCode?: unknown };
     const candidate = body.candidate;
     if (!isTransferCandidate(candidate) || typeof body.acceptanceTest !== 'string' || typeof body.sourceCode !== 'string') {
       return res.status(400).json({ success: false, error: 'candidate (id/fromDomain/toDomain/score), acceptanceTest, sourceCode required' });
     }
-    const adaptedBy = body.adaptedBy as TransferResult['adaptedBy'] | undefined;
-    if (adaptedBy !== undefined && adaptedBy !== 'none' && adaptedBy !== 'operator_ladder' && adaptedBy !== 'model') {
-      return res.status(400).json({ success: false, error: 'adaptedBy must be none|operator_ladder|model' });
+    // Honest gate: a test that only asserts a tautology (or nothing at all) is
+    // not admissible evidence — it would pass against any implementation.
+    if (!acceptanceTestIsNonTrivial(body.acceptanceTest)) {
+      return res.status(400).json({ success: false, error: 'acceptanceTest must contain at least one non-trivial assertion' });
     }
     try {
-      const result = resolveTransfer(candidate, body.acceptanceTest, body.sourceCode, adaptedBy ?? 'operator_ladder');
-      const decision = admit(result);
+      // Operator ladder (CBR): try deterministic adaptations of the submitted
+      // source in order; the first admissible pass wins. No model drafter here —
+      // execution decides, never the caller. This is what gives the result its
+      // honest adaptedBy provenance (operator_ladder, not a caller claim).
+      const resolution = await resolveWithLadder(candidate, body.acceptanceTest, { sourceCode: body.sourceCode });
+      const result = resolution.result;
+      const decision = result
+        ? admit(result)
+        : { candidateId: candidate.id, status: 'tested' as const, admitted: false, reason: 'no adaptation produced a result' };
       const map = readSynergyMap();
-      const next = map ? applyTransferResult(map, result) : null;
+      const next = result && map ? applyTransferResult(map, result) : null;
       if (next) writeSynergyMap(next);
-      recordTransferResult(result, next?.manifestHash ?? candidate.id);
-      res.json({ success: true, result, decision, map: next });
+      if (result) recordTransferResult(result, next?.manifestHash ?? candidate.id);
+      res.json({ success: true, result, decision, operator: resolution.operator, attempts: resolution.attempts, map: next });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'synergy resolve failed';
       res.status(500).json({ success: false, error: message });

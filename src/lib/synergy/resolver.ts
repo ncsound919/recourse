@@ -11,6 +11,22 @@ import type {
   TransferCandidate, TransferResult, AdmissionDecision, SynergyMap, SynergyEdge,
 } from './types.js';
 
+/**
+ * Non-triviality gate for acceptance tests. A test that is empty, never asserts,
+ * or only ever asserts a tautology (`assert true;`) demonstrates nothing — it
+ * would pass against ANY implementation, so it is not admissible evidence.
+ * Returns true only when at least one substantive assertion remains after the
+ * trivial always-true forms are stripped.
+ */
+export function acceptanceTestIsNonTrivial(test: string): boolean {
+  if (!test || !test.trim()) return false;
+  if (!/\bassert\b/.test(test)) return false;
+  const substantive = test
+    .replace(/assert\s*\(\s*true\s*\)\s*;?/gi, '')
+    .replace(/assert\s+true\s*;?/gi, '');
+  return /\bassert\b/.test(substantive);
+}
+
 /** Compose a deterministic, timing-free detail string from a verifier result. */
 function verifierDetail(res: {
   summary?: string;
@@ -35,6 +51,9 @@ export function resolveTransfer(
   let detail = '';
   try {
     if (!acceptanceTest.trim()) throw new Error('acceptance test cannot be empty');
+    if (!acceptanceTestIsNonTrivial(acceptanceTest)) {
+      throw new Error('acceptance test must contain at least one non-trivial assertion');
+    }
     const res = verifyCodingCode(sourceCode, acceptanceTest);
     passed = Boolean(res.passed);
     detail = verifierDetail(res) || (passed ? 'suite passed' : 'suite failed');

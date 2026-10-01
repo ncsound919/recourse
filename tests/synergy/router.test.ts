@@ -1,3 +1,5 @@
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it, expect, beforeAll } from 'vitest';
 import fs from 'node:fs';
 import { createSynergyRouter } from '../../src/routes/synergy.js';
@@ -7,8 +9,8 @@ import type { RawMethod } from '../../src/lib/synergy/methodIndex.js';
 import type { RecourseProblem } from '../../src/lib/problemArchive.js';
 import type { TransferCandidate } from '../../src/lib/synergy/types.js';
 
-const TEST_FILE = `${process.cwd()}\\data\\test-synergy-router-map.json`;
-const TEST_LEDGER = `${process.cwd()}\\data\\test-synergy-router-ledger.jsonl`;
+const TEST_FILE = join(tmpdir(), `recourse-test-synergy-router-map-${process.pid}.json`);
+const TEST_LEDGER = join(tmpdir(), `recourse-test-synergy-router-ledger-${process.pid}.jsonl`);
 
 beforeAll(() => {
   process.env.SYNERGY_MAP_FILE = TEST_FILE;
@@ -138,6 +140,27 @@ describe('synergy router', () => {
       await handler('/synergy/resolve')({ body } as any, res);
       expect(res.code).toBe(400);
       expect(res.payload.success).toBe(false);
+    }
+  });
+
+  it('rejects a trivial acceptance test with a structured 400', async () => {
+    const good: TransferCandidate = {
+      id: 'tc_trivial', methodId: 'm', problemId: 'p', fromDomain: 'a', toDomain: 'b',
+      bridges: [], score: 0.5, support: 1, prediction: 'pass', falsification: 'f', filters: [], engineVersion: '0.1.0',
+    };
+    const cases: unknown[] = [
+      { candidate: good, acceptanceTest: 'assert true;', sourceCode: 'export class Mod { static f() { return 1; } }' },
+      { candidate: good, acceptanceTest: 'const a = 1;', sourceCode: 'export class Mod { static f() { return 1; } }' },
+    ];
+    for (const body of cases) {
+      const res: any = {
+        status: (c: number) => { res.code = c; return res; },
+        json: (v: unknown) => { res.payload = v; return res; },
+      };
+      await handler('/synergy/resolve')({ body } as any, res);
+      expect(res.code).toBe(400);
+      expect(res.payload.success).toBe(false);
+      expect(res.payload.error).toContain('non-trivial');
     }
   });
 

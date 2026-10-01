@@ -85,6 +85,32 @@ export interface TransferCandidate {
   falsification: string;
   filters: FilterDecision[];
   engineVersion: string;
+  /** Directional statistics evidence (Granger, transfer entropy) */
+  directionalStats?: DirectionalStats;
+}
+
+export interface DirectionalStats {
+  granger?: {
+    ok: boolean;
+    bestLag: number;
+    fStat: number;
+    p: number;
+    significant: boolean;
+    n: number;
+    reason?: string;
+  };
+  transferEntropy?: {
+    ok: boolean;
+    bits: number;
+    n: number;
+    bins: number;
+    history: number;
+    reason?: string;
+  };
+  stationarity?: {
+    transforms: string[];
+    wasNonStationary: boolean;
+  };
 }
 
 export interface SynergyEdge {

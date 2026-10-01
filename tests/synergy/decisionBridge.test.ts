@@ -1,4 +1,6 @@
 // tests/synergy/decisionBridge.test.ts
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import fs from 'node:fs';
 import { decisionSynergyInputs } from '../../src/lib/synergy/decisionBridge.js';
@@ -6,7 +8,7 @@ import { buildSynergyMap } from '../../src/lib/synergy/synergyMap.js';
 import { writeSynergyMap } from '../../src/lib/synergy/store.js';
 import type { TransferCandidate } from '../../src/lib/synergy/types.js';
 
-const TEST_FILE = `${process.cwd()}\\data\\test-decision-bridge-map.json`;
+const TEST_FILE = join(tmpdir(), `recourse-test-decision-bridge-map-${process.pid}.json`);
 
 function candidate(id: string, from: string, to: string, score: number): TransferCandidate {
   return {
@@ -79,5 +81,19 @@ describe('decision bridge', () => {
     const out = decisionSynergyInputs();
     expect(out.source).toBe('map');
     expect(out.crossDomainSynergyByDomain).toEqual({});
+  });
+
+  it('passes through native ToolDomain keys emitted by the self-feeding job', () => {
+    // The self-feeding scan emits the native ToolDomain vocabulary directly;
+    // the bridge must not drop those for lacking a sector binding.
+    const map = buildSynergyMap(
+      [candidate('tc_q', 'quantum_sim', 'neuro_symbolic', 0.7)],
+      { generatedAtRun: 'job:synergy' },
+    );
+    writeSynergyMap(map);
+    const out = decisionSynergyInputs();
+    expect(out.source).toBe('map');
+    expect(out.crossDomainSynergyByDomain.quantum_sim).toBeGreaterThan(0);
+    expect(out.crossDomainSynergyByDomain.neuro_symbolic).toBeGreaterThan(0);
   });
 });

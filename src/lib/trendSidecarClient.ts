@@ -154,42 +154,47 @@ export async function trendDecompose(series: TrendSeriesInput, period = 7, base?
   const call = await callTrend<DecomposeResult>('/trend/decompose', { series, period }, base ?? TREND_SIDECAR_DEFAULT_URL, timeoutMs);
   if (!call.ok || !call.data) return { ok: false, error: call.error, latencyMs: call.latencyMs };
   if (call.data.ok === false) return { ok: false, error: call.data.error, latencyMs: call.latencyMs };
-  return { ok: true, ...call.data, latencyMs: call.latencyMs };
+  return { ...call.data, ok: true, latencyMs: call.latencyMs };
 }
 
 export async function trendBurst(series: TrendSeriesInput, gamma = 2.0, persistence = 2, base?: string, timeoutMs = 10000): Promise<BurstResult> {
   const call = await callTrend<BurstResult>('/trend/burst', { series, gamma, persistence }, base ?? TREND_SIDECAR_DEFAULT_URL, timeoutMs);
   if (!call.ok || !call.data) return { ok: false, error: call.error, latencyMs: call.latencyMs };
-  return { ok: true, ...call.data, latencyMs: call.latencyMs };
+  if (call.data.ok === false) return { ok: false, error: call.data.error, latencyMs: call.latencyMs };
+  return { ...call.data, ok: true, latencyMs: call.latencyMs };
 }
 
 export async function trendChangepoint(series: TrendSeriesInput, penalty = 5.0, minSegment = 3, base?: string, timeoutMs = 10000): Promise<ChangepointResult> {
   const call = await callTrend<ChangepointResult>('/trend/changepoint', { series, penalty, min_segment: minSegment }, base ?? TREND_SIDECAR_DEFAULT_URL, timeoutMs);
   if (!call.ok || !call.data) return { ok: false, error: call.error, latencyMs: call.latencyMs };
   if (call.data.ok === false) return { ok: false, error: call.data.error, latencyMs: call.latencyMs };
-  return { ok: true, ...call.data, latencyMs: call.latencyMs };
+  return { ...call.data, ok: true, latencyMs: call.latencyMs };
 }
 
 export async function trendAnomaly(series: TrendSeriesInput, period = 7, base?: string, timeoutMs = 10000): Promise<AnomalyResult> {
   const call = await callTrend<AnomalyResult>('/trend/anomaly', { series, period }, base ?? TREND_SIDECAR_DEFAULT_URL, timeoutMs);
   if (!call.ok || !call.data) return { ok: false, error: call.error, latencyMs: call.latencyMs };
-  return { ok: true, ...call.data, latencyMs: call.latencyMs };
+  if (call.data.ok === false) return { ok: false, error: call.data.error, latencyMs: call.latencyMs };
+  return { ...call.data, ok: true, latencyMs: call.latencyMs };
 }
 
 export async function trendCrossCorr(a: TrendSeriesInput, b: TrendSeriesInput, maxLag = 7, base?: string, timeoutMs = 10000): Promise<CrossCorrResult> {
   const call = await callTrend<CrossCorrResult>('/trend/crosscorr', { a, b, max_lag: maxLag }, base ?? TREND_SIDECAR_DEFAULT_URL, timeoutMs);
   if (!call.ok || !call.data) return { ok: false, error: call.error, latencyMs: call.latencyMs };
-  return { ok: true, ...call.data, latencyMs: call.latencyMs };
+  if (call.data.ok === false) return { ok: false, error: call.data.error, latencyMs: call.latencyMs };
+  return { ...call.data, ok: true, latencyMs: call.latencyMs };
 }
 
 export async function trendMomentum(series: TrendSeriesInput, base?: string, timeoutMs = 10000): Promise<MomentumResult> {
   const call = await callTrend<MomentumResult>('/trend/momentum', series, base ?? TREND_SIDECAR_DEFAULT_URL, timeoutMs);
   if (!call.ok || !call.data) return { ok: false, error: call.error, latencyMs: call.latencyMs };
-  return { ok: true, ...call.data, latencyMs: call.latencyMs };
+  if (call.data.ok === false) return { ok: false, error: call.data.error, latencyMs: call.latencyMs };
+  return { ...call.data, ok: true, latencyMs: call.latencyMs };
 }
 
 export async function trendScan(series: TrendSeriesInput[], base?: string, timeoutMs = 20000): Promise<ScanResult> {
   const call = await callTrend<ScanResult>('/trend/scan', { series }, base ?? TREND_SIDECAR_DEFAULT_URL, timeoutMs);
   if (!call.ok || !call.data) return { ok: false, error: call.error, latencyMs: call.latencyMs };
-  return { ok: true, ...call.data, latencyMs: call.latencyMs };
+  if (call.data.ok === false) return { ok: false, error: call.data.error, latencyMs: call.latencyMs };
+  return { ...call.data, ok: true, latencyMs: call.latencyMs };
 }

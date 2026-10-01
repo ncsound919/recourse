@@ -1,13 +1,15 @@
 // src/lib/synergy/decisionBridge.ts
 /**
  * Bridges the persisted synergy map into the deterministic growth decision
- * engine. The engine scores per-`ToolDomain`; the map scores per-sector. This
- * module translates sector scores onto ToolDomains (a sector may map to several)
- * and merges by max, then reports honestly whether a real map backed the input.
+ * engine. The engine scores per-`ToolDomain`; the map may be keyed either by
+ * sector (caller-supplied scans) or by native ToolDomain (the self-feeding job).
+ * This module translates sector scores onto ToolDomains (a sector may map to
+ * several), passes native ToolDomain keys straight through, and merges by max,
+ * then reports honestly whether a real map backed the input.
  *
  * Fail-soft: a missing, unreadable, or corrupt map yields `source: 'none'` and
  * an empty record — the engine then computes an honest `0`, never a fabricated
- * constant. Sectors absent from the registry are skipped, not invented.
+ * constant. Keys with no ToolDomain mapping are skipped, not invented.
  */
 import type { SynergyMap } from './types.js';
 import { readSynergyMap } from './store.js';
@@ -20,6 +22,12 @@ export interface DecisionSynergyInputs {
   manifestHash?: string;
 }
 
+// The native ToolDomain vocabulary. The self-feeding scan emits these directly
+// (no sector round-trip), so the bridge must recognise them as already-mapped.
+const TOOL_DOMAINS = new Set<string>([
+  'coding', 'math', 'biotech', 'systemic', 'neuro_symbolic', 'cyber_defense', 'quantum_sim',
+]);
+
 export function decisionSynergyInputs(): DecisionSynergyInputs {
   let map: SynergyMap | null;
   try {
@@ -31,11 +39,16 @@ export function decisionSynergyInputs(): DecisionSynergyInputs {
 
   const sectorScores = domainScoresFromMap(map);
   const byToolDomain: Record<string, number> = {};
-  for (const [sector, score] of Object.entries(sectorScores)) {
-    const spec = getDomain(sector);
-    if (!spec) continue;
-    for (const td of spec.toolDomains) {
-      byToolDomain[td] = Math.max(byToolDomain[td] ?? 0, score);
+  for (const [domain, score] of Object.entries(sectorScores)) {
+    const spec = getDomain(domain);
+    if (spec) {
+      for (const td of spec.toolDomains) {
+        byToolDomain[td] = Math.max(byToolDomain[td] ?? 0, score);
+      }
+    } else if (TOOL_DOMAINS.has(domain)) {
+      // Already in the native ToolDomain vocabulary (self-feeding job) — pass
+      // through directly rather than dropping it for lacking a sector binding.
+      byToolDomain[domain] = Math.max(byToolDomain[domain] ?? 0, score);
     }
   }
 
