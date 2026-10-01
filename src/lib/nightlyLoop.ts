@@ -17,8 +17,8 @@ import path from 'node:path';
 import { readJsonFile, writeJsonFile } from './durableJson.js';
 import { renderUpgradeReport, type Snapshot } from './upgradeReport.js';
 
-export type NightlyActionStep = 'dream' | 'openended' | 'forge' | 'benchmark';
-export const NIGHTLY_ACTION_STEPS: readonly NightlyActionStep[] = ['dream', 'openended', 'forge', 'benchmark'];
+export type NightlyActionStep = 'dream' | 'openended' | 'forge' | 'benchmark' | 'remote';
+export const NIGHTLY_ACTION_STEPS: readonly NightlyActionStep[] = ['dream', 'openended', 'forge', 'benchmark', 'remote'];
 
 export interface NightlyStepResult {
   id: NightlyActionStep | 'snapshot' | 'report';

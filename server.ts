@@ -102,6 +102,14 @@ import { lintSource } from './src/lib/lintGate.js';
 import type { LintReport } from './src/lib/lintGate.js';
 import { generationTargets, generationPlanDigest, summarizeBeliefsByDomain } from './src/lib/learnerGenerationPlan.js';
 import { runSleepComputeUnit, takeReadySleepArtifact } from './src/lib/sleepCompute.js';
+import { drainRemoteTasks, lastFinishedRemoteTask, readRemoteQueue, remoteComputeEnabled } from './src/lib/remoteCompute.js';
+import {
+  enqueueForgePrecompute,
+  enqueueLearnerStressEval,
+  enqueueRepairDiagnose,
+  registerRemoteComputeAppliers,
+} from './src/lib/remoteComputeIntegrations.js';
+import { learnerStressEvalScript, stuckDiagnosisScript } from './src/lib/remoteRepairScripts.js';
 import { recordExperience, experienceHint } from './src/lib/experience.js';
 import { planAuditDepth } from './src/autopilot/auditDepth.js';
 import {
@@ -330,6 +338,7 @@ import { createSubagentsRouter } from './src/routes/subagents.js';
 import { createIntelRouter } from './src/routes/intel.js';
 import { createReporterRouter } from './src/routes/reporter.js';
 import { createSelfhostedRouter } from './src/routes/selfhosted.js';
+import { createComputeRouter } from './src/routes/compute.js';
 import { createComposeRouter } from './src/routes/compose.js';
 import { createRatingRouter } from './src/routes/rating.js';
 import { RatingStore, defaultRatingLedger } from './src/lib/rating/store.js';
@@ -650,6 +659,31 @@ async function runNightlyPass(force: boolean) {
         const run = runBenchmarkCycle();
         return { ok: true, detail: `benchmark ${run.solved}/${run.total}`, data: { solved: run.solved, total: run.total } };
       },
+      // Remote recursive-learning acceleration: bootstrap the learner's
+      // calibration over its real forecast window on a free CPU/GPU box. The
+      // scalar result is applied by the drain job as `learner.runEpisode(score)`.
+      remote: async () => {
+        if (!remoteComputeEnabled()) return { ok: true, detail: 'remote compute not configured (learner stress eval skipped)' };
+        try {
+          const state = await learner.status();
+          const script = learnerStressEvalScript(state.forecastWindow ?? [], { bootstrap: 800 });
+          if (!script) return { ok: true, detail: `not enough forecast history for remote stress eval (${(state.forecastWindow ?? []).length} forecasts)` };
+          const active = readRemoteQueue().tasks.some(
+            (t) => t.kind === 'learner_stress_eval' && (t.status === 'queued' || t.status === 'running'),
+          );
+          if (active) return { ok: true, detail: 'remote learner stress eval already queued' };
+          const res = await enqueueLearnerStressEval(script.script, script.requirements, { hardware: { type: 'cpu' } });
+          return {
+            ok: true,
+            detail: res.queued
+              ? `queued remote learner stress eval (${(state.forecastWindow ?? []).length} forecasts)`
+              : `remote learner stress eval refused: ${res.reason}`,
+            data: res.queued ? { taskId: res.task?.id } : undefined,
+          };
+        } catch (err: any) {
+          return { ok: false, detail: `remote learner stress eval failed: ${err?.message || String(err)}` };
+        }
+      },
     },
   });
 }
@@ -880,7 +914,7 @@ const dreamEngine = new DreamingEngine(
           ...forgeLedger.filter((l) => l.status === 'materialized').map((l) => l.name),
         ]);
         const pending = specs.filter((s) => !have.has(s.name)).slice(0, SLEEP_COMPUTE_LIMIT);
-        return await runSleepComputeUnit({
+        const local = await runSleepComputeUnit({
           specs: pending.map((s) => ({
             name: s.name,
             domain: s.domain,
@@ -903,6 +937,38 @@ const dreamEngine = new DreamingEngine(
           verify: (source, suite) => executeTestSuite(source, suite),
           limit: SLEEP_COMPUTE_LIMIT,
         });
+
+        // Remote acceleration: when a free GPU platform is configured, also
+        // queue batch candidate generation for the specs the local model did
+        // NOT ready this cycle. The drain job stores results as sleep artifacts
+        // AFTER local re-verification, so the forge can consume them next cycle
+        // with zero model calls. Guarded so one active batch at a time.
+        if (remoteComputeEnabled()) {
+          const queued = readRemoteQueue().tasks.some(
+            (t) => t.kind === 'forge_precompute' && (t.status === 'queued' || t.status === 'running'),
+          );
+          // Back off for 6h after a failed batch: a misconfigured remote forge
+          // env would otherwise re-enqueue (and burn Kaggle quota) every cycle.
+          const lastForge = lastFinishedRemoteTask('forge_precompute');
+          const recentlyFailed = lastForge?.status === 'failed' && Date.now() - lastForge.updatedAt < 6 * 60 * 60 * 1000;
+          if (!queued && !recentlyFailed) {
+            const notReady = pending
+              .filter((s) => !takeReadySleepArtifact(s.name) && (s.refSuite ?? '').trim().length > 0)
+              .slice(0, SLEEP_COMPUTE_LIMIT);
+            if (notReady.length) {
+              await enqueueForgePrecompute(
+                notReady.map((s) => ({
+                  name: s.name,
+                  domain: s.domain,
+                  prompt: s.prompt ?? s.title,
+                  refSuite: s.refSuite ?? '',
+                })),
+                { count: 2, hardware: { type: 'gpu' } },
+              ).catch(() => {});
+            }
+          }
+        }
+        return local;
       } catch (err) {
         return { attempted: 0, ready: 0, note: `sleep compute unavailable: ${err instanceof Error ? err.message : String(err)}` };
       }
@@ -1101,6 +1167,55 @@ const SELF_REPAIR_BACKOFF_MS = Math.max(30_000, Number(process.env.RECOURSE_SELF
  *  the harness only when enabled. Dispatch + brain-ask always run when stuck. */
 const SELF_REPAIR_APPLY = process.env.RECOURSE_SELF_REPAIR_APPLY !== '0';
 const SELF_REPAIR_BAND = Math.max(50, Number(process.env.RECOURSE_SELF_REPAIR_BAND) || 50);
+
+// ---------------------------------------------------------------------------
+// Remote-compute integration (Kaggle / Hugging Face free tiers). Finished
+// remote jobs are folded back into the live loops by these appliers:
+//   - forge_precompute   -> sleep-time artifacts re-verified LOCALLY (the forge
+//                           then consumes them with zero model calls).
+//   - train_small_model  -> durable small-model metrics registry.
+//   - learner_stress_eval-> the recursive learner's externalScore.
+//   - repair_diagnose    -> surfaced to the next stuck-repair pass.
+// Default behavior is unchanged when no remote platform is configured.
+// ---------------------------------------------------------------------------
+export interface RemoteRepairDiagnosis {
+  at: number;
+  taskId: string;
+  platform: string;
+  issueId: string;
+  detail?: string;
+  data: Record<string, unknown>;
+}
+let remoteRepairDiagnoses: RemoteRepairDiagnosis[] = [];
+function consumeRemoteRepairDiagnoses(): RemoteRepairDiagnosis[] {
+  const out = remoteRepairDiagnoses;
+  remoteRepairDiagnoses = [];
+  return out;
+}
+
+registerRemoteComputeAppliers({
+  appendProvenance: (type, data) => appendProvenanceEvent(type as any, data),
+  applyExternalScore: async (score) => {
+    try {
+      await learner.runEpisode(score);
+    } catch (err) {
+      recordFailure('remote-learner-score', err);
+    }
+  },
+  applyRepairDiagnosis: async (task) => {
+    const data = (task.result?.data ?? {}) as Record<string, unknown>;
+    const issue = (task.payload?.issue ?? {}) as { id?: string };
+    remoteRepairDiagnoses.push({
+      at: Date.now(),
+      taskId: task.id,
+      platform: task.platform,
+      issueId: String(issue.id ?? data.issueId ?? 'unknown'),
+      detail: typeof data.diagnosis === 'string' ? data.diagnosis : undefined,
+      data,
+    });
+    if (remoteRepairDiagnoses.length > 100) remoteRepairDiagnoses.splice(0, remoteRepairDiagnoses.length - 100);
+  },
+});
 
 // ---------------------------------------------------------------------------
 // Ghidra learning sink. A real Ghidra analysis (functions/imports/strings +
@@ -3608,6 +3723,15 @@ const selfhostedRouter = createSelfhostedRouter({
 app.use('/api/recourse', selfhostedRouter.router);
 // Boot auto-supervision after boot self-host verification settles.
 setTimeout(() => { try { selfhostedRouter.ensureLoops(); } catch { /* non-fatal */ } }, 400);
+
+// =========================================================================
+// FREE-TIER COMPUTE PLATFORMS (Kaggle, Hugging Face, E2B, Local)
+// =========================================================================
+const computeRouter = createComputeRouter({
+  appendProvenanceEvent: (type, data) => appendProvenanceEvent(type as any, data),
+  generation: () => status.generation,
+});
+app.use('/api/recourse', computeRouter);
 
 // ---------------------------------------------------------------------------
 // MODEL-NATIVE TOOL CALLING (OpenAI-compatible `tools` via the local Spark model
@@ -7203,6 +7327,41 @@ async function collectStuckSignals(): Promise<StuckSignal[]> {
   return signals;
 }
 
+/**
+ * Build the real numeric series a remote diagnostic will analyze for a stuck
+ * issue. Returns null when no measured series exists — in which case NO remote
+ * diagnosis is enqueued (a remote worker must never be asked to guess).
+ */
+function remoteDiagnosisContextFor(issue: StuckIssue): { series: number[]; label: string; note?: string } | null {
+  try {
+    if (issue.id === 'goal:math-no-solve') {
+      const cycles = recentMathCycles(24);
+      return { series: cycles.map((c) => Number(c.attemptScore) || 0), label: 'math attempt score', note: 'math conductor solve goal' };
+    }
+    if (issue.id === 'goal:science-novelty') {
+      const cycles = recentCycles(24);
+      return { series: cycles.map((c) => Number((c as any).novelCount) || 0), label: 'science novel findings per cycle', note: 'science discovery goal' };
+    }
+    if (issue.id === 'verifier:pass-rate') {
+      return { series: registry.map((t) => realToolRewardFor(t)), label: 'per-tool verifier reward', note: 'registry verifier pass-rate' };
+    }
+    if (issue.id === 'failure:spike') {
+      const now = Date.now();
+      const buckets = Array.from({ length: 6 }, () => 0);
+      for (const f of failureLedger) {
+        const age = now - f.at;
+        if (age < 0 || age > 30 * 60 * 1000) continue;
+        const idx = Math.min(5, Math.floor(age / (5 * 60 * 1000)));
+        buckets[5 - idx] += 1;
+      }
+      return { series: buckets, label: 'failures per 5-min bucket (last 30m)', note: 'failure-ledger spike' };
+    }
+  } catch {
+    /* context is best-effort; absence means no remote diagnosis */
+  }
+  return null;
+}
+
 async function escalateStuckIssue(issue: StuckIssue, repoUrl: string | null, repo: string): Promise<StuckRepairAction> {
   const action: StuckRepairAction = {
     issueId: issue.id, at: Date.now(),
@@ -7371,6 +7530,39 @@ async function runStuckRepairPass(force = false): Promise<Record<string, unknown
       issue.lastEscalatedAt = now;
       issue.escalationCount += 1;
       actions.push(action);
+
+      // Remote diagnosis (free-tier compute): when a real measured series
+      // exists for this issue and a remote platform is configured, enqueue a
+      // statistical change-point/trend analysis. The drain job applies the
+      // structured verdict to the next pass via consumeRemoteRepairDiagnoses().
+      if (remoteComputeEnabled()) {
+        const ctx = remoteDiagnosisContextFor(issue);
+        if (ctx) {
+          const script = stuckDiagnosisScript({ id: issue.id, name: issue.name, detail: issue.detail }, ctx);
+          if (script) {
+            const alreadyQueued = readRemoteQueue().tasks.some(
+              (t) =>
+                t.kind === 'repair_diagnose' &&
+                (t.status === 'queued' || t.status === 'running') &&
+                (t.payload?.issue as { id?: string } | undefined)?.id === issue.id,
+            );
+            // Don't re-enqueue a diagnosis for this issue if the last one failed
+            // within the escalation backoff (avoids a failing job every pass).
+            const lastDiag = lastFinishedRemoteTask(
+              'repair_diagnose',
+              (t) => (t.payload?.issue as { id?: string } | undefined)?.id === issue.id,
+            );
+            const recentlyFailed = lastDiag?.status === 'failed' && Date.now() - lastDiag.updatedAt < SELF_REPAIR_BACKOFF_MS;
+            if (!alreadyQueued && !recentlyFailed) {
+              await enqueueRepairDiagnose(
+                script.script,
+                { id: issue.id, name: issue.name, detail: issue.detail },
+                { hardware: { type: 'cpu' } },
+              ).catch(() => {});
+            }
+          }
+        }
+      }
       stuckRepairLedger.push(action);
       if (stuckRepairLedger.length > 200) stuckRepairLedger.splice(0, stuckRepairLedger.length - 200);
     }
@@ -7386,6 +7578,9 @@ async function runStuckRepairPass(force = false): Promise<Record<string, unknown
       applyEnabled: SELF_REPAIR_APPLY,
       backoffMs: SELF_REPAIR_BACKOFF_MS,
       band: SELF_REPAIR_BAND,
+      // Remote diagnoses produced since the last pass (Kaggle/HF). Empty when
+      // no remote platform is configured or nothing finished.
+      remoteDiagnoses: consumeRemoteRepairDiagnoses(),
     };
   } finally {
     selfRepairBusy = false;
@@ -7627,10 +7822,18 @@ async function startServer() {
   }
 
   const LISTEN_HOST = resolveListenHost();
-  app.listen(PORT, LISTEN_HOST, () => {
+  const server = app.listen(PORT, LISTEN_HOST, () => {
     console.log(`Recourse server running on http://${LISTEN_HOST}:${PORT}` +
       (LISTEN_HOST === '127.0.0.1' ? ' (loopback only; set RECOURSE_HOST=0.0.0.0 to expose)' : ''));
     startStateHygiene();
+  });
+  // Surface a bind failure instead of hanging silently with the process alive
+  // and no port bound (EADDRINUSE / EACCES). Without this listener the 'error'
+  // event would become an uncaughtException; with a bare swallow it would hang.
+  server.on('error', (err: any) => {
+    console.error(`[Recourse] HTTP listen failed on ${LISTEN_HOST}:${PORT}: ${err?.code || ''} ${err?.message || err}`);
+    logCrash('listen', err);
+    gracefulExit(1);
   });
   console.log(`[boot] t+${Math.round(process.uptime())}s listen() called on ${PORT}`);
 }
@@ -7795,6 +7998,27 @@ function registerAllSchedulerJobs(): void {
       if (!devAutopilotOn) return { skipped: 'autopilot disabled' };
       const r = await runStuckRepairPass(false);
       return { ok: r.ok, stuck: (r.snapshot as any)?.stuckCount ?? 0, escalated: r.escalated ?? 0, signals: r.signals ?? 0 };
+    },
+  });
+
+  // Remote-compute queue drain. Polls queued Kaggle/HF jobs and folds finished
+  // results back into the forge (sleep artifacts), the learner (externalScore),
+  // and self-repair (diagnoses). No-op when no remote platform is configured.
+  register({
+    id: 'remote-compute',
+    name: 'Remote Compute Drain (Kaggle / Hugging Face)',
+    group: 'autonomy',
+    cadenceMs: Math.max(60_000, Number(process.env.REMOTE_COMPUTE_MS) || 2 * 60 * 1000),
+    enabledByDefault: true,
+    run: async () => {
+      if (!remoteComputeEnabled()) return { skipped: 'no remote compute platform configured' };
+      const summary = await drainRemoteTasks({}, 5);
+      return {
+        polled: summary.polled,
+        completed: summary.completed.length,
+        failed: summary.failed.length,
+        applied: summary.applied,
+      };
     },
   });
 

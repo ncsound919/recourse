@@ -30,6 +30,12 @@ const external = [
   'react-dom',
   'vite',
   'node-cron',
+  // esbuild's SYNCHRONOUS API (transformSync, used by the sandbox verifier at
+  // boot) spawns a worker thread and blocks the main thread in Atomics.wait.
+  // Its JS API cannot be bundled: the bundled copy's worker never reports back,
+  // so transformSync deadlocks the event loop and app.listen() never binds.
+  // It must resolve its own binary via a relative path from the real package.
+  'esbuild',
   // Pure-JS + WASM; must resolve its own .wasm assets at runtime, so it is
   // loaded dynamically and kept external rather than bundled.
   'quickjs-emscripten',

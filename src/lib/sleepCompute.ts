@@ -139,6 +139,54 @@ export async function runSleepComputeUnit(input: {
   };
 }
 
+/**
+ * Record artifacts that were generated OFFLINE elsewhere (e.g. a remote
+ * compute-platform batch) but verified HERE against the reference suite. The
+ * verification runs locally/in-sandbox so a remote worker can never mark its own
+ * homework; an unverified draft is stored but is never served as ready.
+ *
+ * Honest: each entry is only `verified:true` when the injected real verifier
+ * passes its reference suite.
+ */
+export function recordSleepArtifacts(
+  entries: Array<SleepTask & { source: string }>,
+  verify: (source: string, suite: string) => { passed: boolean },
+): { recorded: number; ready: number } {
+  const doc = readSleepStore();
+  let ready = 0;
+  let recorded = 0;
+  const now = Date.now();
+  for (const entry of entries) {
+    if (!entry?.name || typeof entry.source !== 'string' || !entry.source.trim()) continue;
+    recorded += 1;
+    let verified = false;
+    try {
+      verified = verify(entry.source, entry.refSuite).passed;
+    } catch {
+      verified = false;
+    }
+    const artifact: SleepArtifact = {
+      name: entry.name,
+      domain: entry.domain,
+      prompt: entry.prompt,
+      refSuite: entry.refSuite,
+      source: entry.source,
+      verified,
+      createdAt: now,
+    };
+    doc.artifacts = doc.artifacts.filter((a) => a.name !== entry.name);
+    doc.artifacts.push(artifact);
+    if (verified) ready += 1;
+  }
+  doc.artifacts = doc.artifacts
+    .sort((a, b) => Number(b.verified) - Number(a.verified) || b.createdAt - a.createdAt)
+    .slice(0, MAX_ARTIFACTS);
+  doc.updatedAt = now;
+  doc.ready = doc.artifacts.filter((a) => a.verified).length;
+  writeSleepStore(doc);
+  return { recorded, ready };
+}
+
 /** A verified artifact ready to be consumed by the forge, or null. */
 export function takeReadySleepArtifact(name: string, domain?: string): SleepArtifact | null {
   const doc = readSleepStore();
