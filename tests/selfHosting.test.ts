@@ -74,14 +74,14 @@ describe('template plugin API', () => {
   });
 
   it('rejects malformed plugins', () => {
-    expect(() => registerComponentTemplatePlugin({} as TemplatePlugin)).toThrow(/id/);
+    expect(() => registerComponentTemplatePlugin({} as unknown as TemplatePlugin)).toThrow(/id/);
     expect(() =>
       registerComponentTemplatePlugin({
         id: 'tpl_bad_no_synth',
         name: 'x',
         domain: 'coding',
         params: []
-      } as TemplatePlugin)
+      } as unknown as TemplatePlugin)
     ).toThrow(/synthesizer/);
   });
 });
@@ -252,6 +252,31 @@ describe('self-hosting lifecycle (LRU)', () => {
     expect(removed.success).toBe(true);
     expect(fs.existsSync(path.join(root, 'tools/dogfood_lru.mjs'))).toBe(false);
     expect(listSelfHostedEntries(root).length).toBe(0);
+  });
+
+  it('refuses green verification when the stored suite has zero assertions', async () => {
+    const root = freshRoot();
+    const { tpl, result } = buildTool('tpl_lru_cache', 'ZeroAssertLru', { capacity: 3 });
+    const write = writeSelfHostedTool(
+      {
+        name: 'zero_assert_lru',
+        templateId: 'tpl_lru_cache',
+        domain: 'coding',
+        entrypointName: result.entrypointName,
+        params: { capacity: 3 },
+        sourceCode: result.synthesizedCode,
+        // No acceptance suite: a green run would prove nothing.
+        testSuiteCode: '',
+        summary: 'lru',
+        selfHost: tpl.selfHost!
+      },
+      root
+    );
+    expect(write.success).toBe(true);
+    if (!write.success) return;
+    const verdict = await verifySelfHostedEntry(write.entry, root);
+    expect(verdict.passed).toBe(false);
+    expect(verdict.detail).toContain('zero assertions');
   });
 
   it('fails verification honestly when the module file is tampered/deleted', async () => {

@@ -37,7 +37,7 @@ export function createRepairRouter(deps: RepairRouterDeps): Router {
   // sandbox verifier accepts the patched source.
   router.post('/repair/scan-heal', (_req, res) => {
     const detectedAnomalies = deps.anomalies().filter((a) => a.status === 'detected');
-    const results = [];
+    const results: Array<ReturnType<typeof deps.executeSelfRepair>> = [];
 
     for (const anom of detectedAnomalies) {
       const healResult = deps.executeSelfRepair(anom.toolName, anom.brokenCode, anom.errorType, anom.test_suite_code);

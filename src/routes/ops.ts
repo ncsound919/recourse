@@ -14,6 +14,7 @@ import { tracer, exportOtlp } from '../lib/tracing';
 import { openPolicyEngine, type PolicyAction, type PolicyEngine } from '../lib/policy';
 import { openApprovalStore, type ApprovalStore } from '../lib/approvals';
 import { buildDockerComposePlan, runDeployPlan } from '../lib/deploy';
+import type { ReverifyReport } from '../lib/registryReverify';
 
 export interface OpsRouterDeps {
   requireMutationAuth: (req: Request, res: Response) => boolean;
@@ -22,6 +23,9 @@ export interface OpsRouterDeps {
   approvals?: ApprovalStore;
   /** Optional guard for read-only telemetry inspection (traces). */
   requireReadAuth?: (req: Request, res: Response) => boolean;
+  /** Operator-triggered re-verification of the main registry against the real
+   *  invariant protocol. Injected so this router stays free of engine state. */
+  reverifyRegistryTools?: () => Promise<ReverifyReport>;
 }
 
 export function createOpsRouter(deps: OpsRouterDeps): Router {
@@ -127,6 +131,20 @@ export function createOpsRouter(deps: OpsRouterDeps): Router {
       res.status(result.ok ? 200 : 500).json({ success: result.ok, decision, result });
     } catch (e: any) {
       res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // --- Registry re-verification -------------------------------------------
+  router.post('/tools/reverify', async (req, res) => {
+    if (!deps.requireMutationAuth(req, res)) return;
+    if (!deps.reverifyRegistryTools) {
+      return res.status(501).json({ success: false, error: 'registry re-verification is not wired on this host' });
+    }
+    try {
+      const report = await deps.reverifyRegistryTools();
+      res.json({ success: true, report });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'registry re-verification failed' });
     }
   });
 

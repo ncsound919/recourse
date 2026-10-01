@@ -21,7 +21,8 @@ import {
   GitHubIngestionResult,
   SwarmStatus,
   SubAgentType,
-  SubAgentTask
+  SubAgentTask,
+  SelfRepairStatus,
 } from './src/types.js';
 import {
   INITIAL_REGISTRY,
@@ -39,14 +40,6 @@ import { MerkleTree, auditCodeSecurity } from './src/lib/cyberDefenseEngine.js';
 import { transformSync } from 'esbuild';
 import { fetchRepoSource, domainLabel } from './src/lib/githubResearchEngine.js';
 import { validateBiotechClaimAgainstKG, CANONICAL_ONCOLOGY_KG } from './src/lib/biotechKnowledgeGraph.js';
-import { buildLiveOncologyGraph, liveEvidenceHealth } from './src/lib/liveOncologyGraph.js';
-import { synthesizeOdeKinetics } from './src/lib/odeKineticSynthesizer.js';
-import { runDosingSweep } from './src/lib/dosingOptimizer.js';
-import { exportOdeToSbml } from './src/lib/sbmlExporter.js';
-import { exportOdeToPhysicell } from './src/lib/physicellExporter.js';
-import { buildEvidenceDossier } from './src/lib/evidenceDossier.js';
-import { otSearch, otHealth as openTargetsHealth } from './src/lib/openTargetsClient.js';
-import { ptSearch, ptHealth as pubTatorHealth, parsePubTatorAnnotations } from './src/lib/pubTatorClient.js';
 import { HARD_MATH_PROBLEMS } from './src/lib/hardMathProblems.js';
 import { recordMathAttempt, recordBiotechClaim, getMathAttempts, getGoalProgress, MathAttempt, BiotechClaim as LedgerBiotechClaim, initGoalLedger, saveGoalLedger } from './src/lib/goalLedger.js';
 import { oncologyHealth } from './src/lib/oncologyEngineBridge.js';
@@ -80,7 +73,6 @@ import { renderAndPersistAgenda, selectNextMathMilestone, selectNextOncologyMile
 import { persistGameProfile } from './src/lib/gamification.js';
 import { renderDashboard } from './src/lib/fleetDashboard.js';
 import * as jobSchedulerApi from './src/lib/jobScheduler.js';
-import { zod400, kgNeighborhoodReq, kgBridgesReq } from './src/lib/contracts.js';
 import helmet from 'helmet';
 import { rateLimit } from 'express-rate-limit';
 import { DEFAULT_GROWTH_WEIGHTS } from './src/lib/decisionEngine.js';
@@ -112,7 +104,6 @@ import { generationTargets, generationPlanDigest, summarizeBeliefsByDomain } fro
 import { runSleepComputeUnit, takeReadySleepArtifact } from './src/lib/sleepCompute.js';
 import { recordExperience, experienceHint } from './src/lib/experience.js';
 import { planAuditDepth } from './src/autopilot/auditDepth.js';
-import type { Directive } from './src/dream/learner-types.js';
 import {
   listSelfHostedEntries,
   writeStatelessSelfHostedTool,
@@ -143,7 +134,7 @@ import {
 } from './src/lib/forgeLearningLoop.js';
 import { bbtchIdeaToProposal, heuristicScore, sortProposals, nextProposalToPursue } from './src/lib/intelInvention.js';
 import type { IntelProposal } from './src/lib/intelInvention.js';
-import { intelSourceStatuses, pullBbtchArchetypes, rankProposalsWithStrategy } from './src/lib/intelSources.js';
+import { intelSourceStatuses, pullBbtchArchetypes, pullOmniresearchIdeas, rankProposalsWithStrategy } from './src/lib/intelSources.js';
 
 // Fleet development integration: audit/repair team plugin seam (RepoRank,
 // Grader, Codegang, Benchmark Olympics / the Deep, Draymond repair team).
@@ -180,6 +171,7 @@ import {
   repairVerificationStats,
   type RepairVerification,
 } from './src/lib/repairVerification.js';
+import { nextRepairCounters } from './src/lib/repairCounters.js';
 import {
   assessSourceSubstance,
 } from './src/lib/honestyMetrics.js';
@@ -198,6 +190,7 @@ import {
   maybeRefreshBenchmark,
   memoryStoreStatus,
   consolidateSemanticMemory,
+  closeMemoryStores,
 } from './src/lib/recourseActivator.js';
 
 // AgentBrowser web-fetch connector (download from the web through the real browser).
@@ -223,6 +216,7 @@ import { VectorMemory, openVectorMemory } from './src/lib/vectorMemory.js';
 // gates, patch-mode editing, and dedup-aware fleet recursion.
 import { OpenEndedArchive } from './src/lib/openEnded/archive.js';
 import { runOpenEndedCycle, rewardForResult, capabilityKeyFor, type OpenEndedCycleResult } from './src/lib/openEnded/engine.js';
+import { propertyVectorsForProblem } from './src/lib/openEnded/propertyVectors.js';
 import { FleetRecursionLedger } from './src/lib/openEnded/fleetRecursion.js';
 import { mintProblems } from './src/lib/openEnded/problemMint.js';
 import { inspire } from './src/lib/inspirationCrossover.js';
@@ -296,6 +290,7 @@ import { createReportsRouter } from './src/routes/reports.js';
 import { createGitHubRouter } from './src/routes/github.js';
 import { createCapabilityRuntimeRouter } from './src/routes/capabilityRuntime.js';
 import { createSynergyRouter } from './src/routes/synergy.js';
+import { selfFeedSynergyScan, persistSelfFeedScan } from './src/lib/synergy/selfFeed.js';
 import { createFleetDogfoodRouter } from './src/routes/fleetDogfood.js';
 import { runFleetDogfoodCycle } from './src/lib/fleetDogfood.js';
 import { createVizRouter } from './src/routes/viz.js';
@@ -308,6 +303,7 @@ import { openWallet } from './src/lib/wallet.js';
 import { setSandboxSpendSink } from './src/lib/selfHostSandbox.js';
 import { createProductRouter } from './src/routes/product.js';
 import { createOpsRouter } from './src/routes/ops.js';
+import { reverifyRegistry, type DreamGeneRef, type ReverifyReport } from './src/lib/registryReverify.js';
 import { metrics } from './src/lib/metrics.js';
 import { tracer, runInSpan, parseTraceparent, formatTraceparent, currentSpan } from './src/lib/tracing.js';
 import { A2A_SKILLS, openA2aTaskStore } from './src/lib/a2a.js';
@@ -359,6 +355,7 @@ import { createSelfImprovementRouter } from './src/routes/selfImprovement.js';
 import { openPolicyEngine } from './src/lib/policy.js';
 import { attemptRemediation, resolveRemediationService, parseRemediationMap } from './src/lib/remediation.js';
 import { createCodePlanner } from './src/autopilot/codePlanner.js';
+import { canonicalize, sha256Hex } from './src/lib/federation/canonical.js';
 const STATE_FILE = path.join(process.cwd(), 'recourse_storage.json');
 
 // Budgeted action wallet (durable, hash-chained). Also installed as the sandbox
@@ -543,11 +540,49 @@ const nightlyStore = openNightlyStore();
 
 // Wave 2 ops surface reuses the shared policy + approval engines above, so a
 // remediation approval queued by self-repair is visible to the ops routes.
+/**
+ * Operator-triggered re-verification of the MAIN registry.
+ *
+ * The dream mirror wrote each gene into the registry with
+ * `passed_verifier: true` and no suite behind it (its "reference suite" only
+ * asserted the function exists and did not throw). This pass re-runs the real
+ * invariant protocol for the gene kind against each tool's own stored source,
+ * appends a module-form version with the real result, and deliberately leaves
+ * health at `unverified` - without a semantic suite there is nothing a boot
+ * re-verify could reproduce, and a smoke pass must never read as health.
+ */
+async function reverifyMirroredRegistryTools(): Promise<ReverifyReport> {
+  const st = await dreamEngine.status();
+  const geneByName = new Map<string, DreamGeneRef>();
+  for (const gene of st.registry ?? []) {
+    if (gene && typeof gene.name === 'string' && typeof gene.kind === 'string') {
+      geneByName.set(gene.name, { kind: gene.kind });
+    }
+  }
+  const { tools, report } = reverifyRegistry(registry, geneByName);
+  registry = tools;
+  status.registeredToolsCount = registry.length;
+  appendProvenanceEvent('tool_registry_reverified', {
+    considered: report.considered,
+    verified: report.verified,
+    failed: report.failed,
+    unverifiable: report.unverifiable,
+    skippedHasSuite: report.skippedHasSuite,
+    skippedAlreadyCurrent: report.skippedAlreadyCurrent,
+    noSuiteOnFile: report.noSuiteOnFile,
+    withdrawnClaims: report.withdrawnClaims,
+    geneKindsKnown: geneByName.size,
+  });
+  saveStateToDisk();
+  return report;
+}
+
 const opsRouter = createOpsRouter({
   requireMutationAuth,
   policy: policyEngine,
   approvals: approvalStore,
   requireReadAuth: telemetryAuthorized,
+  reverifyRegistryTools: reverifyMirroredRegistryTools,
 });
 
 function nightlyMetrics(): UpgradeSnapshot {
@@ -714,9 +749,28 @@ function releaseInstanceLock(): void {
     }
   } catch { /* best-effort */ }
 }
+/**
+ * Flush the debounced state save and close durable stores. Previously SIGINT /
+ * SIGTERM called process.exit(0) directly, so every shutdown dropped whatever
+ * was queued in the 1.5s save debounce (and never checkpointed the memory DB).
+ * `stateStore` is a module `let` declared further down; a signal that lands
+ * before that line runs would hit its TDZ, hence the try/catch.
+ */
+function flushDurableState(): void {
+  try { stateStore?.flush(); } catch (err) { console.warn('[Recourse] state flush on shutdown failed:', err); }
+  try { closeMemoryStores(); } catch { /* best-effort */ }
+}
+let shuttingDown = false;
+function gracefulExit(code: number): void {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  flushDurableState();
+  releaseInstanceLock();
+  process.exit(code);
+}
 process.on('exit', releaseInstanceLock);
-process.on('SIGINT', () => { releaseInstanceLock(); process.exit(0); });
-process.on('SIGTERM', () => { releaseInstanceLock(); process.exit(0); });
+process.on('SIGINT', () => gracefulExit(0));
+process.on('SIGTERM', () => gracefulExit(0));
 
 // Crash visibility. Detached/fleet-respawned instances inherit no console, so
 // a death leaves empty stderr and no clue. Log every uncaught exception and
@@ -731,11 +785,11 @@ function logCrash(kind: string, err: unknown): void {
 }
 process.on('uncaughtException', (err) => {
   logCrash('uncaughtException', err);
-  process.exit(1);
+  gracefulExit(1);
 });
 process.on('unhandledRejection', (reason) => {
   logCrash('unhandledRejection', reason);
-  process.exit(1);
+  gracefulExit(1);
 });
 
 // Dream-engine model generator: asks the configured local model (the Spark
@@ -912,10 +966,26 @@ export interface ForgeLedgerEntry {
   quality?: { score: number; gateOk: boolean; reasons: string[] };
 }
 let forgeLedger: ForgeLedgerEntry[] = [];
+/** Append to the forge ledger with a retention cap. Every forge attempt used to
+ *  append forever (and the whole array is re-serialized on each state save).
+ *  Materialized entries are kept regardless — they are the dedupe record the
+ *  agenda backfill and builtNames checks rely on. */
+const FORGE_LEDGER_MAX = Number(process.env.RECOURSE_FORGE_LEDGER_MAX) || 2000;
+function pushForgeLedger(entry: ForgeLedgerEntry): void {
+  forgeLedger.push(entry);
+  if (forgeLedger.length <= FORGE_LEDGER_MAX) return;
+  const excess = forgeLedger.length - FORGE_LEDGER_MAX;
+  let dropped = 0;
+  forgeLedger = forgeLedger.filter((e) => {
+    if (dropped >= excess || e.status === 'materialized') return true;
+    dropped++;
+    return false;
+  });
+}
 let forgeAutopilotOn = false;
 let forgeBusy = false;
 let forgeTimer: NodeJS.Timeout | null = null;
-const FORGE_AUTOPILOT_MS = Math.max(5000, Number(process.env.FORGE_AUTOPILOT_MS) || 2000);
+const FORGE_AUTOPILOT_MS = Math.max(5000, Number(process.env.FORGE_AUTOPILOT_MS) || 5000);
 // Quarantine: dream/backfill specs that fail live re-verify are retried only
 // FORGE_QUARANTINE_LIMIT times, then skipped by nextForgeSpec. Prevents the
 // 2s autopilot from spinning forever on a gene whose source cannot self-host.
@@ -1073,15 +1143,6 @@ async function learnFromGhidra(input: GhidraLearnInput): Promise<GhidraLearnResu
   return result;
 }
 
-app.use(express.json({
-  limit: '10mb',
-  // Preserve the exact bytes for Stripe webhook signature verification
-  // (signatures are computed over the raw body, not a re-serialization).
-  verify: (req, _res, buf) => {
-    (req as typeof req & { rawBody?: string }).rawBody = buf.toString('utf-8');
-  },
-}));
-
 // Default-deny floor for mutating /api routes (see src/lib/apiGuard.ts): the
 // local UI keeps working, remote/cross-site callers need RECOURSE_API_SECRET.
 app.use(createApiGuard());
@@ -1138,10 +1199,10 @@ app.use(
           directives: {
             defaultSrc: ["'self'"],
             scriptSrc: ["'self'"],
-            styleSrc: ["'self'", "'unsafe-inline'"], // React inline style attrs + Tailwind
+            styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'], // React inline style attrs + Tailwind + Geist
             imgSrc: ["'self'", 'data:', 'https:'],
             connectSrc: ["'self'"],
-            fontSrc: ["'self'", 'data:'],
+            fontSrc: ["'self'", 'data:', 'https://fonts.gstatic.com'],
             objectSrc: ["'none'"],
             baseUri: ["'self'"],
             frameAncestors: ["'none'"],
@@ -1165,6 +1226,20 @@ if (RATE_LIMIT_MAX > 0) {
     }),
   );
 }
+
+// Body parsing runs AFTER the API guard and the rate limiter, so a refused or
+// throttled caller can no longer make the server buffer + parse up to 10MB
+// first. The raw-bytes copy is kept only for the Stripe webhook (signatures
+// are computed over the raw body); it used to be duplicated for every request.
+app.use(express.json({
+  limit: '10mb',
+  verify: (req, _res, buf) => {
+    const url = String((req as { url?: string }).url ?? '').split('?')[0].toLowerCase();
+    if (url.endsWith('/billing/webhook')) {
+      (req as typeof req & { rawBody?: string }).rawBody = buf.toString('utf-8');
+    }
+  },
+}));
 
 
 // Local-model telemetry (OpenAI-compatible provider). Online state is
@@ -1279,7 +1354,10 @@ function reconcileRegistryOnBoot() {
   let verifiedPass = 0;
   let verifiedTotal = 0;
   for (const tool of registry) {
-    let liveHealthy = true;
+    // 'unverified' is the honest default: a tool whose current version was never
+    // re-executed here must NOT report 'healthy' (that is an implied claim).
+    let verifiedCurrent = false;
+    let currentPassed = false;
     for (const v of tool.versions) {
       if (!v.promoted) continue;
       const isCurrent = v.version === tool.currentVersion;
@@ -1291,7 +1369,12 @@ function reconcileRegistryOnBoot() {
       }
       if (!v.source_code) continue;
       let vr: VerifierResult | null = null;
-      if (tool.domain === 'biotech') {
+      // Biotech CLAIMS are stored as JSON payloads; biotech CODE genes (dream /
+      // grounding tools) are plain JS. Treating every biotech tool as a claim
+      // marked ~190 code tools "FAILED (invalid JSON payload)" -> degraded on
+      // every boot, which fed the auto-repair loop and deflated the pass rate.
+      const looksLikeClaim = tool.domain === 'biotech' && /^\s*\{/.test(v.source_code);
+      if (looksLikeClaim) {
         try {
           const claim = JSON.parse(v.source_code) as BiotechClaim;
           vr = verifyBiotechClaim(claim);
@@ -1305,6 +1388,11 @@ function reconcileRegistryOnBoot() {
           if (!v.test_suite_code) v.test_suite_code = suite;
         }
       }
+      if (!vr && v.verifier_notes === 'GENESIS RE-VERIFIED: FAILED (invalid JSON payload)') {
+        // Left behind by the old claim-parser bug on a code gene: no suite is
+        // stored, so there is nothing to re-run — say so instead of a fake FAIL.
+        v.verifier_notes = 'NOT RE-VERIFIED AT BOOT: code gene with no stored suite (earlier "invalid JSON payload" verdict was a misclassification)';
+      }
       if (vr) {
         v.passed_verifier = vr.passed;
         v.score = Math.round(vr.score * 100) / 100;
@@ -1312,10 +1400,11 @@ function reconcileRegistryOnBoot() {
         verifiedTotal++;
         if (vr.passed) verifiedPass++;
         if (vr.passed) totalUpgrades++;
-        else liveHealthy = false;
+        currentPassed = vr.passed;
+        verifiedCurrent = true;
       }
     }
-    tool.healthStatus = liveHealthy ? 'healthy' : 'degraded';
+    tool.healthStatus = !verifiedCurrent ? 'unverified' : currentPassed ? 'healthy' : 'degraded';
   }
   status.registeredToolsCount = registry.length;
   status.totalUpgrades = totalUpgrades;
@@ -1464,10 +1553,15 @@ interface SkillImportRecord {
 // Load persisted state if available
 function loadPersistedDreamGenesFromStorage(): Array<{ name: string; domain?: string; code?: string; description?: string; testVectors?: unknown[]; invariantChecks?: Array<{ name: string; passed: boolean }> }> {
   try {
+    // Legacy location first (still present until the next state save drops it),
+    // then the dream engine's own file store.
     const data = ensureStateStore().load<Record<string, any>>();
-    if (!data) return [];
-    const dreamReg = data?.status?.dreamState?.registry;
-    return Array.isArray(dreamReg) ? dreamReg : [];
+    const legacyReg = data?.status?.dreamState?.registry;
+    if (Array.isArray(legacyReg) && legacyReg.length) return legacyReg;
+    const dreamFile = process.env.DREAM_STATE_FILE || path.join(process.cwd(), 'recourse_dream.json');
+    if (!fs.existsSync(dreamFile)) return [];
+    const stored = JSON.parse(fs.readFileSync(dreamFile, 'utf-8')) as { registry?: unknown };
+    return Array.isArray(stored?.registry) ? (stored.registry as ReturnType<typeof loadPersistedDreamGenesFromStorage>) : [];
   } catch {
     return [];
   }
@@ -1485,7 +1579,19 @@ function loadStateFromDisk() {
       if (data.gitHubBlueprints) gitHubBlueprints = data.gitHubBlueprints;
       if (data.swarmStatus) swarmStatus = data.swarmStatus;
       if (Array.isArray(data.swarmTeamStates)) swarmTeamStates = data.swarmTeamStates;
-      if (data.status) status = { ...status, ...data.status };
+      if (data.status) {
+        // `status.dreamState` is a legacy 1.2MB copy of the dream engine's own
+        // store (recourse_dream.json). Merging it back kept re-serializing it on
+        // every save; the dream engine owns that state, so drop the copy here.
+        const { dreamState: _legacyDreamCopy, swarmStatus: _swarmCopy, ...persistedStatus } = data.status as Record<string, unknown>;
+        status = { ...status, ...(persistedStatus as Partial<SystemStatus>) };
+        // selfRepair is merged field-by-field rather than replaced wholesale: a
+        // state file written before a counter existed would otherwise drop the
+        // seeded default and the field would read `undefined` until this boot
+        // happened to record an attempt.
+        const persistedSelfRepair = (persistedStatus.selfRepair ?? {}) as Partial<SelfRepairStatus>;
+        status.selfRepair = { ...INITIAL_STATUS.selfRepair, ...persistedSelfRepair };
+      }
       if (data.intakeSignals) intakeSignals = data.intakeSignals;
       if (data.benchmarkHistory) benchmarkHistory = data.benchmarkHistory;
       if (Array.isArray(data.benchmarkAppendedProblems)) restoreBenchmarkProblems(data.benchmarkAppendedProblems);
@@ -1524,7 +1630,18 @@ function loadStateFromDisk() {
       if (typeof data.skillFound === 'number') skillFound = data.skillFound;
       if (typeof data.skillPrunedTranslations === 'number') skillPrunedTranslations = data.skillPrunedTranslations;
       if (Array.isArray(data.skillLastErrors)) skillLastErrors = data.skillLastErrors;
-      if (typeof data.skillExportRoot === 'string') skillExportRoot = data.skillExportRoot;
+      // NOTE: data.skillExportRoot is deliberately NOT restored.
+      //
+      // It used to be restored from this file, which made it self-perpetuating:
+      // an absolute path captured before the repo moved out of
+      // C:\Users\User\Downloads\recourse was written into recourse_storage.json,
+      // then re-read on every subsequent boot, so deleting the directory or
+      // restarting the service never fixed it -- only hand-editing 27 MB of
+      // state did. Nothing ever wrote this value at runtime (SKILL_EXPORT_DIR is
+      // the only supported override), so persisting a machine-local absolute
+      // path bought nothing and cost portability. The root is now derived from
+      // process.cwd() at boot, which is the same value every other state path
+      // in this file already uses.
       if (typeof data.skillExports === 'number') skillExports = data.skillExports;
       if (typeof data.skillImports === 'number') skillImports = data.skillImports;
       if (Array.isArray(data.skillImportPending)) skillImportPending = data.skillImportPending;
@@ -1536,6 +1653,10 @@ function loadStateFromDisk() {
       if (typeof data.devAutopilotOn === 'boolean') devAutopilotOn = data.devAutopilotOn;
       if (Array.isArray(data.stuckIssues)) stuckIssues = data.stuckIssues;
       if (Array.isArray(data.stuckRepairLedger)) stuckRepairLedger = data.stuckRepairLedger;
+      // Repair verifications were persisted but never restored, so every
+      // restart zeroed the open/pass/fail stats (and any unverified repair
+      // silently lost its pending record). Restore them with the rest.
+      if (Array.isArray(data.repairVerifications)) repairVerifications = data.repairVerifications;
       if (data.providerMode === 'local' || data.providerMode === 'api') providerMode = data.providerMode;
       if (Array.isArray(data.builderProfiles) && data.builderProfiles.length >= 1) builderProfiles = data.builderProfiles;
       if (Array.isArray(data.builderJournal)) builderJournal = data.builderJournal;
@@ -1614,7 +1735,10 @@ function ensureStateStore(): ReturnType<typeof createStateStore> {
       gitHubBlueprints,
       swarmStatus,
       swarmTeamStates,
-      status,
+      // GET /status attaches live dreamState + swarmStatus to `status` for the
+      // UI; both are persisted by their owners (dream store, top-level
+      // swarmStatus), so persisting them again here re-wrote ~1.3MB per save.
+      status: (({ dreamState: _d, swarmStatus: _s, ...rest }) => rest)(status),
       intakeSignals,
       benchmarkHistory,
       benchmarkAppendedProblems: appendedBenchmarkProblems(),
@@ -1637,7 +1761,6 @@ function ensureStateStore(): ReturnType<typeof createStateStore> {
       skillFound,
       skillPrunedTranslations,
       skillLastErrors,
-      skillExportRoot,
       skillExports,
       skillImports,
       skillImportPending,
@@ -1688,9 +1811,22 @@ void verifyAllSelfHosted().catch((err) => {
 });
 
 // Helper: Hash Chaining for Provenance
-function computeHash(prevHash: string, payload: { type: string; ts: number; data: any }): string {
-  const blob = JSON.stringify({ prev: prevHash, payload }, Object.keys({ prev: prevHash, payload }).sort());
+//
+// v1 (legacy) hashed `JSON.stringify(obj, ['payload','prev'])`. A replacer ARRAY
+// is a property allowlist applied at EVERY depth, so the payload serialized as
+// `{}` — v1 hashes cover only `prev` and none of the event content. v2 hashes a
+// canonical (key-sorted) serialization of the JSON round-tripped event, so it is
+// stable across persist/reload and actually binds type/ts/data. Legacy events
+// keep their v1 hash (rewriting them would itself break the chain) and are
+// reported as `legacyUnbound` by verifyChainIntegrity.
+function computeHashV1(prevHash: string, payload: { type: string; ts: number; data: any }): string {
+  const blob = JSON.stringify({ prev: prevHash, payload }, ['payload', 'prev']);
   return crypto.createHash('sha256').update(blob).digest('hex');
+}
+
+function computeHash(prevHash: string, payload: { type: string; ts: number; data: any }): string {
+  const roundTripped = JSON.parse(JSON.stringify({ prev: prevHash, payload }));
+  return sha256Hex(canonicalize(roundTripped));
 }
 
 function getLastHash(): string {
@@ -1705,7 +1841,7 @@ function appendProvenanceEvent(eventType: ProvenanceEvent['type'], data: Record<
   const ts = Date.now();
   const payload = { type: eventType, ts, data };
   const hash = computeHash(prevHash, payload);
-  const event: ProvenanceEvent = { prev: prevHash, hash, type: eventType, ts, data };
+  const event: ProvenanceEvent = { v: 2, prev: prevHash, hash, type: eventType, ts, data };
   provenanceEvents.push(event);
   // Window sized for ~hours of full-autonomy churn (a 3s tick emits several
   // events/min, mostly capability_served/selfuse heartbeats). Too small a
@@ -1717,17 +1853,34 @@ function appendProvenanceEvent(eventType: ProvenanceEvent['type'], data: Record<
   return event;
 }
 
-function verifyChainIntegrity(): { valid: boolean; length: number; lastHash: string; brokenIndex?: number } {
+function verifyChainIntegrity(): {
+  valid: boolean;
+  length: number;
+  lastHash: string;
+  brokenIndex?: number;
+  reason?: 'link' | 'hash';
+  legacyUnbound?: number;
+} {
   if (provenanceEvents.length === 0) return { valid: true, length: 0, lastHash: '0'.repeat(64) };
+  const lastHash = provenanceEvents[provenanceEvents.length - 1].hash;
   let prev = provenanceEvents[0].prev;
+  let legacyUnbound = 0;
   for (let i = 0; i < provenanceEvents.length; i++) {
     const e = provenanceEvents[i];
     if (e.prev !== prev) {
-      return { valid: false, length: provenanceEvents.length, lastHash: provenanceEvents[provenanceEvents.length - 1].hash, brokenIndex: i };
+      return { valid: false, length: provenanceEvents.length, lastHash, brokenIndex: i, reason: 'link' };
     }
+    // Recompute: linkage alone proves nothing if the hash is never checked
+    // against the content it claims to cover.
+    const payload = { type: e.type, ts: e.ts, data: e.data };
+    const expected = e.v === 2 ? computeHash(e.prev, payload) : computeHashV1(e.prev, payload);
+    if (expected !== e.hash) {
+      return { valid: false, length: provenanceEvents.length, lastHash, brokenIndex: i, reason: 'hash' };
+    }
+    if (e.v !== 2) legacyUnbound++;
     prev = e.hash;
   }
-  return { valid: true, length: provenanceEvents.length, lastHash: provenanceEvents[provenanceEvents.length - 1].hash };
+  return { valid: true, length: provenanceEvents.length, lastHash, ...(legacyUnbound ? { legacyUnbound } : {}) };
 }
 
 // Autonomous Self-Repair Core
@@ -1737,8 +1890,18 @@ function verifyChainIntegrity(): { valid: boolean; length: number; lastHash: str
 // suite, its genesis suite, or a caller-supplied suite). If the patched code
 // does not pass, the repair attempt is recorded as a failed attempt and the
 // tool stays degraded. No score is ever fabricated.
-let repairAttempts = 0;
-let repairSuccesses = 0;
+//
+// Attempt bookkeeping lives on `status.selfRepair` (persisted with the rest of
+// status) rather than in module-level counters that nothing could read: the
+// previous `repairAttempts` / `repairSuccesses` variables were dead — the
+// success count was already `totalHealedCount`, and the attempt count was
+// invisible, which made "we healed N tools" impossible to weigh against "we
+// tried N times".
+function recordRepairAttempt(outcome: 'healed' | 'smoke-only' | 'failed'): void {
+  const next = nextRepairCounters(status.selfRepair, outcome);
+  status.selfRepair.repairAttempts = next.repairAttempts;
+  status.selfRepair.unverifiedRepairAttempts = next.unverifiedRepairAttempts;
+}
 
 function resolveRepairSuite(tool: ToolEntry | undefined, testSuite?: string): string | undefined {
   if (testSuite) return testSuite;
@@ -1767,21 +1930,28 @@ function executeSelfRepair(
 
   const { repairedCode, rootCause, errorType, patchSummary, templateApplied, confidence, preventativeMeasures } = diagnoseAndRepairCode(domain, brokenCode, faultHint);
 
-  repairAttempts += 1;
-
   // 1. Verify the repaired code honestly.
+  //
+  // Depth matters: a real suite (or, for biotech payloads, the claim verifier)
+  // can prove the repair; a bare "does it run" smoke check cannot. Only the
+  // former may be called a heal — a smoke pass is recorded as an attempt that
+  // was never verified.
   let verifierResult: VerifierResult | null = null;
   let repairSuite: string | undefined;
+  let verificationDepth: 'suite' | 'claim' | 'smoke' = 'smoke';
   if (domain === 'biotech') {
     try {
       const claim = JSON.parse(repairedCode) as BiotechClaim;
       verifierResult = verifyBiotechClaim(claim);
+      verificationDepth = 'claim';
     } catch {
       verifierResult = { passed: false, summary: 'FAILED (repaired payload is not valid JSON)', details: [], score: 0 };
+      verificationDepth = 'claim';
     }
   } else {
     repairSuite = resolveRepairSuite(tool, testSuite);
     if (repairSuite) {
+      verificationDepth = 'suite';
       verifierResult = verifyCodeWithSuite(repairedCode, repairSuite);
     } else {
       // No regression suite on file: the most we can truthfully claim is that
@@ -1798,8 +1968,11 @@ function executeSelfRepair(
     }
   }
 
-  const healed = verifierResult?.passed === true;
-  if (healed) repairSuccesses += 1;
+  // A smoke pass is NOT a heal: nothing was checked against expected behavior,
+  // so it cannot be counted as a success, promoted, or marked verified.
+  const smokeOnlyPass = verificationDepth === 'smoke' && verifierResult?.passed === true;
+  const healed = verifierResult?.passed === true && verificationDepth !== 'smoke';
+  recordRepairAttempt(healed ? 'healed' : smokeOnlyPass ? 'smoke-only' : 'failed');
 
   const repairLatency = Date.now() - startTime;
   const versionHash = crypto.createHash('sha256').update(repairedCode).digest('hex').substring(0, 16);
@@ -1810,36 +1983,47 @@ function executeSelfRepair(
     hash: versionHash,
     created_at: Date.now(),
     passed_verifier: healed,
-    score: verifierResult?.score ?? 0,
+    // A smoke check produces no verifier score; reporting its "ran fine"
+    // as 1.0 is how a suite-less repair ends up looking fully verified.
+    score: healed ? (verifierResult?.score ?? 0) : 0,
     promoted: healed,
     isRepaired: true,
     test_suite_code: repairSuite,
     verifier_notes: healed
       ? `AUTONOMOUSLY HEALED & RE-VERIFIED: ${verifierResult?.summary}${templateApplied ? ` [Template: ${templateApplied}, Conf: ${(confidence * 100).toFixed(0)}%]` : ''}`
-      : `REPAIR ATTEMPT DID NOT PASS VERIFIER: ${verifierResult?.summary ?? 'no verifier available'}`,
+      : smokeOnlyPass
+        ? `SMOKE-ONLY REPAIR — NOT VERIFIED: ${verifierResult?.summary}. No regression suite on file, so this is recorded as an attempt, not a heal.`
+        : `REPAIR ATTEMPT DID NOT PASS VERIFIER: ${verifierResult?.summary ?? 'no verifier available'}`,
     source_code: repairedCode
   };
+
+  // Health: only a suite/claim-verified repair may make a tool healthy again.
+  // A smoke-only pass keeps the pre-existing non-healed state (`degraded`),
+  // which is also what the fleet repair targeting keys off — introducing a
+  // fresh `unverified` value here would drop these tools out of the sick list.
+  const repairedHealth: ToolEntry['healthStatus'] = healed ? 'healthy' : 'degraded';
 
   if (!tool) {
     tool = {
       name: toolName,
       domain,
       entrypoint: `src/tools/${toolName}.ts`,
-      description: `Autonomously self-healed tool gene`,
+      description: 'Autonomously self-healed tool gene',
       versions: [repairedVersionObj],
       currentVersion: newVersionStr,
-      healthStatus: healed ? 'healthy' : 'degraded',
+      healthStatus: repairedHealth,
       anomalyCount: 0
     };
-    registry.push(tool);
+    // Route through the shared promotion chokepoint. A repair is judged by its
+    // verification window, not the substance/novelty gate, so gate:false — but
+    // the insertion still flows through the one authoritative path.
+    promoteTool(tool, { origin: 'self-repair', gate: false, push: true });
   } else {
     tool.versions.push(repairedVersionObj);
+    tool.healthStatus = repairedHealth;
     if (healed) {
       tool.currentVersion = newVersionStr;
-      tool.healthStatus = 'healthy';
       tool.anomalyCount = 0;
-    } else {
-      tool.healthStatus = 'degraded';
     }
   }
 
@@ -2072,6 +2256,8 @@ function a2aBaseUrl(req: { headers: Record<string, any>; protocol?: string }): s
   return `${proto}://${host}`;
 }
 
+const INTERNAL_API_TIMEOUT_MS = Number(process.env.RECOURSE_INTERNAL_API_TIMEOUT_MS) || 120_000;
+
 /** Same-process HTTP call (keeps the A2A ops thin — they reuse the REST routes). */
 async function internalApiCall(
   method: 'GET' | 'POST',
@@ -2086,7 +2272,10 @@ async function internalApiCall(
   const res = await fetch(`http://127.0.0.1:${PORT}${apiPath}`, {
     method,
     headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body: body === undefined || method === 'GET' ? undefined : JSON.stringify(body),
+    // A2A ops proxy to our own routes; a wedged route must not pin the A2A
+    // caller (and its socket) forever.
+    signal: AbortSignal.timeout(INTERNAL_API_TIMEOUT_MS),
   });
   let data: any = null;
   try { data = await res.json(); } catch { /* non-JSON */ }
@@ -2972,7 +3161,7 @@ async function sweepCapabilityAdoptions(): Promise<boolean> {
           method: cap.method,
           score: next.score,
           hash: next.hash,
-          priorSource: capabilityAdoptions[cap.id].priorSource,
+          priorSource: capabilityAdoptions[cap.id]?.priorSource ?? null,
           generation: status.generation,
         });
       } else {
@@ -3170,7 +3359,7 @@ function currentSystemSnapshot(label: string): SystemSnapshot {
     tools.push({
       name: t.name,
       domain: t.domain,
-      version: cur,
+      version: v.version,
       hash: v.hash || String(v.created_at || 0),
       score: typeof v.score === 'number' ? v.score : 0,
       passed: v.passed_verifier === true,
@@ -3605,6 +3794,11 @@ async function mirrorCrystallizedDreamGenes(): Promise<number> {
         : 'coding';
       const version = '1.0.0';
       const versionHash = crypto.createHash('sha256').update(cTool.code).digest('hex').substring(0, 16);
+      // Build the reference suite BEFORE promotion so the stored version carries
+      // it: boot reconciliation can then re-execute the gene against real
+      // assertions instead of having no suite to run (a gene with no suite has
+      // no live verdict, only a stored claim).
+      const refSuite = buildRefSuiteFromVectors(cTool);
       const dreamPromoted = promoteTool({
         name: cTool.name,
         domain,
@@ -3615,11 +3809,12 @@ async function mirrorCrystallizedDreamGenes(): Promise<number> {
           version,
           hash: versionHash,
           created_at: Date.now(),
-          passed_verifier: cTool.verified,
+          passed_verifier: cTool.verified === true,
           score: 1.0,
-          promoted: cTool.verified,
-          verifier_notes: `Dream gene passed engine sandbox verification (${cTool.kind || 'crystallized'}). Surfaced to main registry from dream store.`,
-          source_code: cTool.code
+          promoted: cTool.verified === true,
+          verifier_notes: `Dream gene passed engine sandbox verification (${cTool.kind || 'crystallized'}). Surfaced to main registry from dream store.${refSuite ? ' Reference suite stored from gene test vectors.' : ' No test vectors on file - not re-verifiable at boot.'}`,
+          source_code: cTool.code,
+          ...(refSuite ? { test_suite_code: refSuite } : {}),
         }],
         healthStatus: 'healthy',
         anomalyCount: 0
@@ -3636,7 +3831,6 @@ async function mirrorCrystallizedDreamGenes(): Promise<number> {
       // dream genes sit in the registry but never back any capability, and
       // 0/1080 tools ever become forge-materialized.
       if (!builtLedger.has(cTool.name) && !dynamicAgenda.some((d) => d.name === cTool.name)) {
-        const refSuite = buildRefSuiteFromVectors(cTool);
         if (refSuite) {
           const spec: ForgeSpec = {
             id: `dream_${cTool.name}_${versionHash.slice(0, 6)}`,
@@ -4125,14 +4319,17 @@ Your code is run in an isolated sandbox against your own tests. No placeholders.
 
 /** Process up to `limit` queued tasks for real. No-op when busy or offline. */
 async function pumpSwarmQueue(limit = 1): Promise<number> {
+  // Claim the busy flag BEFORE the first await: checking it, awaiting the model
+  // probe, and only then setting it let two pumps both pass the check and run
+  // the same queued task twice.
   if (swarmBusy) return 0;
-  const online = await modelCheckOnline(false);
-  if (!online) return 0;
-  const queued = swarmStatus.activeTaskQueue.filter((t) => t.status === 'queued');
-  if (queued.length === 0) return 0;
   swarmBusy = true;
   let processed = 0;
   try {
+    const online = await modelCheckOnline(false);
+    if (!online) return 0;
+    const queued = swarmStatus.activeTaskQueue.filter((t) => t.status === 'queued');
+    if (queued.length === 0) return 0;
     for (const task of queued.slice(0, Math.max(1, limit))) {
       if (await executeSwarmTask(task)) processed++;
     }
@@ -4321,7 +4518,19 @@ let autopilotProbeTickCounter = 0;
  *  swarm → dream → axioms → forge/lego → ledger → capability adoption sweep).
  *  Extracted from the /tick HTTP route so it can be driven by the server
  *  heartbeat as well as by a browser/API caller. */
-async function runServerTick() {
+// Single-flight: /tick is driven by the scheduler job AND by every open browser
+// tab (POST /tick every 3s with auto-evolve on). The tick does read-modify-write
+// on module state across awaits (swarmStatus, dreamState, status ...), so two
+// interleaved ticks lost updates. Concurrent callers now share the running tick.
+let serverTickInflight: ReturnType<typeof runServerTickOnce> | null = null;
+function runServerTick(): ReturnType<typeof runServerTickOnce> {
+  if (!serverTickInflight) {
+    serverTickInflight = runServerTickOnce().finally(() => { serverTickInflight = null; });
+  }
+  return serverTickInflight;
+}
+
+async function runServerTickOnce() {
     // 0. Refresh the real external benchmark on a cadence (throttled - running
     //    every hidden suite against every registry tool is not free). Measured
     //    regardless of whether the intake autopilot is on, so the reward and
@@ -5609,6 +5818,27 @@ function currentSourceOf(entry: ToolEntry): string | null {
 }
 
 /**
+ * Shared novelty gate (P1.4): near-duplicate check against the FULL registry.
+ * Both the promotion chokepoint and the capability forge route through here so
+ * the definition of "already exists" can never diverge between paths. Returns
+ * the name of the duplicate, or null when the source is novel. A refusal is
+ * recorded as a promotion_refused provenance event — auditable, never silent.
+ */
+function noveltyGate(source: string, name: string, origin: string, extra?: Record<string, unknown>): string | null {
+  const dup = findNearDuplicate(
+    source,
+    name,
+    registry.map((t) => ({ name: t.name, sourceCode: currentSourceOf(t) ?? undefined })),
+  );
+  if (!dup) return null;
+  try {
+    appendProvenanceEvent('promotion_refused', { tool: name, origin, reason: `near-duplicate of ${dup}`, ...extra });
+    recordDev('promotion-refused', false, `${name} (${origin}): near-duplicate of ${dup}`, { driver: 'novelty-gate' });
+  } catch { /* refusal logging is best-effort; the refusal itself still holds */ }
+  return dup;
+}
+
+/**
  * Shared registry promotion chokepoint (P1.4).
  *
  * Every NEW capability — generated, learned, mutated, dream-crystallized,
@@ -5634,20 +5864,8 @@ function promoteTool(entry: ToolEntry, opts: { origin: string; gate?: boolean; p
       }
       // Novelty (P1.4): the same algorithm with different constants under a new
       // name (e.g. dream weight-mutation variants) is not a new capability.
-      const dup = findNearDuplicate(
-        source,
-        entry.name,
-        registry.map((t) => ({ name: t.name, sourceCode: currentSourceOf(t) ?? undefined })),
-      );
-      if (dup) {
-        try {
-          appendProvenanceEvent('promotion_refused', {
-            tool: entry.name, origin: opts.origin, reason: `near-duplicate of ${dup}`, lines: verdict.meaningfulLines,
-          });
-          recordDev('promotion-refused', false, `${entry.name} (${opts.origin}): near-duplicate of ${dup}`, { driver: 'novelty-gate' });
-        } catch { /* best-effort */ }
-        return false;
-      }
+      const dup = noveltyGate(source, entry.name, opts.origin, { lines: verdict.meaningfulLines });
+      if (dup) return false;
     }
   }
   if (opts.push) registry.push(entry); else registry.unshift(entry);
@@ -5686,7 +5904,7 @@ async function materializeForgeOutcome(outcome: ForgeAttemptOutcome, spec: Forge
     if (alreadySelfHosted) {
       base.status = 'exists';
       base.wallMs = Date.now() - started;
-      forgeLedger.push(base);
+      pushForgeLedger(base);
       saveStateToDisk();
       return base;
     }
@@ -5701,7 +5919,7 @@ async function materializeForgeOutcome(outcome: ForgeAttemptOutcome, spec: Forge
     base.status = outcome.reason === 'offline' ? 'offline' : 'failed';
     if (outcome.reason === 'quality') base.summary = `passed reference suite but failed quality gate: ${outcome.quality?.gate.reasons.join('; ') ?? 'unknown'}`;
     base.wallMs = Date.now() - started;
-    forgeLedger.push(base);
+    pushForgeLedger(base);
     saveStateToDisk();
     return base;
   }
@@ -5714,7 +5932,7 @@ async function materializeForgeOutcome(outcome: ForgeAttemptOutcome, spec: Forge
     base.summary = substance.reason;
     base.failures = [...(base.failures || []), { attempt: 0, note: substance.reason ?? 'substance gate' }];
     base.wallMs = Date.now() - started;
-    forgeLedger.push(base);
+    pushForgeLedger(base);
     saveStateToDisk();
     return base;
   }
@@ -5740,21 +5958,24 @@ async function materializeForgeOutcome(outcome: ForgeAttemptOutcome, spec: Forge
     // Deterministic rejection: without a quarantine bump the autopilot would
     // re-pick this (dream/backfill) spec every cycle.
     bumpForgeQuarantine(spec.name);
-    forgeLedger.push(base);
+    pushForgeLedger(base);
     saveStateToDisk();
     return base;
   }
   const doc = outcome.doc ?? extractToolDoc(outcome.source, spec.name);
-  const nearDup = findNearDuplicate(outcome.source, spec.name, listSelfHostedEntries());
+  // Novelty gate unified on the FULL registry (not just self-hosted tools), so
+  // a forge spec cannot mint a near-duplicate of any existing registry gene. A
+  // refusal is recorded as promotion_refused provenance (see noveltyGate).
+  const nearDup = noveltyGate(outcome.source, spec.name, 'forge');
   if (nearDup) {
     base.status = 'failed';
-    base.summary = `novelty gate: near-duplicate of self-hosted tool ${nearDup}`;
+    base.summary = `novelty gate: near-duplicate of ${nearDup}`;
     base.failures = [...(base.failures || []), { attempt: 0, note: base.summary }];
     base.wallMs = Date.now() - started;
     // Deterministic rejection: without a quarantine bump the autopilot would
     // re-pick this (dream/backfill) spec every cycle.
     bumpForgeQuarantine(spec.name);
-    forgeLedger.push(base);
+    pushForgeLedger(base);
     saveStateToDisk();
     return base;
   }
@@ -5766,7 +5987,7 @@ async function materializeForgeOutcome(outcome: ForgeAttemptOutcome, spec: Forge
     base.summary = 'failed oxlint gate';
     base.failures = [...(base.failures || []), { attempt: 0, note: lintVerdictNote(lint) }];
     base.wallMs = Date.now() - started;
-    forgeLedger.push(base);
+    pushForgeLedger(base);
     saveStateToDisk();
     return base;
   }
@@ -5801,7 +6022,7 @@ async function materializeForgeOutcome(outcome: ForgeAttemptOutcome, spec: Forge
       base.summary = writeRes.error;
       base.wallMs = Date.now() - started;
       bumpForgeQuarantine(spec.name);
-      forgeLedger.push(base);
+      pushForgeLedger(base);
       saveStateToDisk();
       return base;
     }
@@ -5818,7 +6039,7 @@ async function materializeForgeOutcome(outcome: ForgeAttemptOutcome, spec: Forge
       base.summary = 'live re-verify failed after write';
       base.wallMs = Date.now() - started;
       bumpForgeQuarantine(spec.name);
-      forgeLedger.push(base);
+      pushForgeLedger(base);
       saveStateToDisk();
       return base;
     }
@@ -5849,7 +6070,7 @@ async function materializeForgeOutcome(outcome: ForgeAttemptOutcome, spec: Forge
     ? `src/tools/${toSafeModuleName(spec.name)}.ts`
     : `.selfhosted/tools/${toSafeModuleName(spec.name)}.mjs`;
 
-  registry.unshift({
+  const forgeEntry: ToolEntry = {
     name: spec.name,
     domain: spec.domain,
     entrypoint,
@@ -5860,7 +6081,11 @@ async function materializeForgeOutcome(outcome: ForgeAttemptOutcome, spec: Forge
     versions: [newVersion],
     healthStatus: 'healthy',
     anomalyCount: 0,
-  });
+  };
+  // Route through the shared promotion chokepoint. The forge has already cleared
+  // the substance + quality + novelty gates above, so gate:false avoids a second
+  // judgment — but the insertion flows through the one authoritative path.
+  promoteTool(forgeEntry, { origin: 'forge', gate: false, push: false });
   status.registeredToolsCount = registry.length;
   status.totalUpgrades += 1;
 
@@ -5870,7 +6095,7 @@ async function materializeForgeOutcome(outcome: ForgeAttemptOutcome, spec: Forge
   base.summary = isClass ? `${spec.title} — verified class gene (not self-hosted)` : `${spec.title} — live self-hosted tool (${verdictNote})`;
   base.wallMs = Date.now() - started;
   forgeQuarantine.delete(spec.name); // success clears quarantine
-  forgeLedger.push(base);
+  pushForgeLedger(base);
 
   appendProvenanceEvent('template_component_built', {
     toolName: spec.name,
@@ -5983,20 +6208,6 @@ function appendOpenEndedCycle(result: OpenEndedCycleResult): void {
     fs.mkdirSync(path.dirname(OPEN_ENDED_CYCLES_FILE), { recursive: true });
     fs.appendFileSync(OPEN_ENDED_CYCLES_FILE, JSON.stringify({ at: Date.now(), ...result }) + '\n', 'utf-8');
   } catch { /* best-effort cycle log */ }
-}
-
-/** Approximate fast-check input shapes for the property gate, from the
- *  problem's required export name. Catches infinite loops / mutation for array
- *  and numeric capabilities; returns null for constructor-style problems where
- *  vector-shaped arbitraries do not apply. */
-function propertyVectorsForProblem(problem: { functionName: string; vectors?: unknown[] }): unknown[] | null {
-  // Prefer the minted problem's own sample calls: they have the correct
-  // parameter arity and shapes for any domain (arrays, strings, objects).
-  if (Array.isArray(problem.vectors) && problem.vectors.length) return problem.vectors;
-  const n = problem.functionName.toLowerCase();
-  if (/arr|list|array|chunk|merge|flatten|sort|dedupe|search|sieve|top|uniq/.test(n)) return [[[]], [[1, 2, 3]], [[5]]];
-  if (/cache|class|constructor/.test(n)) return null;
-  return [[0], [1], [2], [7]];
 }
 
 /** Build open-ended deps from real server state and run one engine cycle. */
@@ -6317,8 +6528,33 @@ async function intelView() {
   return { ...intelSnapshot(), sources: await intelSourceStatuses() };
 }
 
+/** Cap on retained intel proposals. Every pull can add up to ~60 and nothing
+ *  else prunes them, so without a cap the persisted state grows forever. */
+const INTEL_PROPOSALS_MAX = Number(process.env.RECOURSE_INTEL_PROPOSALS_MAX) || 500;
+
+/** Drop the lowest-value un-adopted proposals beyond the cap (adopted ones are
+ *  history the forge agenda points at, so they are always kept). */
+function pruneIntelProposals(): void {
+  if (intelProposals.length <= INTEL_PROPOSALS_MAX) return;
+  const adopted = intelProposals.filter((p) => p.status === 'adopted');
+  const rest = sortProposals(intelProposals.filter((p) => p.status !== 'adopted'))
+    .slice(0, Math.max(0, INTEL_PROPOSALS_MAX - adopted.length));
+  intelProposals = [...adopted, ...rest];
+}
+
+/** Single-flight: two overlapping pulls would both snapshot `existing` before
+ *  awaiting the network and then push the same titles twice. */
+let intelPullInflight: Promise<{ added: number; detail: string }> | null = null;
+
 /** Pull intel from reachable sources into durable proposals. */
-async function runIntelPull(): Promise<{ added: number; detail: string }> {
+function runIntelPull(): Promise<{ added: number; detail: string }> {
+  if (!intelPullInflight) {
+    intelPullInflight = runIntelPullOnce().finally(() => { intelPullInflight = null; });
+  }
+  return intelPullInflight;
+}
+
+async function runIntelPullOnce(): Promise<{ added: number; detail: string }> {
   let added = 0;
   const existing = new Set(intelProposals.map((p) => p.title.toLowerCase()));
   const st = await intelSourceStatuses();
@@ -6335,8 +6571,24 @@ async function runIntelPull(): Promise<{ added: number; detail: string }> {
       }
     }
   }
-  if (added) saveStateToDisk();
-  return { added, detail: `bbtech online=${Boolean(bb?.online)}` };
+  const om = st.find((s) => s.id === 'omniresearch');
+  if (om?.online) {
+    const res = await pullOmniresearchIdeas({ focus: 'improve Recourse tool generation, healing and learning', maxProposals: 12 });
+    if (res.ok) {
+      for (const idea of res.ideas) {
+        if (!idea.title || existing.has(idea.title.toLowerCase())) continue;
+        const p = bbtchIdeaToProposal(`intel_${Date.now()}_${intelProposals.length}_${added}`, idea, 'omniresearch');
+        intelProposals.push(p);
+        existing.add(p.title.toLowerCase());
+        added++;
+      }
+    }
+  }
+  if (added) {
+    pruneIntelProposals();
+    saveStateToDisk();
+  }
+  return { added, detail: `bbtech online=${Boolean(bb?.online)} omniresearch online=${Boolean(om?.online)}` };
 }
 
 /** Rank proposals via the strategy team (or a transparent local heuristic). */
@@ -6631,6 +6883,7 @@ async function runBrainGateway(body: {
   problem?: string;
   candidates?: DevBrainCandidate[];
   strategy?: DevBrainStrategy;
+  useJev?: boolean;
 }): Promise<Record<string, unknown>> {
   const brain = body.brain === 'dev-brain' ? 'dev-brain' : 'deterministic-brain';
   const drv = getFleetDriver(brain);
@@ -6656,9 +6909,9 @@ async function runBrainGateway(body: {
     candidates = dossier.findings.map((f) => ({ name: f.slug, description: f.reasons.join('; '), tags: ['recourse-finding'] }));
   }
   if (candidates.length === 0) return { ok: false, brain, error: 'no candidates to rank (provide candidates or have findings)' };
-  const res = await callDevBrain({ action, problem, candidates, strategy: body.strategy, url: base });
-  recordDev('brain', res.ok, `${action}: ${res.recommendedId ?? (res.ok ? 'ranked' : res.error ?? 'failed')}`, { driver: brain });
-  return { ok: res.ok, brain, action, ...res };
+  const res = await callDevBrain({ action, problem, candidates, strategy: body.strategy, url: base, useJev: body.useJev === true });
+  recordDev('brain', res.ok, `${action}${res.jevRequested ? '+jev' : ''}: ${res.recommendedId ?? (res.ok ? 'ranked' : res.error ?? 'failed')}`, { driver: brain });
+  return { brain, action, ...res };
 }
 
 // ---------------------------------------------------------------------------
@@ -7567,6 +7820,38 @@ function registerAllSchedulerJobs(): void {
       if (!scienceAutopilotOn) return { skipped: 'autopilot disabled' };
       const c = await runScienceCycle();
       return { cycle: c.cycle, mode: c.experimentMode, trendEngine: c.trendScan?.engine, findings: c.findings.length, trendAnomalies: c.trendScan?.anomalyCount };
+    },
+  });
+
+  // Self-feeding cross-domain synergy scan. Derives the corpus in-process from
+  // the live registry (methods) + open-ended problem archive (problems), runs
+  // the deterministic discovery core, and persists the map + ledger insight so
+  // the growth decision engine's synergy input stops being source:'none'. No
+  // HTTP and no caller-supplied payloads — the corpus is the system's own state.
+  register({
+    id: 'synergy',
+    name: 'Cross-Domain Synergy Scan (self-feeding)',
+    group: 'science',
+    cadenceMs: Math.max(60_000, Number(process.env.SYNERGY_SCAN_MS) || 15 * 60 * 1000),
+    enabledByDefault: true,
+    run: async () => {
+      const scan = selfFeedSynergyScan(registry, getOpenEndedArchive().list());
+      if (scan.methods.length === 0 || scan.problems.length === 0 || scan.candidates.length === 0) {
+        return {
+          skipped: 'empty corpus or no cross-domain bridges',
+          methods: scan.methods.length,
+          problems: scan.problems.length,
+          candidates: scan.candidates.length,
+        };
+      }
+      persistSelfFeedScan(scan);
+      return {
+        candidates: scan.candidates.length,
+        methods: scan.methods.length,
+        problems: scan.problems.length,
+        domains: scan.map.domains.length,
+        manifest: scan.manifest.slice(0, 12),
+      };
     },
   });
 

@@ -132,6 +132,29 @@ export function createDreamRouter(deps: DreamRouterDeps): Router {
     }
   });
 
+  router.post('/dream/reconcile-registry', async (_req, res) => {
+    try {
+      const r = await deps.dreamEngine.reconcileRegistry();
+      deps.setDreamState(r.dreamState);
+      // Provenance so the mass re-verdict is auditable rather than a silent
+      // bulk edit: how many claims survived, and how many did not.
+      deps.appendProvenance('dream_registry_reconciled', {
+        total: r.report.total,
+        reverified: r.report.reverified,
+        stillVerified: r.report.stillVerified,
+        downgraded: r.report.downgraded,
+        upgraded: r.report.upgraded,
+        unverifiable: r.report.unverifiable,
+        codeRewrittenToModuleForm: r.report.codeRewrittenToModuleForm,
+        vectorsRestored: r.report.vectorsRestored,
+      });
+      deps.saveState();
+      res.json({ success: true, report: r.report });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   router.get('/dream/cron', async (req, res) => {
     try {
       if (process.env.DREAM_CRON_SECRET && req.headers['x-dream-secret'] !== process.env.DREAM_CRON_SECRET) {

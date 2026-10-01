@@ -264,10 +264,14 @@ export interface OrchestrationRun {
  */
 export async function orchestrate(
   explicitPhase?: PhaseId,
-  opts: { apply?: boolean } = {},
+  opts: { apply?: boolean; resources?: ResourceSample } = {},
 ): Promise<OrchestrationRun> {
   const activePhase = resolveActivePhase(explicitPhase);
-  const resources = sampleResources();
+  // `opts.resources` is a real seam, not a test affordance: a caller that has
+  // already sampled the host (or a scheduler tick that wants to decide from a
+  // snapshot) should not have to re-sample, and tests should not have to mock a
+  // Node builtin to exercise a decision function.
+  const resources = opts.resources ?? sampleResources();
   const table = await pm2Table();
   const decision = decideOrchestration(activePhase, table, resources);
   const started: string[] = [];
