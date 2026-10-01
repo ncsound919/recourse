@@ -60,11 +60,12 @@ export class ComposerLearner {
 
   /** Record (or update) a rating for a reproducible composition brief. */
   rate(brief: Pick<ComposeBrief, 'style' | 'seed' | 'bars' | 'key' | 'major' | 'bpm'>, rating: number, tags?: string[], notes?: string): Episode {
-    if (![4, 8, 16].includes(brief.bars)) throw new Error('bars must be 4, 8 or 16');
+    const bars = brief.bars;
+    if (bars !== 4 && bars !== 8 && bars !== 16) throw new Error('bars must be 4, 8 or 16');
     if (rating < 1 || rating > 5) throw new Error('rating must be 1..5');
     const style = brief.style as StyleId;
     // Capture the canonical, reproducible track.
-    const t = compose({ style, seed: brief.seed, bars: brief.bars, key: brief.key, major: brief.major, bpm: brief.bpm });
+    const t = compose({ style, seed: brief.seed, bars, key: brief.key, major: brief.major, bpm: brief.bpm });
     const rootMoves: number[] = [];
     for (let i = 1; i < t.chords.length; i++) {
       let d = (t.chords[i].rootPc - t.chords[i - 1].rootPc) % 12;
@@ -73,9 +74,11 @@ export class ComposerLearner {
       rootMoves.push(d);
     }
     const episode: Episode = {
-      id: `${style}-${brief.seed}-${brief.bars}`,
+      // Use the RESOLVED seed: an omitted seed used to produce ids like
+      // "trap-undefined-8" and an episode that could not be reproduced.
+      id: `${style}-${t.seed}-${bars}`,
       style,
-      brief: { style, seed: brief.seed, bars: brief.bars, key: t.key, major: t.major, bpm: t.bpm },
+      brief: { style, seed: t.seed, bars, key: t.key, major: t.major, bpm: t.bpm },
       chords: t.chords.map((c) => `${pcName(c.rootPc)}${c.quality}`),
       rootMoves,
       qualities: t.chords.map((c) => c.quality),

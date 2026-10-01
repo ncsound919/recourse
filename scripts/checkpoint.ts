@@ -12,6 +12,7 @@
  */
 
 import { FileCheckpointStore, resolveCheckpoint, evaluateCheckpointTimeout } from '../src/autopilot/checkpoint';
+import type { CheckpointT } from '../src/autopilot/loopTypes';
 import { DEFAULT_CHECKPOINTS_DIR, listBusinessSlugs } from '../src/autopilot/businessProfile';
 
 function parseArgs(argv: string[]): { cmd: string; slug?: string; id?: string; notes?: string } {
@@ -62,7 +63,7 @@ Options:
 async function main(): Promise<void> {
   switch (cmd) {
     case 'list': {
-      let checkpoints = [];
+      let checkpoints: CheckpointT[] = [];
       if (slug) {
         checkpoints = await store.list(slug);
       } else {

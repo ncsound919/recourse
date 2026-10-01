@@ -5,7 +5,7 @@
  * The sidecar is STATELESS: Recourse sends the graph (nodes+edges) in every
  * request and the sidecar returns real networkx metrics over that data. The
  * single source of truth for ontology data stays here in TypeScript
- * (`src/lib/biotechKnowledgeGraph.ts`) �?" the sidecar never owns a copy, so
+ * (`src/lib/biotechKnowledgeGraph.ts`) — the sidecar never owns a copy, so
  * there is no drift.
  *
  * Honesty contract (mirrors `src/intake/*`): every call is guarded by a
@@ -164,7 +164,7 @@ async function getKg<T>(path: string, base: string, timeoutMs: number): Promise<
   }
 }
 
-/** Health check �?" used by the status route so the UI can report sidecar online/offline honestly. */
+/** Health check — used by the status route so the UI can report sidecar online/offline honestly. */
 export async function kgSidecarHealth(base = KG_SIDECAR_DEFAULT_URL, timeoutMs = 2000): Promise<KgHealthResult> {
   const call = await getKg<KgHealthResult>('/health', base, timeoutMs);
   if (!call.ok || !call.data) return { ok: false, error: call.error, latencyMs: call.latencyMs };
@@ -207,7 +207,7 @@ export async function kgBridges(
 /**
  * Projects the canonical oncology KG into {nodes, edges} for the sidecar.
  * Edges mean "these two assets are related through a shared target protein or a
- * shared biomarker" �?" the raw material for real graph analytics.
+ * shared biomarker" — the raw material for real graph analytics.
  * This is pure/deterministic so it is unit-testable with no network.
  */
 export function oncologyKgToGraph(): KgPayload {

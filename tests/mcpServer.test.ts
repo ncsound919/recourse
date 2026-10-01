@@ -49,13 +49,13 @@ describe('Recourse MCP server (stdio)', () => {
     // honest "unreachable" note), so the response must be shaped content.
     const res = await client.callTool({ name: 'recourse.status', arguments: {} });
     expect(Array.isArray(res.content)).toBe(true);
-    expect(res.content[0]).toHaveProperty('type', 'text');
+    expect((res.content as Array<{ type: string }>)[0]).toHaveProperty('type', 'text');
 
     // A write tool with no secret configured reports the fail-closed state as
     // text — it never throws and never pretends the write happened.
     const writeRes = await client.callTool({ name: 'recourse.export_skill', arguments: { toolName: 'whatever' } });
     expect(Array.isArray(writeRes.content)).toBe(true);
-    expect(String(writeRes.content[0].text)).toContain('RECOURSE_API_SECRET is not set');
+    expect(String((writeRes.content as Array<{ text?: string }>)[0].text)).toContain('RECOURSE_API_SECRET is not set');
 
     await client.close();
     transport.close();

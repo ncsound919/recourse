@@ -1,5 +1,5 @@
 /**
- * Recourse MCP server �?" exposes the live Recourse system to any MCP host
+ * Recourse MCP server — exposes the live Recourse system to any MCP host
  * (Claude, Cursor, opencode, DSH...) over stdio.
  *
  * Read tools reflect live state; write tools (skills export/import) drive the
