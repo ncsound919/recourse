@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Reviews ONLY the dependencies a PR adds/changes (not the pre-existing
       # set), so it is a real gate that does not go red on legacy advisories.
       - uses: actions/dependency-review-action@v5
