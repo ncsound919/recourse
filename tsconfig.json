@@ -31,6 +31,7 @@
     "skills-out",
     "bisim and abm",
     "deteministic researcher",
-    "recourse-fix-bundle"
+    "recourse-fix-bundle",
+    "python/*/cf-worker.ts"
   ]
 }
