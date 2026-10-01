@@ -2,7 +2,6 @@ import React, {
   useState,
   useEffect,
   useCallback,
-  useMemo,
   useRef,
   Suspense,
 } from 'react';
@@ -75,38 +74,10 @@ import { recourseJson } from './lib/recourseClient';
 const RecourseVisualizer3D = React.lazy(() =>
   import('./components/RecourseVisualizer3D').then((m) => ({ default: m.RecourseVisualizer3D }))
 );
-import {
-  Activity,
-  GitCommit,
-  Layers,
-  Terminal,
-  FileText,
-  Sparkles,
-  RefreshCw,
-  Wrench,
-  Target,
-  Brain,
-  Moon,
-  GitBranch,
-  Users,
-  Atom,
-  Cpu,
-   Puzzle,
-   Server,
-   Globe,
-   Download,
-   FolderSearch,
-   Library,
-   Box,
-   Settings,
-   Gamepad2,
-   BarChart3,
-  Binary,
-  Newspaper,
-  Music,
-  Mic,
-  Network
-} from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
+import { Sidebar } from './components/Sidebar';
+import { CommandPalette } from './components/CommandPalette';
+import { NAV_ITEMS, navGroupOf, navItem, type TabKey } from './components/nav';
 
 // ================================================================
 //  Custom Hooks
@@ -137,7 +108,7 @@ function useRecourseState() {
         fetch('/api/recourse/status').then((r) => r.json()),
         fetch('/api/recourse/registry').then((r) => r.json()),
         fetch('/api/recourse/provenance').then((r) => r.json()),
-        fetch('/api/recourse/reports').then((r) => r.json()),
+        fetch('/api/recourse/reports/hourly').then((r) => r.json()),
       ]);
 
       if (resStatus?.status) setStatus(resStatus.status);
@@ -191,7 +162,10 @@ function useAutoEvolution(
   useEffect(() => {
     if (!isAutoEvolving) return;
 
-    let mounted = true;
+    // The busy flag belongs to the in-flight tick, not to this effect instance:
+    // the effect re-runs whenever `onTick` changes identity, and the old cleanup
+    // cleared the flag while a tick was still running - so the new interval
+    // started a second, overlapping tick.
     const interval = setInterval(async () => {
       if (isBusyRef.current) return;
       isBusyRef.current = true;
@@ -200,15 +174,11 @@ function useAutoEvolution(
       } catch (err) {
         console.warn('AutoEvolution tick failed:', err);
       } finally {
-        if (mounted) {
-          isBusyRef.current = false;
-        }
+        isBusyRef.current = false;
       }
     }, tickIntervalMs);
 
     return () => {
-      mounted = false;
-      isBusyRef.current = false;
       clearInterval(interval);
     };
   }, [isAutoEvolving, onTick, tickIntervalMs]);
@@ -247,317 +217,6 @@ function useToast(durationMs: number = 4000) {
 //  Main App Component
 // ================================================================
 
-type TabKey =
-  | 'overview'
-  | 'lego'
-  | 'provider'
-  | 'music-therapy'
-  | 'music'
-  | 'rating'
-  | 'recursive-math'
-  | 'recursive-learner'
-  | 'decision'
-  | 'dreaming'
-  | 'forge'
-  | 'github'
-  | 'subagents'
-  | 'self-repair'
-  | 'benchmark'
-  | 'provenance'
-  | 'registry'
-  | 'verifier'
-   | 'reports'
-  | 'reporter'
-  | 'intake-growth'
-  | 'corpus'
-  | 'skills'
-  | 'web'
-  | 'visualizer'
-  | 'dataviz'
-  | 'ghidra'
-  | 'gamepad'
-  | 'voice-clone'
-  | 'fleet-voice'
-  | 'settings';
-
-const TABS: Array<{
-  key: TabKey;
-  label: string;
-  icon: React.ReactNode;
-  badge?: (status: SystemStatus, count?: number) => React.ReactNode;
-}> = [
-  {
-    key: 'overview',
-    label: 'OVERVIEW',
-    icon: <Activity className="w-4 h-4" />,
-  },
-  {
-    key: 'lego',
-    label: 'LEGO COMPOSABLE ML',
-    icon: <Puzzle className="w-4 h-4 text-amber-400" />,
-    badge: () => (
-      <span className="px-1.5 py-0.2 bg-amber-950 text-amber-300 text-[10px] rounded border border-amber-800 font-bold">
-        7-LAYER
-      </span>
-    ),
-  },
-  {
-    key: 'provider',
-    label: 'AI PROVIDER',
-    icon: <Server className="w-4 h-4 text-indigo-400" />,
-    badge: () => (
-      <span className="px-1.5 py-0.2 bg-indigo-950 text-indigo-300 text-[10px] rounded border border-indigo-800 font-bold">
-        API
-      </span>
-    ),
-  },
-  {
-    key: 'music-therapy',
-    label: 'MUSIC THERAPY',
-    icon: <Activity className="w-4 h-4 text-fuchsia-400" />,
-    badge: () => (
-      <span className="px-1.5 py-0.2 bg-fuchsia-950 text-fuchsia-300 text-[10px] rounded border border-fuchsia-800 font-bold">
-        432Hz
-      </span>
-    ),
-  },
-  {
-    key: 'music',
-    label: 'MUSIC (SOUNDLAB)',
-    icon: <Music className="w-4 h-4 text-emerald-400" />,
-    badge: () => (
-      <span className="px-1.5 py-0.2 bg-emerald-950 text-emerald-300 text-[10px] rounded border border-emerald-800 font-bold">
-        PROGRESSIONS
-      </span>
-    ),
-  },
-  {
-    key: 'rating',
-    label: 'A/B RATING LOOP',
-    icon: <Activity className="w-4 h-4 text-amber-400" />,
-    badge: () => (
-      <span className="px-1.5 py-0.2 bg-amber-950 text-amber-300 text-[10px] rounded border border-amber-800 font-bold">
-        AUDIO
-      </span>
-    ),
-  },
-  {
-    key: 'forge',
-    label: 'STRUCTURAL FORGE',
-    icon: <Cpu className="w-4 h-4 text-emerald-400" />,
-    badge: (status) => (
-      <span className="px-1.5 py-0.2 bg-emerald-950 text-emerald-300 text-[10px] rounded border border-emerald-800 font-bold">
-        {status.artifacts?.length || 0}
-      </span>
-    ),
-  },
-  {
-    key: 'recursive-learner',
-    label: 'BETA-POSTERIOR LEARNING',
-    icon: <Brain className="w-4 h-4 text-emerald-400" />,
-    badge: () => (
-      <span className="px-1.5 py-0.2 bg-emerald-950 text-emerald-300 text-[10px] rounded border border-emerald-800 font-bold">
-        META
-      </span>
-    ),
-  },
-  {
-    key: 'recursive-math',
-    label: '5-FORMULA LOOP',
-    icon: <Atom className="w-4 h-4 text-indigo-400" />,
-    badge: () => (
-      <span className="px-1.5 py-0.2 bg-indigo-950 text-indigo-300 text-[10px] rounded border border-indigo-800 font-bold">
-        e^ix
-      </span>
-    ),
-  },
-  {
-    key: 'decision',
-    label: 'DETERMINISTIC GROWTH',
-    icon: <Brain className="w-4 h-4 text-indigo-400" />,
-    badge: () => (
-      <span className="px-1.5 py-0.2 bg-indigo-950 text-indigo-300 text-[10px] rounded border border-indigo-800 font-bold">
-        U(a)
-      </span>
-    ),
-  },
-  {
-    key: 'dreaming',
-    label: 'ALWAYS-ON DREAMING',
-    icon: <Moon className="w-4 h-4 text-purple-400" />,
-    badge: () => (
-      <span className="px-1.5 py-0.2 bg-purple-950 text-purple-300 text-[10px] rounded border border-purple-800 font-bold">
-        24/7
-      </span>
-    ),
-  },
-  {
-    key: 'github',
-    label: 'GITHUB RESEARCH',
-    icon: <GitBranch className="w-4 h-4 text-blue-400" />,
-  },
-  {
-    key: 'subagents',
-    label: 'SUBAGENTS',
-    icon: <Users className="w-4 h-4 text-cyan-400" />,
-    badge: () => (
-      <span className="px-1.5 py-0.2 bg-cyan-950 text-cyan-300 text-[10px] rounded border border-cyan-800 font-bold">
-        6 swarm
-      </span>
-    ),
-  },
-  {
-    key: 'self-repair',
-    label: 'SELF-REPAIR',
-    icon: <Wrench className="w-4 h-4 text-emerald-400" />,
-    badge: (status) => (
-      <span className="px-1.5 py-0.2 bg-emerald-950 text-emerald-400 text-[10px] rounded border border-emerald-800 font-bold">
-        {status.selfRepair?.totalHealedCount || 0}
-      </span>
-    ),
-  },
-  {
-    key: 'benchmark',
-    label: 'BENCHMARK',
-    icon: <Target className="w-4 h-4 text-indigo-400" />,
-    badge: (status) => {
-      const rp = status.realProgress;
-      if (!rp || rp.benchmarkTotal === 0) return null;
-      return (
-        <span className="px-1.5 py-0.2 bg-indigo-950 text-indigo-300 text-[10px] rounded border border-indigo-800 font-bold">
-          {rp.benchmarkSolved}/{rp.benchmarkTotal}
-        </span>
-      );
-    },
-  },
-  {
-    key: 'intake-growth',
-    label: 'INTAKE & GROWTH',
-    icon: <Globe className="w-4 h-4 text-emerald-400" />,
-  },
-  {
-    key: 'corpus',
-    label: 'CORPUS',
-    icon: <FolderSearch className="w-4 h-4 text-cyan-400" />,
-  },
-  {
-    key: 'skills',
-    label: 'SKILLS',
-    icon: <Library className="w-4 h-4 text-purple-400" />,
-  },
-  {
-    key: 'web',
-    label: 'WEB DOWNLOAD',
-    icon: <Download className="w-4 h-4 text-sky-400" />,
-  },
-  {
-    key: 'visualizer',
-    label: '3D VISUALIZER',
-    icon: <Box className="w-4 h-4 text-indigo-400" />,
-    badge: () => (
-      <span className="px-1.5 py-0.2 bg-indigo-950 text-indigo-300 text-[10px] rounded border border-indigo-800 font-bold">
-        LIVE
-      </span>
-    ),
-  },
-  {
-    key: 'dataviz',
-    label: 'DATA VIZ SIDECAR',
-    icon: <BarChart3 className="w-4 h-4 text-cyan-400" />,
-    badge: () => (
-      <span className="px-1.5 py-0.2 bg-cyan-950 text-cyan-300 text-[10px] rounded border border-cyan-800 font-bold">
-        PY
-      </span>
-    ),
-  },
-  {
-    key: 'ghidra',
-    label: 'GHIDRA RE',
-    icon: <Binary className="w-4 h-4 text-emerald-400" />,
-    badge: () => (
-      <span className="px-1.5 py-0.2 bg-emerald-950 text-emerald-300 text-[10px] rounded border border-emerald-800 font-bold">
-        NSA
-      </span>
-    ),
-  },
-  {
-    key: 'gamepad',
-    label: 'GAMEPAD',
-    icon: <Gamepad2 className="w-4 h-4 text-emerald-400" />,
-  },
-  {
-    key: 'settings',
-    label: 'SETTINGS',
-    icon: <Settings className="w-4 h-4 text-slate-300" />,
-  },
-  {
-    key: 'registry',
-    label: 'GENES',
-    icon: <Layers className="w-4 h-4" />,
-    badge: (status) =>
-      status.pendingApprovalsCount > 0 ? (
-        <span className="px-1.5 py-0.2 bg-amber-500/20 text-amber-400 border border-amber-500/30 text-[10px] rounded font-bold">
-          {status.pendingApprovalsCount}
-        </span>
-      ) : null,
-  },
-  {
-    key: 'provenance',
-    label: 'PROVENANCE',
-    icon: <GitCommit className="w-4 h-4" />,
-    badge: (_, count) => (
-      <span className="px-1.5 py-0.2 bg-slate-950 text-[10px] rounded border border-slate-800">
-        {count || 0}
-      </span>
-    ),
-  },
-  {
-    key: 'verifier',
-    label: 'VERIFIER',
-    icon: <Terminal className="w-4 h-4" />,
-  },
-  {
-    key: 'reports',
-    label: 'REPORTS',
-    icon: <FileText className="w-4 h-4" />,
-    badge: (_, count) => (
-      <span className="px-1.5 py-0.2 bg-slate-950 text-[10px] rounded border border-slate-800">
-        {count || 0}
-      </span>
-    ),
-  },
-  {
-    key: 'reporter',
-    label: 'SELF REPORTER',
-    icon: <Newspaper className="w-4 h-4 text-cyan-400" />,
-    badge: () => (
-      <span className="px-1.5 py-0.2 bg-cyan-950 text-cyan-300 text-[10px] rounded border border-cyan-800 font-bold">
-        AUTO
-      </span>
-    ),
-  },
-  {
-    key: 'voice-clone',
-    label: 'VOICE CLONE',
-    icon: <Mic className="w-4 h-4 text-rose-400" />,
-    badge: () => (
-      <span className="px-1.5 py-0.2 bg-rose-950 text-rose-300 text-[10px] rounded border border-rose-800 font-bold">
-        TTS
-      </span>
-    ),
-  },
-  {
-    key: 'fleet-voice',
-    label: 'FLEET VOICE',
-    icon: <Network className="w-4 h-4 text-cyan-400" />,
-    badge: () => (
-      <span className="px-1.5 py-0.2 bg-cyan-950 text-cyan-300 text-[10px] rounded border border-cyan-800 font-bold">
-        AXIOM / OPENHUB
-      </span>
-    ),
-  },
-];
-
 export default function App() {
   // -------------------- State Management --------------------
   const {
@@ -576,7 +235,7 @@ export default function App() {
   // Live status polling + event-driven voice narration monitor.
   useSystemVoiceMonitor(setStatus);
   // Speak real Axiom/OpenHub transitions (bridge reachability, loop lifecycle,
-  // audit grade/findings) — see src/hooks/useFleetVoiceMonitor.ts.
+  // audit grade/findings) - see src/hooks/useFleetVoiceMonitor.ts.
   useFleetVoiceMonitor();
 
   const { toastMessage, showToast } = useToast(4000);
@@ -601,7 +260,7 @@ export default function App() {
     onAction: (action) => {
       setLastGamepadAction(action);
       setGamepadPulse((p) => p + 1);
-      const tabs = TABS.map((t) => t.key);
+      const tabs = NAV_ITEMS.map((t) => t.key);
       const idx = tabs.indexOf(activeTabRef.current);
       switch (action) {
         case 'left':
@@ -635,13 +294,28 @@ export default function App() {
   });
   const gamepadSnapshot = useGamepadSnapshot();
   const [isAiModalOpen, setIsAiModalOpen] = useState<boolean>(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
+
+  // Ctrl/Cmd+K opens the jump list from anywhere.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setPaletteOpen((o) => !o);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // Each view starts at the top; switching used to keep the previous scroll offset.
+  useEffect(() => {
+    window.scrollTo({ top: 0 });
+  }, [activeTab]);
   const [isStepping, setIsStepping] = useState<boolean>(false);
   const [isGeneratingReport, setIsGeneratingReport] = useState<boolean>(false);
   const [isApproving, setIsApproving] = useState<boolean>(false);
-
-  // -------------------- Memoized derived values --------------------
-  const registryCount = useMemo(() => registry.length, [registry]);
-  const reportCount = useMemo(() => reports.length, [reports]);
 
   // -------------------- Handlers (memoized) --------------------
   const handleToggleAuto = useCallback(
@@ -681,7 +355,7 @@ export default function App() {
 
         if (res.success) {
           setStatus((prev) => ({ ...prev, activePolicy: policy }));
-          showToast(`🛡 Gate Policy updated to: ${policy}`);
+          showToast(` Gate Policy updated to: ${policy}`);
           fetchAllState(true);
         }
       } catch (err: any) {
@@ -706,7 +380,7 @@ export default function App() {
         if (res.success && res.executedAction) {
           fetchAllState(true);
           showToast(
-            `⚡ Deterministic Step: [${res.executedAction.actionType}] ${res.executedAction.title}`
+            ` Deterministic Step: [${res.executedAction.actionType}] ${res.executedAction.title}`
           );
         } else {
           // Fallback to domain evolve
@@ -744,7 +418,7 @@ export default function App() {
 
         if (res.success) {
           fetchAllState(true);
-          showToast(`✅ Executed Deterministic Action: ${res.executedAction.title}`);
+          showToast(` Executed Deterministic Action: ${res.executedAction.title}`);
         }
         return res;
       } catch (err: any) {
@@ -769,7 +443,7 @@ export default function App() {
 
         if (res.success) {
           fetchAllState(true);
-          showToast(`✅ Approved & Promoted ${toolName} v${version}!`);
+          showToast(` Approved & Promoted ${toolName} v${version}!`);
         }
       } catch (err: any) {
         showToast(`Approval failed: ${err.message}`);
@@ -790,7 +464,7 @@ export default function App() {
 
       if (res.success) {
                 fetchAllState(true);
-        showToast(`📄 Hourly Report Digest ${res.report.id} generated!`);
+        showToast(` Hourly Report Digest ${res.report.id} generated!`);
         setActiveTab('reports');
       }
     } catch (err: any) {
@@ -828,7 +502,7 @@ export default function App() {
         if (res.success) {
           fetchAllState(true);
           showToast(
-            `✨ AI Mutation ${res.toolName} v${res.version} [${res.outcome.toUpperCase()}]`
+            ` AI Mutation ${res.toolName} v${res.version} [${res.outcome.toUpperCase()}]`
           );
         }
         return res;
@@ -852,7 +526,7 @@ export default function App() {
         if (res.success) {
           fetchAllState(true);
           showToast(
-            `🔥 Defect Injected: ${chaosType} on ${targetToolName}. Autonomous healing radar engaged.`
+            ` Defect Injected: ${chaosType} on ${targetToolName}. Autonomous healing radar engaged.`
           );
         }
       } catch (err: any) {
@@ -871,7 +545,7 @@ export default function App() {
 
       if (res.success) {
                 fetchAllState(true);
-        showToast(`✨ Autonomous Scan Complete: Healed ${res.healedCount} compromised genes!`);
+        showToast(` Autonomous Scan Complete: Healed ${res.healedCount} compromised genes!`);
       }
     } catch (err: any) {
       showToast(`Scan & Heal failed: ${err.message}`);
@@ -889,7 +563,7 @@ export default function App() {
 
         if (res.success) {
           fetchAllState(true);
-          showToast(`🛡 Gene ${toolName} hot-patched to v${res.healResult.version}!`);
+          showToast(` Gene ${toolName} hot-patched to v${res.healResult.version}!`);
         }
       } catch (err: any) {
         showToast(`Repair failed: ${err.message}`);
@@ -909,7 +583,7 @@ export default function App() {
 
         if (res.success) {
           fetchAllState(true);
-          showToast(`🧬 Genetic Crossover Successful: Created ${res.hybridTool.name}!`);
+          showToast(` Genetic Crossover Successful: Created ${res.hybridTool.name}!`);
           setActiveTab('registry');
         }
       } catch (err: any) {
@@ -930,7 +604,7 @@ export default function App() {
 
         if (res.success) {
           setStatus((prev) => ({ ...prev, hyperParams: res.hyperParams }));
-          showToast('⚙ Hyperparameters synchronized to Recourse core engine.');
+          showToast(' Hyperparameters synchronized to Recourse core engine.');
         }
       } catch (err: any) {
         showToast(`Hyperparameter update error: ${err.message}`);
@@ -950,7 +624,7 @@ export default function App() {
 
         if (res.success) {
           fetchAllState(true);
-          showToast(`✨ Lucid Crystallization: Gene ${res.crystallizedTool?.name} Promoted!`);
+          showToast(` Lucid Crystallization: Gene ${res.crystallizedTool?.name} Promoted!`);
         }
         return res;
       } catch (err: any) {
@@ -972,7 +646,7 @@ export default function App() {
 
         if (res.success) {
           fetchAllState(true);
-          showToast(`✨ Ingested ${res.ingestionResult?.toolName} from GitHub!`);
+          showToast(` Ingested ${res.ingestionResult?.toolName} from GitHub!`);
         }
         return res;
       } catch (err: any) {
@@ -994,7 +668,7 @@ export default function App() {
 
         if (res.success) {
           fetchAllState(true);
-          showToast(`🚀 Dispatched task to ${agentType}!`);
+          showToast(` Dispatched task to ${agentType}!`);
         }
         return res;
       } catch (err: any) {
@@ -1036,108 +710,70 @@ export default function App() {
 
   // -------------------- Render --------------------
   
-  // Calculate recursive UI intensity based on deterministic growth metrics
-  const score = status.readinessScore || 0;
-  const gen = status.generation || 1;
-  
-  let intensityClass = 'bg-slate-950 border-slate-900';
-  let glowEffect = '';
-  
-  if (score > 0.95 && gen > 20) {
-    intensityClass = 'bg-slate-950 border-indigo-500/50';
-    glowEffect = 'shadow-[inset_0_0_150px_rgba(99,102,241,0.15)]';
-  } else if (score > 0.8 && gen > 10) {
-    intensityClass = 'bg-slate-950 border-indigo-700/30';
-    glowEffect = 'shadow-[inset_0_0_100px_rgba(99,102,241,0.08)]';
-  } else if (score > 0.5 && gen > 5) {
-    intensityClass = 'bg-slate-950 border-indigo-900/20';
-    glowEffect = 'shadow-[inset_0_0_50px_rgba(99,102,241,0.03)]';
-  }
+  const current = navItem(activeTab);
 
   return (
-    <div className={`min-h-screen ${intensityClass} ${glowEffect} text-slate-100 font-sans antialiased selection:bg-indigo-500 selection:text-white transition-all duration-1000`}>
-      <Header
+    <div className="min-h-dvh bg-ink-950 text-ink-200 lg:grid lg:grid-cols-[15rem_minmax(0,1fr)]">
+      <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-3 focus:z-50 focus:rounded-md focus:bg-ink-800 focus:px-3 focus:py-1.5 focus:text-sm">
+        Skip to content
+      </a>
+      <Sidebar
+        active={activeTab}
         status={status}
-        onToggleAuto={handleToggleAuto}
-        onPolicyChange={handlePolicyChange}
-        onOpenAiMutator={() => setIsAiModalOpen(true)}
-        onGenerateReport={handleGenerateReport}
-        isGeneratingReport={isGeneratingReport}
+        onSelect={setActiveTab}
+        onOpenPalette={() => setPaletteOpen(true)}
+        open={navOpen}
+        onClose={() => setNavOpen(false)}
       />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {/* Tab Navigation */}
-        <div className="flex flex-wrap items-center justify-between border-b border-slate-800 pb-3 mb-6 gap-3">
-          <div className="flex flex-wrap items-center space-x-1 bg-slate-900 p-1.5 rounded-xl border border-slate-800 font-mono text-xs">
-            {TABS.map((tab) => {
-              const isActive = activeTab === tab.key;
-              const badge = tab.badge
-                ? tab.badge(status, tab.key === 'registry' ? registryCount : reportCount)
-                : null;
-              return (
-                <button
-                  key={tab.key}
-                  onClick={() => setActiveTab(tab.key)}
-                  className={`flex items-center space-x-1.5 px-3 py-2 rounded-lg font-bold transition-all cursor-pointer ${
-                    isActive
-                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/20'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                  aria-current={isActive ? 'page' : undefined}
-                >
-                  {tab.icon}
-                  <span>{tab.label}</span>
-                  {badge && <span className="ml-1">{badge}</span>}
-                </button>
-              );
-            })}
-          </div>
+      <div className="min-w-0">
+        <Header
+          status={status}
+          title={current.label}
+          group={navGroupOf(activeTab)}
+          onToggleAuto={handleToggleAuto}
+          onOpenAiMutator={() => setIsAiModalOpen(true)}
+          onGenerateReport={handleGenerateReport}
+          isGeneratingReport={isGeneratingReport}
+          onOpenNav={() => setNavOpen(true)}
+          extra={
+            gamepadConnected ? (
+              <GamepadIndicator
+                connected={gamepadConnected}
+                name={gamepadName}
+                lastAction={lastGamepadAction}
+                pulse={gamepadPulse}
+              />
+            ) : null
+          }
+        />
 
-          <div className="flex items-center space-x-2 font-mono text-xs text-slate-400">
-            <GamepadIndicator
-              connected={gamepadConnected}
-              name={gamepadName}
-              lastAction={lastGamepadAction}
-              pulse={gamepadPulse}
-            />
-            <span className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-lg">
-              <RefreshCw className="w-3.5 h-3.5 text-indigo-400 animate-spin" />
-              <span>Deterministic OS Core Active</span>
-            </span>
-          </div>
-        </div>
-
-        {/* Loading/Error States */}
-        {loading && (
-          <div className="flex justify-center items-center p-8">
-            <RefreshCw className="w-8 h-8 text-indigo-400 animate-spin" />
-            <span className="ml-3 text-slate-400 font-mono">Synchronizing state...</span>
-          </div>
-        )}
+        <main id="main" className="mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8">
         {error && !loading && (
-          <div className="p-4 mb-6 bg-red-950/40 border border-red-800/60 rounded-xl text-red-300 text-sm flex items-center gap-2">
-            <span>⚠️ {error}</span>
+          <div className="mb-6 flex items-center gap-3 rounded-lg border border-bad-800/60 bg-bad-950/40 px-4 py-3 text-sm text-bad-200" role="alert">
+            <span>Could not load system state: {error}</span>
             <button
-              onClick={fetchAllState}
-              className="ml-auto px-3 py-1 bg-red-900/40 hover:bg-red-800/60 rounded-lg text-xs font-mono transition"
+              onClick={() => fetchAllState(true)}
+              className="ml-auto rounded-md border border-bad-800 px-2.5 py-1 text-xs text-bad-100 transition-colors hover:bg-bad-900/60"
             >
               Retry
             </button>
           </div>
         )}
 
-        {/* Determinism Banner */}
-        <MissionStatusStrip />
-        <DeterminismBanner status={status} />
+        {loading && (
+          <div className="flex items-center gap-2 py-16 text-sm text-ink-400">
+            <RefreshCw className="h-4 w-4 animate-spin text-ink-500" />
+            Loading system state
+          </div>
+        )}
 
-        {/* Metrics Overview (always visible) */}
-        <MetricsOverview status={status} />
-
-        {/* Tab Views */}
         {!loading && (
           <>
             {activeTab === 'overview' && (
-              <div className="space-y-6">
+              <div className="space-y-5">
+                <MissionStatusStrip />
+                <MetricsOverview status={status} />
                 <LiveEvolutionControl
                   status={status}
                   onToggleAuto={handleToggleAuto}
@@ -1145,15 +781,20 @@ export default function App() {
                   onPolicyChange={handlePolicyChange}
                   isStepping={isStepping}
                 />
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <DeterminismBanner status={status} />
+                <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
                   <ProvenanceTimeline
                     events={provenanceEvents.slice(0, 10)}
                     integrity={chainIntegrity}
+                    compact
+                    onViewAll={() => setActiveTab('provenance')}
                   />
                   <ToolRegistryView
                     registry={registry}
                     onApprovePending={handleApprovePending}
                     isApproving={isApproving}
+                    limit={10}
+                    onViewAll={() => setActiveTab('registry')}
                   />
                 </div>
               </div>
@@ -1292,9 +933,9 @@ export default function App() {
             {activeTab === 'visualizer' && (
               <Suspense
                 fallback={
-                  <div className="h-[560px] rounded-2xl border border-slate-800 bg-slate-950/60 flex items-center justify-center">
-                    <div className="flex items-center gap-3 text-slate-400 font-mono text-sm">
-                      <RefreshCw className="w-5 h-5 text-indigo-400 animate-spin" />
+                  <div className="h-[560px] rounded-xl border border-ink-800 bg-ink-950/60 flex items-center justify-center">
+                    <div className="flex items-center gap-3 text-ink-400 text-sm">
+                      <RefreshCw className="w-5 h-5 text-accent-400 animate-spin" />
                       Bootstrapping 3D viewport…
                     </div>
                   </div>
@@ -1314,12 +955,12 @@ export default function App() {
             )}
             {activeTab === 'gamepad' && (
               <div className="space-y-6">
-                <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-6">
+                <div className="rounded-xl border border-ink-800 bg-ink-950/60 p-6">
                   <div className="flex items-center justify-between mb-4">
-                    <h2 className="font-mono text-sm text-slate-300">
-                      LIVE CONTROLLER INPUT
+                    <h2 className="text-sm text-ink-300">
+                      Live controller input
                     </h2>
-                    <span className="font-mono text-[11px] text-slate-500">
+                    <span className="text-[11px] text-ink-500">
                       60fps • browser Gamepad API
                     </span>
                   </div>
@@ -1330,28 +971,28 @@ export default function App() {
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-5">
-                    <h3 className="font-mono text-xs text-slate-400 mb-3 uppercase">
+                  <div className="rounded-xl border border-ink-800 bg-ink-950/60 p-5">
+                    <h3 className="text-xs text-ink-400 mb-3 ">
                       Control map
                     </h3>
-                    <ul className="font-mono text-xs space-y-2 text-slate-300">
-                      <li><span className="text-violet-400">Left/Right</span> — cycle dashboard tabs</li>
-                      <li><span className="text-violet-400">Up / Down</span> — scroll the view</li>
-                      <li><span className="text-emerald-400">X (cross)</span> — run a deterministic step</li>
-                      <li><span className="text-red-400">O (circle)</span> — back to previous tab</li>
-                      <li><span className="text-sky-400">Square</span> — toggle 24/7 auto-growth loop</li>
-                      <li><span className="text-amber-400">Triangle</span> — jump to Overview</li>
+                    <ul className="text-xs space-y-2 text-ink-300">
+                      <li><span className="text-accent-400">Left/Right</span> - cycle dashboard tabs</li>
+                      <li><span className="text-accent-400">Up / Down</span> - scroll the view</li>
+                      <li><span className="text-ok-400">X (cross)</span> - run a deterministic step</li>
+                      <li><span className="text-bad-400">O (circle)</span> - back to previous tab</li>
+                      <li><span className="text-accent-400">Square</span> - toggle 24/7 auto-growth loop</li>
+                      <li><span className="text-warn-400">Triangle</span> - jump to Overview</li>
                     </ul>
                   </div>
-                  <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-5">
-                    <h3 className="font-mono text-xs text-slate-400 mb-3 uppercase">
+                  <div className="rounded-xl border border-ink-800 bg-ink-950/60 p-5">
+                    <h3 className="text-xs text-ink-400 mb-3 ">
                       Live readout
                     </h3>
-                    <ul className="font-mono text-xs space-y-2 text-slate-300">
-                      <li>Buttons polled: <span className="text-slate-500">{gamepadSnapshot.buttons.length}</span></li>
-                      <li>Axes polled: <span className="text-slate-500">{gamepadSnapshot.axes.length}</span></li>
-                      <li>Last action: <span className="text-emerald-400">{lastGamepadAction?.toUpperCase() ?? '—'}</span></li>
-                      <li>Connection: <span className={gamepadConnected ? 'text-emerald-400' : 'text-slate-500'}>{gamepadConnected ? 'CONNECTED' : 'DISCONNECTED'}</span></li>
+                    <ul className="text-xs space-y-2 text-ink-300">
+                      <li>Buttons polled: <span className="text-ink-500">{gamepadSnapshot.buttons.length}</span></li>
+                      <li>Axes polled: <span className="text-ink-500">{gamepadSnapshot.axes.length}</span></li>
+                      <li>Last action: <span className="text-ok-400">{lastGamepadAction?.toUpperCase() ?? '-'}</span></li>
+                      <li>Connection: <span className={gamepadConnected ? 'text-ok-400' : 'text-ink-500'}>{gamepadConnected ? 'Connected' : 'Disconnected'}</span></li>
                     </ul>
                   </div>
                 </div>
@@ -1359,7 +1000,8 @@ export default function App() {
             )}
           </>
         )}
-      </main>
+        </main>
+      </div>
 
       <AiMutatorModal
         isOpen={isAiModalOpen}
@@ -1370,19 +1012,15 @@ export default function App() {
 
       {toastMessage && (
         <div
-          className="fixed bottom-6 right-6 z-50 bg-slate-900 border border-indigo-500/50 text-white font-mono text-xs px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2 animate-bounce"
-          role="alert"
+          className="fixed bottom-5 right-5 z-50 max-w-sm rounded-lg border border-ink-700 bg-ink-900 px-4 py-3 text-sm text-ink-100 shadow-2xl"
+          role="status"
           aria-live="polite"
         >
-          <Sparkles className="w-4 h-4 text-amber-300" />
-          <span>{toastMessage}</span>
+          {toastMessage}
         </div>
       )}
 
-      <footer className="mt-12 border-t border-slate-900 py-6 text-center font-mono text-xs text-slate-600">
-        Recourse Autonomous Architectural OS • Deterministic Multi-Objective Growth Matrix • Always-On
-        24/7 Dreaming Engine • GitHub Open-Source Research • Autonomous Subagent Builders Swarm Active
-      </footer>
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} onSelect={setActiveTab} />
     </div>
   );
 }

@@ -95,8 +95,8 @@ export const RatingPairPlayer: React.FC<Props> = ({ defaultStyle = 'jasper-balla
           onClick={() => rate(side, n)}
           className={`w-8 h-8 rounded-lg border text-xs font-mono transition ${
             ratings[side] === n
-              ? 'bg-amber-500/20 border-amber-400 text-amber-300'
-              : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-amber-500/50'
+              ? 'bg-warn-500/20 border-warn-400 text-warn-300'
+              : 'bg-ink-900 border-ink-700 text-ink-400 hover:border-warn-500/50'
           }`}
           title={`Rate take ${side.toUpperCase()} ${n}/5`}
         >
@@ -107,14 +107,14 @@ export const RatingPairPlayer: React.FC<Props> = ({ defaultStyle = 'jasper-balla
   );
 
   const take = (side: 'a' | 'b', seed: number) => (
-    <div className="flex-1 bg-slate-950 border border-slate-800 rounded-xl p-4">
+    <div className="flex-1 bg-ink-950 border border-ink-800 rounded-xl p-4">
       <div className="flex items-center justify-between mb-3">
-        <span className="text-xs font-mono text-slate-400">TAKE {side.toUpperCase()} · seed {seed}</span>
+        <span className="text-xs text-ink-400">TAKE {side.toUpperCase()} · seed {seed}</span>
         <div className="flex gap-2">
           <a
             href={wavUrl(seed)}
             download={`recourse-${style}-${seed}.wav`}
-            className="p-1.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-400 hover:text-emerald-400"
+            className="p-1.5 bg-ink-900 border border-ink-700 rounded-lg text-ink-400 hover:text-ok-400"
             title="Download WAV"
           >
             <Download className="w-4 h-4" />
@@ -122,7 +122,7 @@ export const RatingPairPlayer: React.FC<Props> = ({ defaultStyle = 'jasper-balla
           <button
             onClick={() => sendToMidi(seed)}
             disabled={busy}
-            className="p-1.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-400 hover:text-indigo-400 disabled:opacity-40"
+            className="p-1.5 bg-ink-900 border border-ink-700 rounded-lg text-ink-400 hover:text-accent-400 disabled:opacity-40"
             title="Send to MIDI device"
           >
             <Radio className="w-4 h-4" />
@@ -131,29 +131,29 @@ export const RatingPairPlayer: React.FC<Props> = ({ defaultStyle = 'jasper-balla
       </div>
       <audio controls preload="none" className="w-full mb-3" src={wavUrl(seed)} />
       <div className="flex items-center gap-3">
-        <ThumbsUp className="w-4 h-4 text-slate-500" />
+        <ThumbsUp className="w-4 h-4 text-ink-500" />
         {ratingRow(side)}
       </div>
     </div>
   );
 
   return (
-    <div className="bg-slate-900 border border-amber-500/20 rounded-2xl p-5">
+    <div className="bg-ink-900 border border-warn-500/20 rounded-xl p-5">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div className="flex items-center gap-3">
-          <div className="p-2.5 bg-amber-950/70 border border-amber-700/40 rounded-xl">
-            <Music className="w-5 h-5 text-amber-400" />
+          <div className="p-2.5 bg-warn-950/70 border border-warn-700/40 rounded-xl">
+            <Music className="w-5 h-5 text-warn-400" />
           </div>
           <div>
-            <h3 className="text-white font-bold text-sm tracking-widest">A/B RATING LOOP</h3>
-            <p className="text-[11px] text-slate-400">Listen, rate, and teach the composer. Rendered locally to WAV — no DAW.</p>
+            <h3 className="text-white font-semibold text-sm ">A/B rating loop</h3>
+            <p className="text-[11px] text-ink-400">Listen, rate, and teach the composer. Rendered locally to WAV - no DAW.</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
           <select
             value={style}
             onChange={(e) => setStyle(e.target.value as StyleIdLite)}
-            className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-300"
+            className="bg-ink-950 border border-ink-700 rounded-lg px-3 py-2 text-xs text-ink-300"
           >
             {STYLES.map((s) => (
               <option key={s} value={s}>{STYLE_LABEL[s]}</option>
@@ -161,7 +161,7 @@ export const RatingPairPlayer: React.FC<Props> = ({ defaultStyle = 'jasper-balla
           </select>
           <button
             onClick={reroll}
-            className="flex items-center gap-1.5 px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-xs text-slate-300 hover:text-amber-400"
+            className="flex items-center gap-1.5 px-3 py-2 bg-ink-950 border border-ink-700 rounded-lg text-xs text-ink-300 hover:text-warn-400"
           >
             <Shuffle className="w-3.5 h-3.5" /> New pair
           </button>
@@ -171,7 +171,7 @@ export const RatingPairPlayer: React.FC<Props> = ({ defaultStyle = 'jasper-balla
         {take('a', seedA)}
         {take('b', seedB)}
       </div>
-      <div className="mt-3 flex items-center gap-2 text-[10px] text-slate-500 font-mono">
+      <div className="mt-3 flex items-center gap-2 text-[10px] text-ink-500">
         <Star className="w-3 h-3" />
         Deterministic: the same style + seed always renders the same audio. Ratings feed the composer learner.
       </div>

@@ -110,7 +110,7 @@ export function VoiceCloneView() {
       const cooldown = Math.round(cloneCooldownMs() / 1000);
       setNotice(
         cooldown > 0
-          ? `synthesis unavailable: ${e?.message || e} — narration falls back to Web Speech for ~${cooldown}s`
+          ? `synthesis unavailable: ${e?.message || e} - narration falls back to Web Speech for ~${cooldown}s`
           : `synthesis unavailable: ${e?.message || e}`,
       );
     } finally {
@@ -126,53 +126,53 @@ export function VoiceCloneView() {
     <div className="p-4 space-y-4 text-sm max-w-3xl">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="text-emerald-300 font-semibold text-base">Voice Clone — speak in your own voice</div>
-          <div className="text-slate-400 text-xs mt-0.5">
+          <div className="text-ok-300 font-semibold text-base">Voice Clone - speak in your own voice</div>
+          <div className="text-ink-400 text-xs mt-0.5">
             Record a clean ~15s reference clip, then narration is synthesized in that voice. The Web Speech API
-            cannot host a custom voice and its output cannot be captured, so cloning <strong>replaces</strong> it —
+            cannot host a custom voice and its output cannot be captured, so cloning <strong>replaces</strong> it -
             Web Speech stays the fallback when this is off or the sidecar is down.
           </div>
         </div>
         <button
           onClick={refresh}
-          className="px-3 py-1.5 rounded border border-slate-700 hover:border-emerald-600 text-slate-300 flex items-center gap-1.5 shrink-0"
+          className="px-3 py-1.5 rounded border border-ink-700 hover:border-ok-600 text-ink-300 flex items-center gap-1.5 shrink-0"
         >
           <RefreshCw className="w-3.5 h-3.5" /> Refresh
         </button>
       </div>
 
-      <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-3 space-y-2">
-        <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono">
-          <span className={`px-2 py-1 rounded border ${sidecar?.online ? 'border-emerald-800 text-emerald-300' : 'border-red-800 text-red-300'}`}>
-            SIDECAR {sidecar?.online ? 'ONLINE' : 'OFFLINE'}
+      <div className="rounded-lg border border-ink-800 bg-ink-950/40 p-3 space-y-2">
+        <div className="flex flex-wrap items-center gap-2 text-[11px]">
+          <span className={`px-2 py-1 rounded border ${sidecar?.online ? 'border-ok-800 text-ok-300' : 'border-bad-800 text-bad-300'}`}>
+            SIDECAR {sidecar?.online ? 'Online' : 'Offline'}
           </span>
-          <span className={`px-2 py-1 rounded border ${sidecar?.ttsAvailable ? 'border-emerald-800 text-emerald-300' : 'border-amber-700 text-amber-300'}`}>
-            TTS {sidecar?.ttsAvailable ? 'AVAILABLE' : 'NOT INSTALLED'}
+          <span className={`px-2 py-1 rounded border ${sidecar?.ttsAvailable ? 'border-ok-800 text-ok-300' : 'border-warn-700 text-warn-300'}`}>
+            TTS {sidecar?.ttsAvailable ? 'Available' : 'Not installed'}
           </span>
-          <span className="px-2 py-1 rounded border border-slate-700 text-slate-400">
-            ENGINES {engines.length ? engines.join(', ') : '—'}
+          <span className="px-2 py-1 rounded border border-ink-700 text-ink-400">
+            ENGINES {engines.length ? engines.join(', ') : '-'}
           </span>
-          <span className="px-2 py-1 rounded border border-slate-700 text-slate-400">
-            DEVICE {sidecar?.device ?? '—'}
+          <span className="px-2 py-1 rounded border border-ink-700 text-ink-400">
+            DEVICE {sidecar?.device ?? '-'}
           </span>
         </div>
-        {sidecar?.error && <div className="text-amber-300 text-xs">{sidecar.error}</div>}
+        {sidecar?.error && <div className="text-warn-300 text-xs">{sidecar.error}</div>}
         {sidecar?.online && !sidecar.ttsAvailable && (
-          <div className="text-amber-300 text-xs flex items-start gap-1.5">
+          <div className="text-warn-300 text-xs flex items-start gap-1.5">
             <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
             <span>
               No zero-shot TTS backend on the sidecar. Install one from <code>python/tts_service</code>:
-              <code className="ml-1 text-slate-300">pip install -r requirements.txt</code> (coqui-tts / XTTS-v2).
+              <code className="ml-1 text-ink-300">pip install -r requirements.txt</code> (coqui-tts / XTTS-v2).
               Recordings are stored either way; synthesis stays honestly unavailable until then.
             </span>
           </div>
         )}
       </div>
 
-      <div className="flex items-center justify-between gap-3 bg-slate-900/50 rounded border border-slate-800 p-3">
-        <div className="text-slate-300 text-sm">
+      <div className="flex items-center justify-between gap-3 bg-ink-900/50 rounded border border-ink-800 p-3">
+        <div className="text-ink-300 text-sm">
           Use cloned voice for narration
-          <div className="text-slate-500 text-xs mt-0.5">
+          <div className="text-ink-500 text-xs mt-0.5">
             {enabled
               ? 'On: speak() routes through the clone, falling back to Web Speech on failure.'
               : 'Off: narration uses the system Web Speech voice.'}
@@ -182,7 +182,7 @@ export function VoiceCloneView() {
           onClick={() => toggleEnabled(!enabled)}
           disabled={!cloneUsable}
           className={`relative w-12 h-6 rounded-full transition-colors shrink-0 disabled:opacity-40 ${
-            enabled && cloneUsable ? 'bg-emerald-600' : 'bg-slate-700'
+            enabled && cloneUsable ? 'bg-ok-600' : 'bg-ink-700'
           }`}
           aria-pressed={enabled && cloneUsable}
         >
@@ -190,21 +190,21 @@ export function VoiceCloneView() {
         </button>
       </div>
 
-      <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-3 space-y-3">
-        <div className="text-slate-300 font-semibold text-sm">Reference clip</div>
+      <div className="rounded-lg border border-ink-800 bg-ink-950/40 p-3 space-y-3">
+        <div className="text-ink-300 font-semibold text-sm">Reference clip</div>
         <div className="flex flex-wrap items-end gap-2">
-          <label className="text-xs text-slate-400">
+          <label className="text-xs text-ink-400">
             Profile name
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="mt-1 block w-48 bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-slate-200"
+              className="mt-1 block w-48 bg-ink-900 border border-ink-700 rounded px-2 py-1.5 text-ink-200"
             />
           </label>
           <button
             onClick={record}
             disabled={busy || recording}
-            className="px-4 py-2 rounded bg-rose-700 hover:bg-rose-600 disabled:opacity-50 text-white font-semibold flex items-center gap-2"
+            className="px-4 py-2 rounded bg-bad-700 hover:bg-bad-600 disabled:opacity-50 text-white font-semibold flex items-center gap-2"
           >
             {recording ? (
               <>
@@ -217,7 +217,7 @@ export function VoiceCloneView() {
             )}
           </button>
         </div>
-        <div className="text-xs text-slate-500">
+        <div className="text-xs text-ink-500">
           Speak a full sentence or two, no music or noise. The clip is downsampled to 16 kHz mono WAV before upload
           and stored under <code>data/voice-profiles/</code>.
         </div>
@@ -225,24 +225,24 @@ export function VoiceCloneView() {
 
       {profiles.length > 0 && (
         <div className="space-y-2">
-          <div className="text-slate-300 font-semibold text-sm">Saved profiles</div>
+          <div className="text-ink-300 font-semibold text-sm">Saved profiles</div>
           {profiles.map((p) => {
             const active = p.id === selected;
             return (
               <div
                 key={p.id}
                 className={`flex items-center justify-between gap-3 rounded border p-3 ${
-                  active ? 'border-emerald-500 bg-emerald-950/30' : 'border-slate-700 bg-slate-900/40'
+                  active ? 'border-ok-500 bg-ok-950/30' : 'border-ink-700 bg-ink-900/40'
                 }`}
               >
                 <button onClick={() => setSelected(p.id)} className="text-left flex-1">
                   <div className="flex items-center gap-2">
-                    <span className={`font-semibold ${active ? 'text-emerald-300' : 'text-slate-200'}`}>{p.name}</span>
-                    <span className={`px-2 py-0.5 rounded text-[10px] border ${active ? 'border-emerald-700 text-emerald-200' : 'border-slate-700 text-slate-400'}`}>
+                    <span className={`font-semibold ${active ? 'text-ok-300' : 'text-ink-200'}`}>{p.name}</span>
+                    <span className={`px-2 py-0.5 rounded text-[10px] border ${active ? 'border-ok-700 text-ok-200' : 'border-ink-700 text-ink-400'}`}>
                       {active ? 'ACTIVE' : 'select'}
                     </span>
                   </div>
-                  <div className="text-xs text-slate-500 mt-0.5">
+                  <div className="text-xs text-ink-500 mt-0.5">
                     {p.durationSec ? `${p.durationSec.toFixed(1)}s · ` : ''}
                     {(p.bytes / 1024).toFixed(0)} KB · {p.language} · {new Date(p.updatedAt).toLocaleString()}
                   </div>
@@ -250,7 +250,7 @@ export function VoiceCloneView() {
                 <button
                   onClick={() => remove(p.id)}
                   disabled={busy}
-                  className="p-2 rounded border border-slate-700 hover:border-rose-600 text-slate-400 hover:text-rose-300 disabled:opacity-40"
+                  className="p-2 rounded border border-ink-700 hover:border-bad-600 text-ink-400 hover:text-bad-300 disabled:opacity-40"
                   title="Delete profile"
                 >
                   <Trash2 className="w-4 h-4" />
@@ -261,33 +261,33 @@ export function VoiceCloneView() {
         </div>
       )}
 
-      <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-3 space-y-3">
-        <div className="text-slate-300 font-semibold text-sm">Test synthesis</div>
+      <div className="rounded-lg border border-ink-800 bg-ink-950/40 p-3 space-y-3">
+        <div className="text-ink-300 font-semibold text-sm">Test synthesis</div>
         <textarea
           value={testText}
           onChange={(e) => setTestText(e.target.value)}
           rows={2}
-          className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-slate-200"
+          className="w-full bg-ink-900 border border-ink-700 rounded px-2 py-1.5 text-ink-200"
         />
         <div className="flex items-center gap-2">
           <button
             onClick={test}
             disabled={busy || !selected || !sidecar?.ttsAvailable || speaking}
-            className="px-4 py-2 rounded bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 text-white font-semibold flex items-center gap-2"
+            className="px-4 py-2 rounded bg-ok-700 hover:bg-ok-600 disabled:opacity-40 text-white font-semibold flex items-center gap-2"
           >
             <Play className="w-4 h-4" /> {speaking ? 'Generating…' : 'Synthesize'}
           </button>
           <button
             onClick={stopClonedSpeech}
-            className="px-3 py-2 rounded border border-slate-700 hover:border-slate-500 text-slate-300 flex items-center gap-2"
+            className="px-3 py-2 rounded border border-ink-700 hover:border-ink-500 text-ink-300 flex items-center gap-2"
           >
             <Volume2 className="w-4 h-4" /> Stop
           </button>
-          {selected && <span className="text-xs text-slate-500 font-mono">profile {selected.slice(0, 8)}</span>}
+          {selected && <span className="text-xs text-ink-500">profile {selected.slice(0, 8)}</span>}
         </div>
       </div>
 
-      {notice && <div className="text-amber-300 text-xs">{notice}</div>}
+      {notice && <div className="text-warn-300 text-xs">{notice}</div>}
     </div>
   );
 }

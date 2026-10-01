@@ -54,23 +54,23 @@ const DOMAIN_ICONS: Record<string, React.ElementType> = {
 };
 
 const DOMAIN_COLORS: Record<string, string> = {
-  coding: 'text-cyan-400 bg-cyan-950/60 border-cyan-800',
-  math: 'text-amber-400 bg-amber-950/60 border-amber-800',
-  systemic: 'text-emerald-400 bg-emerald-950/60 border-emerald-800',
-  cyber_defense: 'text-rose-400 bg-rose-950/60 border-rose-800',
-  biotech: 'text-purple-400 bg-purple-950/60 border-purple-800',
-  neuro_symbolic: 'text-indigo-400 bg-indigo-950/60 border-indigo-800',
-  quantum_sim: 'text-fuchsia-400 bg-fuchsia-950/60 border-fuchsia-800'
+  coding: 'text-accent-400 bg-accent-950/60 border-accent-800',
+  math: 'text-warn-400 bg-warn-950/60 border-warn-800',
+  systemic: 'text-ok-400 bg-ok-950/60 border-ok-800',
+  cyber_defense: 'text-bad-400 bg-bad-950/60 border-bad-800',
+  biotech: 'text-accent-400 bg-accent-950/60 border-accent-800',
+  neuro_symbolic: 'text-accent-400 bg-accent-950/60 border-accent-800',
+  quantum_sim: 'text-accent-400 bg-accent-950/60 border-accent-800'
 };
 
 // Runtime transport of a self-hostable template output (artifact kind).
 const ARTIFACT_KIND_META: Record<string, { label: string; color: string }> = {
-  function: { label: 'FUNCTION', color: 'text-slate-300 bg-slate-800/70 border-slate-600' },
-  cli: { label: 'CLI', color: 'text-emerald-300 bg-emerald-950/70 border-emerald-800' },
-  api: { label: 'API', color: 'text-sky-300 bg-sky-950/70 border-sky-800' },
-  mcp: { label: 'MCP', color: 'text-fuchsia-300 bg-fuchsia-950/70 border-fuchsia-800' },
-  a2a: { label: 'A2A', color: 'text-amber-300 bg-amber-950/70 border-amber-800' },
-  loop: { label: 'LOOP', color: 'text-rose-300 bg-rose-950/70 border-rose-800' },
+  function: { label: 'Function', color: 'text-ink-300 bg-ink-800/70 border-ink-600' },
+  cli: { label: 'CLI', color: 'text-ok-300 bg-ok-950/70 border-ok-800' },
+  api: { label: 'API', color: 'text-accent-300 bg-accent-950/70 border-accent-800' },
+  mcp: { label: 'MCP', color: 'text-accent-300 bg-accent-950/70 border-accent-800' },
+  a2a: { label: 'A2A', color: 'text-warn-300 bg-warn-950/70 border-warn-800' },
+  loop: { label: 'LOOP', color: 'text-bad-300 bg-bad-950/70 border-bad-800' },
 };
 function kindMeta(tpl: any): { label: string; color: string } | null {
   if (!tpl || tpl.selfHostable !== true) return null;
@@ -93,7 +93,7 @@ const TYPE_LABELS: Record<ArtifactType, string> = {
 };
 
 export const ArchitectForgeView: React.FC<ArchitectForgeViewProps> = ({
-  artifacts = [],
+  artifacts = [] as StructuralArtifact[],
   onNotify,
   onToolCreated
 }) => {
@@ -273,15 +273,15 @@ export const ArchitectForgeView: React.FC<ArchitectForgeViewProps> = ({
         try {
           parsedArgs = JSON.parse(callArgs);
         } catch {
-          setCallResult({ success: false, error: 'Args must be a valid JSON array — e.g. ["alpha", 42]' });
-          if (onNotify) onNotify('Args must be a valid JSON array — e.g. ["alpha", 42]');
+          setCallResult({ success: false, error: 'Args must be a valid JSON array - e.g. ["alpha", 42]' });
+          if (onNotify) onNotify('Args must be a valid JSON array - e.g. ["alpha", 42]');
           return;
         }
       } else {
         parsedArgs = [];
       }
       if (!Array.isArray(parsedArgs)) {
-        setCallResult({ success: false, error: 'Args must be a JSON array — e.g. ["alpha", 42]' });
+        setCallResult({ success: false, error: 'Args must be a JSON array - e.g. ["alpha", 42]' });
         return;
       }
       const res = await fetch(`/api/recourse/selfhosted/${encodeURIComponent(callToolName)}/execute`, {
@@ -384,51 +384,50 @@ export const ArchitectForgeView: React.FC<ArchitectForgeViewProps> = ({
   return (
     <div className="space-y-6 font-sans">
       {/* Top Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl relative overflow-hidden">
-        <div className="absolute -right-16 -top-16 w-64 h-64 bg-indigo-600/10 rounded-full blur-3xl pointer-events-none" />
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-ink-900 border border-ink-800 rounded-xl p-6 shadow-xl relative overflow-hidden">
         
         <div className="flex items-center gap-3 relative z-10">
-          <div className="p-3 bg-indigo-950 border border-indigo-800 rounded-xl text-indigo-400 shadow-[0_0_15px_rgba(99,102,241,0.25)]">
+          <div className="p-3 bg-accent-950 border border-accent-800 rounded-xl text-accent-400">
             <Layers className="w-6 h-6" />
           </div>
           <div>
-            <h2 className="text-xl font-bold text-white tracking-wide flex items-center gap-2">
-              ARCHITECT FORGE & TEMPLATE ENGINE
-              <span className="px-2 py-0.5 bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 text-xs rounded-full font-mono">
+            <h2 className="text-xl font-semibold text-white flex items-center gap-2">
+              Architect forge & template engine
+              <span className="px-2 py-0.5 bg-accent-500/20 text-accent-300 border border-accent-500/40 text-xs rounded-full">
                 v2.0 Autonomous
               </span>
             </h2>
-            <p className="text-sm text-slate-400 mt-0.5">
+            <p className="text-sm text-ink-400 mt-0.5">
               Parametric component building, self-healing synthesis, and recursive learner integration.
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 relative z-10 font-mono text-xs">
+        <div className="flex items-center gap-2 relative z-10 text-xs">
           <button
             onClick={() => setActiveSection('templates')}
             className={`flex items-center gap-1.5 px-3 py-2 rounded-xl font-bold transition cursor-pointer ${
               activeSection === 'templates'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
-                : 'bg-slate-800 text-slate-300 hover:text-white'
+                ? 'bg-accent-600 text-white shadow-md'
+                : 'bg-ink-800 text-ink-300 hover:text-white'
             }`}
           >
             <Sliders className="w-3.5 h-3.5" />
-            <span>COMPONENT TEMPLATES</span>
+            <span>Component templates</span>
           </button>
 
           <button
             onClick={() => setActiveSection('learner')}
             className={`flex items-center gap-1.5 px-3 py-2 rounded-xl font-bold transition cursor-pointer ${
               activeSection === 'learner'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
-                : 'bg-slate-800 text-slate-300 hover:text-white'
+                ? 'bg-accent-600 text-white shadow-md'
+                : 'bg-ink-800 text-ink-300 hover:text-white'
             }`}
           >
-            <BrainCircuit className="w-3.5 h-3.5 text-emerald-400" />
-            <span>LEARNER DIRECTIVES</span>
+            <BrainCircuit className="w-3.5 h-3.5 text-ok-400" />
+            <span>Learner directives</span>
             {learnerDirectives.length > 0 && (
-              <span className="px-1.5 py-0.2 bg-emerald-950 text-emerald-300 rounded border border-emerald-800 text-[10px]">
+              <span className="px-1.5 py-0.2 bg-ok-950 text-ok-300 rounded border border-ok-800 text-[10px]">
                 {learnerDirectives.length}
               </span>
             )}
@@ -438,26 +437,26 @@ export const ArchitectForgeView: React.FC<ArchitectForgeViewProps> = ({
             onClick={() => setActiveSection('artifacts')}
             className={`flex items-center gap-1.5 px-3 py-2 rounded-xl font-bold transition cursor-pointer ${
               activeSection === 'artifacts'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
-                : 'bg-slate-800 text-slate-300 hover:text-white'
+                ? 'bg-accent-600 text-white shadow-md'
+                : 'bg-ink-800 text-ink-300 hover:text-white'
             }`}
           >
-            <Network className="w-3.5 h-3.5 text-cyan-400" />
-            <span>STRUCTURAL PROTOCOLS</span>
+            <Network className="w-3.5 h-3.5 text-accent-400" />
+            <span>Structural protocols</span>
           </button>
 
           <button
             onClick={() => setActiveSection('selfhosted')}
             className={`flex items-center gap-1.5 px-3 py-2 rounded-xl font-bold transition cursor-pointer ${
               activeSection === 'selfhosted'
-                ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/20'
-                : 'bg-slate-800 text-slate-300 hover:text-white'
+                ? 'bg-ok-600 text-white shadow-md'
+                : 'bg-ink-800 text-ink-300 hover:text-white'
             }`}
           >
-            <Server className="w-3.5 h-3.5 text-emerald-400" />
-            <span>SELF-HOSTED TOOLS</span>
+            <Server className="w-3.5 h-3.5 text-ok-400" />
+            <span>Self-hosted tools</span>
             {selfHostedTools.length > 0 && (
-              <span className="px-1.5 py-0.2 bg-emerald-950 text-emerald-300 rounded border border-emerald-800 text-[10px]">
+              <span className="px-1.5 py-0.2 bg-ok-950 text-ok-300 rounded border border-ok-800 text-[10px]">
                 {selfHostedTools.length}
               </span>
             )}
@@ -467,12 +466,12 @@ export const ArchitectForgeView: React.FC<ArchitectForgeViewProps> = ({
             onClick={() => setActiveSection('intel')}
             className={`flex items-center gap-1.5 px-3 py-2 rounded-xl font-bold transition cursor-pointer ${
               activeSection === 'intel'
-                ? 'bg-amber-600 text-white shadow-md shadow-amber-600/20'
-                : 'bg-slate-800 text-slate-300 hover:text-white'
+                ? 'bg-warn-600 text-white shadow-md'
+                : 'bg-ink-800 text-ink-300 hover:text-white'
             }`}
           >
-            <Lightbulb className="w-3.5 h-3.5 text-amber-400" />
-            <span>INTEL INBOX</span>
+            <Lightbulb className="w-3.5 h-3.5 text-warn-400" />
+            <span>Intel inbox</span>
           </button>
         </div>
       </div>
@@ -482,22 +481,22 @@ export const ArchitectForgeView: React.FC<ArchitectForgeViewProps> = ({
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {/* Left Column: Template Catalog & Filter */}
           <div className="lg:col-span-5 space-y-4">
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+            <div className="bg-ink-900 border border-ink-800 rounded-xl p-4 space-y-3">
               {/* Search & Filter */}
               <div className="flex items-center gap-2">
                 <div className="relative flex-1">
-                  <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
+                  <Search className="w-4 h-4 text-ink-500 absolute left-3 top-2.5" />
                   <input
                     type="text"
                     placeholder="Search templates, algorithms, tags..."
                     value={searchQuery}
                     onChange={e => setSearchQuery(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 font-mono"
+                    className="w-full bg-ink-950 border border-ink-800 rounded-xl pl-9 pr-3 py-1.5 text-xs text-white placeholder-ink-500 focus:outline-none focus:border-accent-500"
                   />
                 </div>
                 <button
                   onClick={fetchTemplates}
-                  className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl transition cursor-pointer"
+                  className="p-2 bg-ink-800 hover:bg-ink-700 text-ink-300 rounded-xl transition cursor-pointer"
                   title="Refresh catalog"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
@@ -510,10 +509,10 @@ export const ArchitectForgeView: React.FC<ArchitectForgeViewProps> = ({
                   <button
                     key={dom}
                     onClick={() => setSelectedDomain(dom)}
-                    className={`px-2.5 py-1 rounded-lg text-[11px] font-mono transition cursor-pointer uppercase ${
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-mono transition cursor-pointer  ${
                       selectedDomain === dom
-                        ? 'bg-indigo-600 text-white font-bold'
-                        : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'
+                        ? 'bg-accent-600 text-white font-semibold'
+                        : 'bg-ink-950 text-ink-400 hover:text-ink-200 border border-ink-800'
                     }`}
                   >
                     {dom.replace('_', ' ')}
@@ -527,7 +526,7 @@ export const ArchitectForgeView: React.FC<ArchitectForgeViewProps> = ({
               {filteredTemplates.map(tpl => {
                 const isSelected = selectedTemplate?.id === tpl.id;
                 const DomainIcon = DOMAIN_ICONS[tpl.domain] || Code2;
-                const domainColor = DOMAIN_COLORS[tpl.domain] || 'text-slate-400 bg-slate-950 border-slate-800';
+                const domainColor = DOMAIN_COLORS[tpl.domain] || 'text-ink-400 bg-ink-950 border-ink-800';
                 const kind = kindMeta(tpl);
 
                 return (
@@ -536,8 +535,8 @@ export const ArchitectForgeView: React.FC<ArchitectForgeViewProps> = ({
                     onClick={() => selectTemplate(tpl)}
                     className={`p-4 rounded-xl border transition cursor-pointer flex flex-col justify-between gap-3 ${
                       isSelected
-                        ? 'bg-indigo-950/40 border-indigo-500 shadow-lg shadow-indigo-950/50'
-                        : 'bg-slate-900/90 border-slate-800 hover:border-slate-700'
+                        ? 'bg-accent-950/40 border-accent-500 shadow-lg'
+                        : 'bg-ink-900/90 border-ink-800 hover:border-ink-700'
                     }`}
                   >
                     <div className="flex items-start justify-between gap-2">
@@ -546,29 +545,29 @@ export const ArchitectForgeView: React.FC<ArchitectForgeViewProps> = ({
                           <DomainIcon className="w-4 h-4" />
                         </div>
                         <div>
-                          <h4 className="text-sm font-bold text-white tracking-tight">{tpl.name}</h4>
-                          <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider">
+                          <h4 className="text-sm font-semibold text-white tracking-tight">{tpl.name}</h4>
+                          <span className="text-[10px] text-ink-400 ">
                             {tpl.category} • {tpl.complexity}
                           </span>
                         </div>
                       </div>
-                      <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-950 text-emerald-400 border border-emerald-900">
+                      <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-ink-950 text-ok-400 border border-ok-900">
                         {(tpl.defaultScore * 100).toFixed(0)}% Robust
                       </span>
                     </div>
                     {kind && (
                       <div className="flex items-center gap-2">
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold border ${kind.color}`}>
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-semibold border ${kind.color}`}>
                           SELF-HOST · {kind.label}
                         </span>
                       </div>
                     )}
 
-                    <p className="text-xs text-slate-400 line-clamp-2">
+                    <p className="text-xs text-ink-400 line-clamp-2">
                       {tpl.description}
                     </p>
 
-                    <div className="flex items-center justify-between pt-2 border-t border-slate-800/80 text-[10px] font-mono text-slate-500">
+                    <div className="flex items-center justify-between pt-2 border-t border-ink-800/80 text-[10px] text-ink-500">
                       <span>{tpl.benchmarkFlops.toLocaleString()} FLOPs</span>
                       <span>{tpl.params.length} Tunable Params</span>
                     </div>
@@ -577,7 +576,7 @@ export const ArchitectForgeView: React.FC<ArchitectForgeViewProps> = ({
               })}
 
               {filteredTemplates.length === 0 && (
-                <div className="p-8 text-center bg-slate-900 border border-slate-800 rounded-xl text-slate-500 text-xs font-mono">
+                <div className="p-8 text-center bg-ink-900 border border-ink-800 rounded-xl text-ink-500 text-xs">
                   No component templates match criteria.
                 </div>
               )}
@@ -587,53 +586,53 @@ export const ArchitectForgeView: React.FC<ArchitectForgeViewProps> = ({
           {/* Right Column: Interactive Parametric Customizer & Code Preview */}
           <div className="lg:col-span-7 space-y-4">
             {selectedTemplate ? (
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-5 shadow-xl">
+              <div className="bg-ink-900 border border-ink-800 rounded-xl p-6 space-y-5 shadow-xl">
                 {/* Header */}
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-4 border-b border-slate-800">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-4 border-b border-ink-800">
                   <div>
                     <div className="flex items-center gap-2">
-                      <h3 className="text-lg font-bold text-white">{selectedTemplate.name}</h3>
-                      <span className="px-2 py-0.5 bg-slate-950 text-indigo-300 border border-indigo-900 text-xs rounded font-mono">
+                      <h3 className="text-lg font-semibold text-white">{selectedTemplate.name}</h3>
+                      <span className="px-2 py-0.5 bg-ink-950 text-accent-300 border border-accent-900 text-xs rounded">
                         {selectedTemplate.id}
                       </span>
                       {kindMeta(selectedTemplate) && (
-                        <span className={`px-2 py-0.5 text-[10px] font-mono font-bold rounded border ${kindMeta(selectedTemplate)!.color}`}>
+                        <span className={`px-2 py-0.5 text-[10px] font-semibold rounded border ${kindMeta(selectedTemplate)!.color}`}>
                           {kindMeta(selectedTemplate)!.label}
                         </span>
                       )}
                     </div>
-                    <p className="text-xs text-slate-400 mt-1">{selectedTemplate.description}</p>
+                    <p className="text-xs text-ink-400 mt-1">{selectedTemplate.description}</p>
                   </div>
 
                   <div className="flex items-center gap-2">
                     <button
                       onClick={handleBenchmark}
                       disabled={benchmarking}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl font-mono text-xs font-bold transition cursor-pointer disabled:opacity-50"
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-ink-800 hover:bg-ink-700 text-ink-200 border border-ink-700 rounded-xl text-xs font-semibold transition cursor-pointer disabled:opacity-50"
                     >
-                      <Zap className={`w-3.5 h-3.5 text-amber-400 ${benchmarking ? 'animate-bounce' : ''}`} />
-                      <span>{benchmarking ? 'BENCHMARKING...' : 'BENCHMARK'}</span>
+                      <Zap className={`w-3.5 h-3.5 text-warn-400 ${benchmarking ? '' : ''}`} />
+                      <span>{benchmarking ? 'Benchmarking...' : 'Benchmark'}</span>
                     </button>
 
                     <button
                       onClick={handleBuildComponent}
                       disabled={building}
-                      className="flex items-center gap-1.5 px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-mono text-xs font-bold shadow-lg shadow-indigo-600/20 transition cursor-pointer disabled:opacity-50"
+                      className="flex items-center gap-1.5 px-4 py-1.5 bg-accent-600 hover:bg-accent-500 text-white rounded-xl text-xs font-semibold shadow-lg transition cursor-pointer disabled:opacity-50"
                     >
                       <Play className={`w-3.5 h-3.5 ${building ? 'animate-spin' : ''}`} />
-                      <span>{building ? 'SYNTHESIZING...' : 'BUILD COMPONENT'}</span>
+                      <span>{building ? 'Synthesizing...' : 'Build component'}</span>
                     </button>
                   </div>
                 </div>
 
                 {/* Benchmark HUD if available */}
                 {benchmarkResult && (
-                  <div className="bg-slate-950 p-4 rounded-xl border border-amber-500/30 flex items-center justify-between text-xs font-mono">
-                    <div className="flex items-center gap-2 text-amber-300">
+                  <div className="bg-ink-950 p-4 rounded-xl border border-warn-500/30 flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2 text-warn-300">
                       <CheckCircle2 className="w-4 h-4" />
                       <span>Sandbox Benchmark Verified ({benchmarkResult.iterations} cycles)</span>
                     </div>
-                    <div className="flex items-center gap-4 text-slate-300">
+                    <div className="flex items-center gap-4 text-ink-300">
                       <span>Latency: <strong className="text-white">{benchmarkResult.meanLatencyPerRunMs}ms</strong></span>
                       <span>Compute: <strong className="text-white">{benchmarkResult.estimatedFlops} FLOPs</strong></span>
                       <span>Scale: <strong className="text-white">{benchmarkResult.complexity}</strong></span>
@@ -642,33 +641,33 @@ export const ArchitectForgeView: React.FC<ArchitectForgeViewProps> = ({
                 )}
 
                 {/* Parametric Customizer Grid */}
-                <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800/80 space-y-4">
+                <div className="bg-ink-950/60 p-4 rounded-xl border border-ink-800/80 space-y-4">
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-xs font-mono font-bold text-white uppercase tracking-wider">
-                      <Sliders className="w-3.5 h-3.5 text-indigo-400" />
+                    <div className="flex items-center gap-2 text-xs font-semibold text-white ">
+                      <Sliders className="w-3.5 h-3.5 text-accent-400" />
                       <span>Parametric Architecture Configuration</span>
                     </div>
                     {/* Self-Healing Toggle */}
-                    <div className="flex items-center gap-4 text-xs font-mono text-slate-300">
-                      <label className="flex items-center gap-2 cursor-pointer text-xs font-mono text-slate-300">
+                    <div className="flex items-center gap-4 text-xs text-ink-300">
+                      <label className="flex items-center gap-2 cursor-pointer text-xs text-ink-300">
                         <input
                           type="checkbox"
                           checked={withSelfHealing}
                           onChange={e => setWithSelfHealing(e.target.checked)}
-                          className="rounded bg-slate-900 border-slate-700 text-indigo-600 focus:ring-indigo-500"
+                          className="rounded bg-ink-900 border-ink-700 text-accent-600 focus:ring-accent-500"
                         />
-                        <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                        <ShieldCheck className="w-4 h-4 text-ok-400" />
                         <span>Self-Healing Invariant Guards</span>
                       </label>
-                      <label className={`flex items-center gap-2 cursor-pointer text-xs font-mono ${selectedTemplate?.selfHostable ? 'text-slate-300' : 'text-slate-500'}`} title={selectedTemplate?.selfHostable ? 'Write a real module into .selfhosted/ that the running server imports and calls' : 'This template declares no selfHost descriptor — it can only be registered as a sandbox gene'}>
+                      <label className={`flex items-center gap-2 cursor-pointer text-xs ${selectedTemplate?.selfHostable ? 'text-ink-300' : 'text-ink-500'}`} title={selectedTemplate?.selfHostable ? 'Write a real module into .selfhosted/ that the running server imports and calls' : 'This template declares no selfHost descriptor - it can only be registered as a sandbox gene'}>
                         <input
                           type="checkbox"
                           checked={selfHostToRuntime && !!selectedTemplate?.selfHostable}
                           disabled={!selectedTemplate?.selfHostable}
                           onChange={e => setSelfHostToRuntime(e.target.checked)}
-                          className="rounded bg-slate-900 border-slate-700 text-emerald-600 focus:ring-emerald-500"
+                          className="rounded bg-ink-900 border-ink-700 text-ok-600 focus:ring-ok-500"
                         />
-                        <Server className="w-4 h-4 text-emerald-400" />
+                        <Server className="w-4 h-4 text-ok-400" />
                         <span>Self-host to runtime</span>
                       </label>
                     </div>
@@ -676,20 +675,20 @@ export const ArchitectForgeView: React.FC<ArchitectForgeViewProps> = ({
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
                     <div>
-                      <label className="block text-[11px] font-mono text-slate-400 mb-1">Target Component Name</label>
+                      <label className="block text-[11px] text-ink-400 mb-1">Target Component Name</label>
                       <input
                         type="text"
                         value={customName}
                         onChange={e => setCustomName(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
+                        className="w-full bg-ink-900 border border-ink-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-accent-500"
                       />
                     </div>
 
                     {selectedTemplate.params.map((p: ComponentTemplateParam) => (
                       <div key={p.id}>
                         <div className="flex justify-between items-center mb-1">
-                          <label className="text-[11px] font-mono text-slate-400">{p.label}</label>
-                          <span className="text-[10px] font-mono text-slate-500">{p.description}</span>
+                          <label className="text-[11px] text-ink-400">{p.label}</label>
+                          <span className="text-[10px] text-ink-500">{p.description}</span>
                         </div>
 
                         {p.type === 'number' ? (
@@ -701,16 +700,16 @@ export const ArchitectForgeView: React.FC<ArchitectForgeViewProps> = ({
                               step={p.step || 1}
                               value={customParams[p.id] !== undefined ? customParams[p.id] : p.default}
                               onChange={e => handleParamChange(p.id, Number(e.target.value))}
-                              className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
+                              className="w-full bg-ink-900 border border-ink-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-accent-500"
                             />
                           </div>
                         ) : p.type === 'boolean' ? (
-                          <label className="flex items-center gap-2 mt-2 cursor-pointer text-xs font-mono text-slate-300">
+                          <label className="flex items-center gap-2 mt-2 cursor-pointer text-xs text-ink-300">
                             <input
                               type="checkbox"
                               checked={customParams[p.id] !== undefined ? !!customParams[p.id] : !!p.default}
                               onChange={e => handleParamChange(p.id, e.target.checked)}
-                              className="rounded bg-slate-900 border-slate-700 text-indigo-600 focus:ring-indigo-500"
+                              className="rounded bg-ink-900 border-ink-700 text-accent-600 focus:ring-accent-500"
                             />
                             <span>Enable {p.label}</span>
                           </label>
@@ -718,7 +717,7 @@ export const ArchitectForgeView: React.FC<ArchitectForgeViewProps> = ({
                           <select
                             value={customParams[p.id] || p.default}
                             onChange={e => handleParamChange(p.id, e.target.value)}
-                            className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
+                            className="w-full bg-ink-900 border border-ink-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-accent-500"
                           >
                             {(p.options || []).map(opt => (
                               <option key={opt} value={opt}>{opt}</option>
@@ -729,7 +728,7 @@ export const ArchitectForgeView: React.FC<ArchitectForgeViewProps> = ({
                             type="text"
                             value={customParams[p.id] || p.default}
                             onChange={e => handleParamChange(p.id, e.target.value)}
-                            className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
+                            className="w-full bg-ink-900 border border-ink-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-accent-500"
                           />
                         )}
                       </div>
@@ -739,14 +738,14 @@ export const ArchitectForgeView: React.FC<ArchitectForgeViewProps> = ({
 
                 {/* Code & Test Preview Tabs */}
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                    <div className="flex items-center gap-2 text-xs font-mono">
+                  <div className="flex items-center justify-between border-b border-ink-800 pb-2">
+                    <div className="flex items-center gap-2 text-xs">
                       <button
                         onClick={() => setPreviewTab('code')}
                         className={`flex items-center gap-1.5 px-3 py-1 rounded-lg transition cursor-pointer ${
                           previewTab === 'code'
-                            ? 'bg-slate-800 text-indigo-400 font-bold'
-                            : 'text-slate-400 hover:text-slate-200'
+                            ? 'bg-ink-800 text-accent-400 font-semibold'
+                            : 'text-ink-400 hover:text-ink-200'
                         }`}
                       >
                         <Code2 className="w-3.5 h-3.5" />
@@ -757,8 +756,8 @@ export const ArchitectForgeView: React.FC<ArchitectForgeViewProps> = ({
                         onClick={() => setPreviewTab('test')}
                         className={`flex items-center gap-1.5 px-3 py-1 rounded-lg transition cursor-pointer ${
                           previewTab === 'test'
-                            ? 'bg-slate-800 text-emerald-400 font-bold'
-                            : 'text-slate-400 hover:text-slate-200'
+                            ? 'bg-ink-800 text-ok-400 font-semibold'
+                            : 'text-ink-400 hover:text-ink-200'
                         }`}
                       >
                         <CheckCircle className="w-3.5 h-3.5" />
@@ -766,18 +765,18 @@ export const ArchitectForgeView: React.FC<ArchitectForgeViewProps> = ({
                       </button>
                     </div>
 
-                    <span className="text-[10px] font-mono text-slate-500">
+                    <span className="text-[10px] text-ink-500">
                       {previewTab === 'code' ? 'AST Sanitized' : 'Sandbox Asserts'}
                     </span>
                   </div>
 
-                  <pre className="p-4 bg-slate-950 border border-slate-800/80 rounded-xl text-xs font-mono text-slate-300 overflow-x-auto max-h-[320px] leading-relaxed select-text">
+                  <pre className="p-4 bg-ink-950 border border-ink-800/80 rounded-xl text-xs font-mono text-ink-300 overflow-x-auto max-h-[320px] leading-relaxed select-text">
                     <code>{previewTab === 'code' ? codePreview : testPreview}</code>
                   </pre>
                 </div>
               </div>
             ) : (
-              <div className="p-16 text-center bg-slate-900 border border-slate-800 rounded-2xl text-slate-500 font-mono text-xs">
+              <div className="p-16 text-center bg-ink-900 border border-ink-800 rounded-xl text-ink-500 text-xs">
                 Select a template from the catalog to configure its parametric architecture.
               </div>
             )}
@@ -787,14 +786,14 @@ export const ArchitectForgeView: React.FC<ArchitectForgeViewProps> = ({
 
       {/* Section 2: Recursive Learner Directives */}
       {activeSection === 'learner' && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-800 pb-4">
+        <div className="bg-ink-900 border border-ink-800 rounded-xl p-6 space-y-6">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-ink-800 pb-4">
             <div>
-              <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <BrainCircuit className="w-5 h-5 text-emerald-400" />
+              <h3 className="text-base font-semibold text-white flex items-center gap-2">
+                <BrainCircuit className="w-5 h-5 text-ok-400" />
                 <span>Self-Learning Architectural Recommendations</span>
               </h3>
-              <p className="text-xs text-slate-400 mt-1">
+              <p className="text-xs text-ink-400 mt-1">
                 The Recursive Learner analyses gene fitness and automatically recommends internal component templates for synthesis.
               </p>
             </div>
@@ -802,10 +801,10 @@ export const ArchitectForgeView: React.FC<ArchitectForgeViewProps> = ({
             <button
               onClick={() => handleExecuteLearnerDirective()}
               disabled={loading}
-              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-xs font-bold rounded-xl shadow-lg shadow-emerald-600/20 transition cursor-pointer disabled:opacity-50"
+              className="flex items-center gap-2 px-4 py-2 bg-ok-600 hover:bg-ok-500 text-white text-xs font-semibold rounded-xl shadow-lg transition cursor-pointer disabled:opacity-50"
             >
               <Sparkles className="w-4 h-4" />
-              <span>SYNTHESIZE FROM TOP DIRECTIVE</span>
+              <span>Synthesize from top directive</span>
             </button>
           </div>
 
@@ -813,36 +812,36 @@ export const ArchitectForgeView: React.FC<ArchitectForgeViewProps> = ({
             {learnerDirectives.map((dir, idx) => (
               <div
                 key={dir.id || idx}
-                className="bg-slate-950 p-5 rounded-xl border border-slate-800 flex flex-col justify-between gap-4"
+                className="bg-ink-950 p-5 rounded-xl border border-ink-800 flex flex-col justify-between gap-4"
               >
                 <div>
                   <div className="flex justify-between items-start mb-2">
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase ${
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold  ${
                       dir.kind === 'amplify'
-                        ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                        ? 'bg-ok-950 text-ok-300 border border-ok-800'
                         : dir.kind === 'synthesize_template'
-                        ? 'bg-indigo-950 text-indigo-300 border border-indigo-800'
+                        ? 'bg-accent-950 text-accent-300 border border-accent-800'
                         : dir.kind === 'refine'
-                        ? 'bg-amber-950 text-amber-300 border border-amber-800'
-                        : 'bg-rose-950 text-rose-300 border border-rose-800'
+                        ? 'bg-warn-950 text-warn-300 border border-warn-800'
+                        : 'bg-bad-950 text-bad-300 border border-bad-800'
                     }`}>
                       {dir.kind.replace('_', ' ')}
                     </span>
-                    <span className="text-[10px] font-mono text-slate-500">Ep #{dir.episode}</span>
+                    <span className="text-[10px] text-ink-500">Ep #{dir.episode}</span>
                   </div>
 
-                  <h4 className="text-sm font-bold text-white mb-1">{dir.geneName}</h4>
-                  <p className="text-xs text-slate-400">{dir.reason}</p>
+                  <h4 className="text-sm font-semibold text-white mb-1">{dir.geneName}</h4>
+                  <p className="text-xs text-ink-400">{dir.reason}</p>
                 </div>
 
-                <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between">
-                  <span className="text-[10px] font-mono text-indigo-400">
+                <div className="pt-3 border-t border-ink-800/80 flex items-center justify-between">
+                  <span className="text-[10px] text-accent-400">
                     {dir.templateId ? `Template: ${dir.templateId}` : 'Ecosystem Directive'}
                   </span>
 
                   <button
                     onClick={() => handleExecuteLearnerDirective(dir.id)}
-                    className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-mono transition cursor-pointer"
+                    className="px-3 py-1 bg-ink-800 hover:bg-ink-700 text-white rounded-lg text-xs transition cursor-pointer"
                   >
                     Synthesize
                   </button>
@@ -851,7 +850,7 @@ export const ArchitectForgeView: React.FC<ArchitectForgeViewProps> = ({
             ))}
 
             {learnerDirectives.length === 0 && (
-              <div className="col-span-full p-12 text-center text-slate-500 font-mono text-xs italic">
+              <div className="col-span-full p-12 text-center text-ink-500 text-xs italic">
                 No active directives generated yet. Run learning episodes in the RECURSIVE LEARNER tab.
               </div>
             )}
@@ -864,15 +863,15 @@ export const ArchitectForgeView: React.FC<ArchitectForgeViewProps> = ({
         <div className="space-y-4">
           <div className="flex justify-between items-center">
             <div>
-              <h3 className="text-lg font-bold text-white">Structural Deployment Artifacts</h3>
-              <p className="text-xs text-slate-400">High-assurance protocols and control systems compiled into the runtime.</p>
+              <h3 className="text-lg font-semibold text-white">Structural Deployment Artifacts</h3>
+              <p className="text-xs text-ink-400">High-assurance protocols and control systems compiled into the runtime.</p>
             </div>
           </div>
 
           {artifacts.length === 0 ? (
-            <div className="py-12 text-center border border-dashed border-slate-800 rounded-xl">
-              <Terminal className="w-8 h-8 text-slate-600 mx-auto mb-3" />
-              <p className="text-slate-400 font-mono text-sm">Awaiting structural initiation...</p>
+            <div className="py-12 text-center border border-dashed border-ink-800 rounded-xl">
+              <Terminal className="w-8 h-8 text-ink-600 mx-auto mb-3" />
+              <p className="text-ink-400 text-sm">Awaiting structural initiation...</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -887,30 +886,29 @@ export const ArchitectForgeView: React.FC<ArchitectForgeViewProps> = ({
       {/* Section 4: Self-Hosted Runtime Tools (the dogfood loop) */}
       {activeSection === 'selfhosted' && (
         <div className="space-y-4">
-          <div className="bg-slate-900 border border-emerald-800/60 rounded-2xl p-6 shadow-xl relative overflow-hidden">
-            <div className="absolute -right-16 -top-16 w-64 h-64 bg-emerald-600/10 rounded-full blur-3xl pointer-events-none" />
+          <div className="bg-ink-900 border border-ok-800/60 rounded-xl p-6 shadow-xl relative overflow-hidden">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 relative z-10">
               <div>
-                <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                  <Server className="w-5 h-5 text-emerald-400" />
+                <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                  <Server className="w-5 h-5 text-ok-400" />
                   <span>Self-Hosted Runtime Tools</span>
                 </h3>
-                <p className="text-xs text-slate-400 mt-1">
+                <p className="text-xs text-ink-400 mt-1">
                   Components that passed their real sandbox suite + lint gate were written to{' '}
-                  <code className="text-emerald-300 font-mono">.selfhosted/tools/*.mjs</code>, imported by the live server,
+                  <code className="text-ok-300 font-mono">.selfhosted/tools/*.mjs</code>, imported by the live server,
                   and re-verified at boot. This is the dogfood loop: Recourse now runs code it built.
                 </p>
               </div>
               <button
                 onClick={handleVerifySelfHosted}
                 disabled={shVerifyBusy}
-                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-xs font-bold rounded-xl shadow-lg shadow-emerald-600/20 transition cursor-pointer disabled:opacity-50"
+                className="flex items-center gap-2 px-4 py-2 bg-ok-600 hover:bg-ok-500 text-white text-xs font-semibold rounded-xl shadow-lg transition cursor-pointer disabled:opacity-50"
               >
                 <RotateCcw className={`w-4 h-4 ${shVerifyBusy ? 'animate-spin' : ''}`} />
-                <span>{shVerifyBusy ? 'RE-VERIFYING...' : 'RE-VERIFY ALL (REAL MODULES)'}</span>
+                <span>{shVerifyBusy ? 'Re-verifying...' : 'Re-verify all (real modules)'}</span>
               </button>
             </div>
-            <p className="text-[11px] font-mono text-slate-500 mt-3 relative z-10">
+            <p className="text-[11px] text-ink-500 mt-3 relative z-10">
               Honesty: a green verdict means the module file exists, dynamically imported OK, and the stored test suite still
               passed against its source. Stateful tools hold a singleton instance until the server restarts. Only
               plugin-declared methods are callable.
@@ -918,10 +916,10 @@ export const ArchitectForgeView: React.FC<ArchitectForgeViewProps> = ({
           </div>
 
           {selfHostedTools.length === 0 ? (
-            <div className="py-14 text-center border border-dashed border-emerald-900/60 rounded-2xl bg-slate-900/50">
-              <Server className="w-8 h-8 text-emerald-700 mx-auto mb-3" />
-              <p className="text-slate-400 font-mono text-sm">No self-hosted tools yet.</p>
-              <p className="text-xs text-slate-500 font-mono mt-2">
+            <div className="py-14 text-center border border-dashed border-ok-900/60 rounded-xl bg-ink-900/50">
+              <Server className="w-8 h-8 text-ok-700 mx-auto mb-3" />
+              <p className="text-ink-400 text-sm">No self-hosted tools yet.</p>
+              <p className="text-xs text-ink-500 mt-2">
                 Build a component with "Self-host to runtime" enabled and it will appear here as a live module.
               </p>
             </div>
@@ -938,20 +936,20 @@ export const ArchitectForgeView: React.FC<ArchitectForgeViewProps> = ({
                       onClick={() => handleSelectCallTool(tool.name, tool.methods)}
                       className={`p-4 rounded-xl border transition cursor-pointer ${
                         selected
-                          ? 'bg-emerald-950/40 border-emerald-500 shadow-lg shadow-emerald-950/50'
-                          : 'bg-slate-900/90 border-slate-800 hover:border-slate-700'
+                          ? 'bg-ok-950/40 border-ok-500 shadow-lg'
+                          : 'bg-ink-900/90 border-ink-800 hover:border-ink-700'
                       }`}
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex items-center gap-2">
-                          <div className={`p-2 rounded-lg border ${healthy ? 'bg-emerald-950/60 border-emerald-800' : 'bg-rose-950/60 border-rose-800'}`}>
+                          <div className={`p-2 rounded-lg border ${healthy ? 'bg-ok-950/60 border-ok-800' : 'bg-bad-950/60 border-bad-800'}`}>
                             {healthy
-                              ? <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                              : <AlertCircle className="w-4 h-4 text-rose-400" />}
+                              ? <CheckCircle2 className="w-4 h-4 text-ok-400" />
+                              : <AlertCircle className="w-4 h-4 text-bad-400" />}
                           </div>
                           <div>
-                            <h4 className="text-sm font-bold text-white font-mono">{tool.name}</h4>
-                            <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider">
+                            <h4 className="text-sm font-semibold text-white">{tool.name}</h4>
+                            <span className="text-[10px] text-ink-400 ">
                               {tool.templateId} • {tool.domain.replace('_', ' ')}
                             </span>
                           </div>
@@ -959,27 +957,27 @@ export const ArchitectForgeView: React.FC<ArchitectForgeViewProps> = ({
                         <button
                           onClick={(e) => { e.stopPropagation(); handleRemoveSelfHosted(tool.name); }}
                           disabled={shRemoving === tool.name}
-                          className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-950 text-slate-400 hover:text-rose-300 transition cursor-pointer disabled:opacity-50"
+                          className="p-1.5 rounded-lg bg-ink-800 hover:bg-bad-950 text-ink-400 hover:text-bad-300 transition cursor-pointer disabled:opacity-50"
                           title="Remove self-hosted tool"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
 
-                      <p className="text-[11px] font-mono text-slate-500 mt-2 truncate" title={tool.file}>
+                      <p className="text-[11px] text-ink-500 mt-2 truncate" title={tool.file}>
                         {tool.file} • #{tool.hash.slice(0, 10)}
                       </p>
 
                       <div className="flex flex-wrap gap-1.5 mt-2">
                         {(tool.methods || []).map((m: any) => (
-                          <span key={m.method} className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800 text-[10px] font-mono text-emerald-300">
+                          <span key={m.method} className="px-1.5 py-0.5 rounded bg-ink-950 border border-ink-800 text-[10px] text-ok-300">
                             {m.method}()
                           </span>
                         ))}
                       </div>
 
                       {tool.lastVerified && (
-                        <p className={`text-[10px] font-mono mt-2 ${healthy ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        <p className={`text-[10px] mt-2 ${healthy ? 'text-ok-400' : 'text-bad-400'}`}>
                           {healthy ? '✓ BOOT-VERIFIED' : '✗ FAILED'} {tool.lastVerified.detail}
                         </p>
                       )}
@@ -995,26 +993,26 @@ export const ArchitectForgeView: React.FC<ArchitectForgeViewProps> = ({
                     const tool = selfHostedTools.find((t) => t.name === callToolName);
                     if (!tool) return null;
                     return (
-                      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+                      <div className="bg-ink-900 border border-ink-800 rounded-xl p-5 space-y-4">
                         <div className="flex items-center justify-between">
                           <div>
-                            <h4 className="text-sm font-bold text-white font-mono">CALL LIVE MODULE</h4>
-                            <p className="text-[11px] text-slate-500 font-mono mt-0.5">
+                            <h4 className="text-sm font-semibold text-white">Call live module</h4>
+                            <p className="text-[11px] text-ink-500 mt-0.5">
                               {tool.name} {tool.stateful ? '(stateful singleton)' : '(stateless static)'}
                             </p>
                           </div>
-                          <span className="px-2 py-1 rounded-lg bg-slate-950 text-slate-300 border border-slate-800 text-[10px] font-mono">
+                          <span className="px-2 py-1 rounded-lg bg-ink-950 text-ink-300 border border-ink-800 text-[10px]">
                             {tool.entrypointName}
                           </span>
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div>
-                            <label className="block text-[11px] font-mono text-slate-400 mb-1">Method (whitelisted)</label>
+                            <label className="block text-[11px] text-ink-400 mb-1">Method (whitelisted)</label>
                             <select
                               value={callMethod}
                               onChange={e => { setCallMethod(e.target.value); setCallResult(null); }}
-                              className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-emerald-500"
+                              className="w-full bg-ink-950 border border-ink-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-ok-500"
                             >
                               {(tool.methods || []).map((m: any) => (
                                 <option key={m.method} value={m.method}>{m.method}</option>
@@ -1022,13 +1020,13 @@ export const ArchitectForgeView: React.FC<ArchitectForgeViewProps> = ({
                             </select>
                           </div>
                           <div>
-                            <label className="block text-[11px] font-mono text-slate-400 mb-1">Args (JSON array)</label>
+                            <label className="block text-[11px] text-ink-400 mb-1">Args (JSON array)</label>
                             <input
                               type="text"
                               value={callArgs}
                               onChange={e => setCallArgs(e.target.value)}
                               placeholder='["key", 42]'
-                              className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-emerald-500"
+                              className="w-full bg-ink-950 border border-ink-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-ok-500"
                             />
                           </div>
                         </div>
@@ -1036,29 +1034,29 @@ export const ArchitectForgeView: React.FC<ArchitectForgeViewProps> = ({
                         <button
                           onClick={handleCallTool}
                           disabled={callRunning || !callMethod}
-                          className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-xs font-bold rounded-xl shadow-lg shadow-emerald-600/20 transition cursor-pointer disabled:opacity-50"
+                          className="flex items-center gap-2 px-4 py-2 bg-ok-600 hover:bg-ok-500 text-white text-xs font-semibold rounded-xl shadow-lg transition cursor-pointer disabled:opacity-50"
                         >
                           <Play className={`w-4 h-4 ${callRunning ? 'animate-spin' : ''}`} />
-                          <span>{callRunning ? 'CALLING...' : 'EXECUTE ON LIVE MODULE'}</span>
+                          <span>{callRunning ? 'Calling...' : 'Execute on live module'}</span>
                         </button>
 
                         {callResult && (
-                          <div className={`p-4 rounded-xl border font-mono text-xs overflow-x-auto ${callResult.success ? 'bg-emerald-950/40 border-emerald-800/60' : 'bg-rose-950/40 border-rose-800/60'}`}>
+                          <div className={`p-4 rounded-xl border font-mono text-xs overflow-x-auto ${callResult.success ? 'bg-ok-950/40 border-ok-800/60' : 'bg-bad-950/40 border-bad-800/60'}`}>
                             {callResult.success ? (
                               <>
                                 <div className="flex items-center justify-between mb-2">
-                                  <span className="text-emerald-300 font-bold">RESULT</span>
-                                  <span className="text-slate-500">{callResult.executionTimeMs}ms</span>
+                                  <span className="text-ok-300 font-semibold">Result</span>
+                                  <span className="text-ink-500">{callResult.executionTimeMs}ms</span>
                                 </div>
-                                <pre className="text-slate-200 whitespace-pre-wrap select-text">{JSON.stringify(callResult.result, null, 2)}</pre>
+                                <pre className="text-ink-200 whitespace-pre-wrap select-text">{JSON.stringify(callResult.result, null, 2)}</pre>
                               </>
                             ) : (
                               <>
                                 <div className="flex items-center gap-2 mb-2">
-                                  <AlertCircle className="w-4 h-4 text-rose-400" />
-                                  <span className="text-rose-300 font-bold">CALL ERROR</span>
+                                  <AlertCircle className="w-4 h-4 text-bad-400" />
+                                  <span className="text-bad-300 font-semibold">Call error</span>
                                 </div>
-                                <pre className="text-rose-200 whitespace-pre-wrap select-text">{callResult.error}</pre>
+                                <pre className="text-bad-200 whitespace-pre-wrap select-text">{callResult.error}</pre>
                               </>
                             )}
                           </div>
@@ -1067,9 +1065,9 @@ export const ArchitectForgeView: React.FC<ArchitectForgeViewProps> = ({
                     );
                   })()
                 ) : (
-                  <div className="h-full py-14 text-center border border-dashed border-slate-800 rounded-2xl bg-slate-900/40">
-                    <Terminal className="w-8 h-8 text-slate-600 mx-auto mb-3" />
-                    <p className="text-slate-400 font-mono text-xs">Select a self-hosted tool to call it.</p>
+                  <div className="h-full py-14 text-center border border-dashed border-ink-800 rounded-xl bg-ink-900/40">
+                    <Terminal className="w-8 h-8 text-ink-600 mx-auto mb-3" />
+                    <p className="text-ink-400 text-xs">Select a self-hosted tool to call it.</p>
                   </div>
                 )}
               </div>
@@ -1081,15 +1079,14 @@ export const ArchitectForgeView: React.FC<ArchitectForgeViewProps> = ({
       {/* Section 5: Intel Inbox */}
       {activeSection === 'intel' && (
         <div className="space-y-4">
-          <div className="bg-slate-900 border border-amber-800/40 rounded-2xl p-5 shadow-xl relative overflow-hidden">
-            <div className="absolute -right-16 -top-16 w-64 h-64 bg-amber-600/5 rounded-full blur-3xl pointer-events-none" />
+          <div className="bg-ink-900 border border-warn-800/40 rounded-xl p-5 shadow-xl relative overflow-hidden">
             <div className="relative z-10">
-              <h3 className="text-lg font-bold text-white flex items-center gap-2 mb-1">
-                <Lightbulb className="w-5 h-5 text-amber-400" />
+              <h3 className="text-lg font-semibold text-white flex items-center gap-2 mb-1">
+                <Lightbulb className="w-5 h-5 text-warn-400" />
                 Intel Inbox
               </h3>
-              <p className="text-xs text-slate-400 mb-4">
-                Research ideas from ecosystem intelligence (bbtech, strategy teams, deep research). Adopt requires a real testable contract — invented ideas become buildable tools only with a reference suite.
+              <p className="text-xs text-ink-400 mb-4">
+                Research ideas from ecosystem intelligence (bbtech, strategy teams, deep research). Adopt requires a real testable contract - invented ideas become buildable tools only with a reference suite.
               </p>
               <IntelInboxView />
             </div>
@@ -1104,19 +1101,19 @@ const ArtifactCard: React.FC<{ artifact: StructuralArtifact }> = ({ artifact }) 
   const Icon = TYPE_ICONS[artifact.type] || Box;
   
   const statusColors = {
-    designing: 'text-blue-400 bg-blue-400/10 border-blue-400/20',
-    compiling: 'text-amber-400 bg-amber-400/10 border-amber-400/20',
-    verifying: 'text-fuchsia-400 bg-fuchsia-400/10 border-fuchsia-400/20',
-    deployed: 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20',
+    designing: 'text-accent-400 bg-accent-400/10 border-accent-400/20',
+    compiling: 'text-warn-400 bg-warn-400/10 border-warn-400/20',
+    verifying: 'text-accent-400 bg-accent-400/10 border-accent-400/20',
+    deployed: 'text-ok-400 bg-ok-400/10 border-ok-400/20',
   };
   
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col hover:border-slate-700 transition-colors">
+    <div className="bg-ink-900 border border-ink-800 rounded-xl p-5 flex flex-col hover:border-ink-700 transition-colors">
       <div className="flex justify-between items-start mb-4">
-        <div className="p-2 bg-slate-800 rounded-lg border border-slate-700">
-          <Icon className="w-5 h-5 text-indigo-400" />
+        <div className="p-2 bg-ink-800 rounded-lg border border-ink-700">
+          <Icon className="w-5 h-5 text-accent-400" />
         </div>
-        <span className={`text-[10px] font-mono px-2 py-1 rounded-full border flex items-center gap-1.5 ${statusColors[artifact.status]}`}>
+        <span className={`text-[10px] px-2 py-1 rounded-full border flex items-center gap-1.5 ${statusColors[artifact.status]}`}>
           {artifact.status !== 'deployed' && <div className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />}
           {artifact.status.toUpperCase()}
         </span>
@@ -1126,39 +1123,39 @@ const ArtifactCard: React.FC<{ artifact: StructuralArtifact }> = ({ artifact }) 
         <h3 className="text-sm font-semibold text-white truncate" title={artifact.name}>
           {artifact.name}
         </h3>
-        <p className="text-xs text-slate-400 font-mono mt-1">
+        <p className="text-xs text-ink-400 mt-1">
           {TYPE_LABELS[artifact.type]}
         </p>
       </div>
       
-      <p className="text-xs text-slate-500 line-clamp-2 mb-4 flex-grow">
+      <p className="text-xs text-ink-500 line-clamp-2 mb-4 flex-grow">
         {artifact.description}
       </p>
       
       <div className="space-y-3 mt-auto">
         {artifact.status !== 'deployed' && (
           <div className="space-y-1.5">
-            <div className="flex justify-between text-[10px] font-mono text-slate-500">
+            <div className="flex justify-between text-[10px] text-ink-500">
               <span>{artifact.status === 'designing' ? 'Architecture' : artifact.status === 'compiling' ? 'Synthesis' : 'Validation'}</span>
               <span>{Math.round(artifact.progress)}%</span>
             </div>
-            <div className="h-1 bg-slate-800 rounded-full overflow-hidden">
+            <div className="h-1 bg-ink-800 rounded-full overflow-hidden">
               <div 
-                className="h-full bg-indigo-500 rounded-full transition-all duration-500 ease-out"
+                className="h-full bg-accent-500 rounded-full transition-all duration-500 ease-out"
                 style={{ width: `${artifact.progress}%` }}
               />
             </div>
           </div>
         )}
         
-        <div className="grid grid-cols-2 gap-2 pt-3 border-t border-slate-800/50">
+        <div className="grid grid-cols-2 gap-2 pt-3 border-t border-ink-800/50">
           <div>
-            <span className="block text-[9px] text-slate-500 uppercase tracking-wider mb-0.5">Scale</span>
-            <span className="text-xs font-mono text-slate-300">{artifact.loc.toLocaleString()} LOC</span>
+            <span className="block text-[9px] text-ink-500 mb-0.5">Scale</span>
+            <span className="text-xs text-ink-300">{artifact.loc.toLocaleString()} LOC</span>
           </div>
           <div>
-            <span className="block text-[9px] text-slate-500 uppercase tracking-wider mb-0.5">Complexity</span>
-            <span className="text-xs font-mono text-slate-300">Ω({artifact.complexity.toFixed(1)})</span>
+            <span className="block text-[9px] text-ink-500 mb-0.5">Complexity</span>
+            <span className="text-xs text-ink-300">Ω({artifact.complexity.toFixed(1)})</span>
           </div>
         </div>
       </div>

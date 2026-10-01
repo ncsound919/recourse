@@ -209,14 +209,14 @@ export const SelfReporterView: React.FC = () => {
   const counts = article?.counts;
 
   return (
-    <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-5">
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 pb-4 border-b border-slate-800">
+    <div className="bg-ink-900/90 border border-ink-800 rounded-xl p-5">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 pb-4 border-b border-ink-800">
         <div>
           <div className="flex items-center space-x-2">
-            <Newspaper className="w-5 h-5 text-cyan-400" />
-            <h2 className="text-lg font-mono font-bold text-white">Self Reporter — First-Person Dispatches</h2>
+            <Newspaper className="w-5 h-5 text-accent-400" />
+            <h2 className="text-lg font-semibold text-white">Self Reporter - First-Person Dispatches</h2>
           </div>
-          <p className="text-xs text-slate-400 font-mono mt-0.5 max-w-3xl">
+          <p className="text-xs text-ink-400 mt-0.5 max-w-3xl">
             Recourse writes its own plain-language field report from live state, reads it as a comic protocol, and scores it
             against a five-dimension quality codex. Same state always yields the same article; each dispatch is content-addressed
             by the SHA-256 of its facts.{status ? ` ${status.voices.length} voices · ${status.formats.length} formats · ${status.articleCount} archived.` : ''}
@@ -227,7 +227,7 @@ export const SelfReporterView: React.FC = () => {
           <select
             value={voice}
             onChange={(e) => setVoice(e.target.value)}
-            className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-2 text-xs font-mono text-slate-200"
+            className="bg-ink-950 border border-ink-800 rounded-lg px-2 py-2 text-xs text-ink-200"
           >
             {(status?.voices ?? [{ id: 'field', name: 'Field Dispatch', tone: '', verbosity: '' }]).map((v) => (
               <option key={v.id} value={v.id}>{v.name}</option>
@@ -236,7 +236,7 @@ export const SelfReporterView: React.FC = () => {
           <select
             value={format}
             onChange={(e) => setFormat(e.target.value)}
-            className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-2 text-xs font-mono text-slate-200"
+            className="bg-ink-950 border border-ink-800 rounded-lg px-2 py-2 text-xs text-ink-200"
           >
             {(status?.formats ?? [{ id: 'dispatch', name: 'Field Dispatch', description: '' }]).map((f) => (
               <option key={f.id} value={f.id}>{f.name}</option>
@@ -245,23 +245,23 @@ export const SelfReporterView: React.FC = () => {
           <button
             onClick={preview}
             disabled={loading}
-            className="flex items-center space-x-2 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-mono text-xs font-bold transition-all disabled:opacity-50 cursor-pointer"
+            className="flex items-center space-x-2 px-3 py-2 rounded-lg bg-ink-800 hover:bg-ink-700 text-ink-200 text-xs font-semibold transition-all disabled:opacity-50 cursor-pointer"
           >
             <Gauge className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-            <span>PREVIEW</span>
+            <span>Preview</span>
           </button>
           <button
             onClick={narrate}
             disabled={narrating || !article || previewing}
-            className="flex items-center space-x-2 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 font-mono text-xs font-bold transition-all disabled:opacity-50 cursor-pointer"
+            className="flex items-center space-x-2 px-3 py-2 rounded-lg bg-ink-800 hover:bg-ink-700 text-accent-300 text-xs font-semibold transition-all disabled:opacity-50 cursor-pointer"
           >
             <Sparkles className={`w-3.5 h-3.5 ${narrating ? 'animate-spin' : ''}`} />
-            <span>NARRATE</span>
+            <span>Narrate</span>
           </button>
           <button
             onClick={writeNow}
             disabled={writing}
-            className="flex items-center space-x-2 px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-mono text-xs font-bold transition-all shadow-md shadow-cyan-500/20 disabled:opacity-50 cursor-pointer"
+            className="flex items-center space-x-2 px-4 py-2 rounded-lg bg-accent-600 hover:bg-accent-500 text-white text-xs font-semibold transition-all shadow-md disabled:opacity-50 cursor-pointer"
           >
             <PenLine className={`w-3.5 h-3.5 ${writing ? 'animate-pulse' : ''}`} />
             <span>{writing ? 'WRITING…' : 'WRITE DISPATCH NOW'}</span>
@@ -270,7 +270,7 @@ export const SelfReporterView: React.FC = () => {
       </div>
 
       {message && (
-        <div className="mt-4 text-xs font-mono text-slate-300 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2">
+        <div className="mt-4 text-xs text-ink-300 bg-ink-950 border border-ink-800 rounded-lg px-3 py-2">
           {message}
         </div>
       )}
@@ -278,37 +278,37 @@ export const SelfReporterView: React.FC = () => {
       <div className="mt-5 grid grid-cols-1 xl:grid-cols-3 gap-5">
         <div className="xl:col-span-2 space-y-4">
           {!article ? (
-            <div className="text-center py-12 text-slate-500 font-mono text-xs">
+            <div className="text-center py-12 text-ink-500 text-xs">
               {loading ? 'Loading the latest dispatch…' : 'No dispatch written yet. Click “Write dispatch now”.'}
             </div>
           ) : (
-            <article className="bg-slate-950 border border-slate-800 rounded-xl p-5">
-              <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-800">
-                <div className="flex items-center gap-2 font-mono text-[11px] text-slate-400">
-                  <Fingerprint className="w-3.5 h-3.5 text-cyan-400" />
+            <article className="bg-ink-950 border border-ink-800 rounded-xl p-5">
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-ink-800">
+                <div className="flex items-center gap-2 text-[11px] text-ink-400">
+                  <Fingerprint className="w-3.5 h-3.5 text-accent-400" />
                   <span>{article.id}</span>
-                  <span className="text-slate-600">·</span>
-                  <Clock className="w-3.5 h-3.5 text-slate-500" />
+                  <span className="text-ink-600">·</span>
+                  <Clock className="w-3.5 h-3.5 text-ink-500" />
                   <span>{fmtTime(article.generatedAt)}</span>
-                  <span className="text-slate-600">·</span>
+                  <span className="text-ink-600">·</span>
                   <span>{article.wordCount} words</span>
-                  <span className="text-slate-600">·</span>
-                  <span className="text-cyan-300">{article.voice.name} / {article.format}</span>
+                  <span className="text-ink-600">·</span>
+                  <span className="text-accent-300">{article.voice.name} / {article.format}</span>
                 </div>
-                <span className="flex items-center gap-1 text-[11px] font-mono text-emerald-400">
+                <span className="flex items-center gap-1 text-[11px] text-ok-400">
                   <ShieldCheck className="w-3.5 h-3.5" /> {previewing ? 'preview' : 'deterministic'}
                 </span>
               </div>
-              <div className="mt-4 font-mono text-xs text-slate-200 leading-relaxed whitespace-pre-wrap">
+              <div className="mt-4 font-mono text-xs text-ink-200 leading-relaxed whitespace-pre-wrap">
                 {article.markdown}
               </div>
               {article.narration?.prose && (
-                <div className="mt-5 border-t border-slate-800 pt-4">
-                  <div className="flex items-center gap-2 text-[11px] font-mono text-amber-300">
+                <div className="mt-5 border-t border-ink-800 pt-4">
+                  <div className="flex items-center gap-2 text-[11px] text-warn-300">
                     <Sparkles className="w-3.5 h-3.5" />
-                    NON-CANONICAL NARRATION{article.narration.model ? ` (${article.narration.model})` : ''} — does not change the article or its fingerprint
+                    NON-CANONICAL NARRATION{article.narration.model ? ` (${article.narration.model})` : ''} - does not change the article or its fingerprint
                   </div>
-                  <div className="mt-3 text-xs text-slate-300 leading-relaxed whitespace-pre-wrap">
+                  <div className="mt-3 text-xs text-ink-300 leading-relaxed whitespace-pre-wrap">
                     {article.narration.prose}
                   </div>
                 </div>
@@ -319,49 +319,49 @@ export const SelfReporterView: React.FC = () => {
 
         <div className="space-y-4">
           {article && (
-            <div className="bg-slate-950 border border-slate-800 rounded-xl p-4">
+            <div className="bg-ink-950 border border-ink-800 rounded-xl p-4">
               <div className="flex items-center gap-2 mb-2">
-                <BookOpen className="w-3.5 h-3.5 text-purple-400" />
-                <span className="text-[11px] font-mono uppercase tracking-widest text-slate-500">Chapter · {article.metaphor.condition}</span>
+                <BookOpen className="w-3.5 h-3.5 text-accent-400" />
+                <span className="text-[11px] text-ink-500">Chapter · {article.metaphor.condition}</span>
               </div>
-              <div className="font-mono text-sm text-purple-200 font-bold">{article.metaphor.archetype}</div>
-              <div className="text-[10px] font-mono text-slate-500 mt-0.5">{article.metaphor.source}</div>
-              <div className="mt-2 text-[11px] text-slate-300 leading-relaxed">{article.metaphor.businessLogic}</div>
+              <div className="text-sm text-accent-200 font-semibold">{article.metaphor.archetype}</div>
+              <div className="text-[10px] text-ink-500 mt-0.5">{article.metaphor.source}</div>
+              <div className="mt-2 text-[11px] text-ink-300 leading-relaxed">{article.metaphor.businessLogic}</div>
               <ul className="mt-2 space-y-1">
                 {article.metaphor.dimensions.map((d) => (
-                  <li key={d.id} className="text-[10px] font-mono text-slate-400">
-                    <span className="text-slate-300">{d.id} {d.title}</span> — {d.logic}
+                  <li key={d.id} className="text-[10px] font-mono text-ink-400">
+                    <span className="text-ink-300">{d.id} {d.title}</span> - {d.logic}
                   </li>
                 ))}
               </ul>
-              <div className="mt-2 text-[11px] text-amber-300">Lesson: {article.metaphor.lesson}</div>
+              <div className="mt-2 text-[11px] text-warn-300">Lesson: {article.metaphor.lesson}</div>
             </div>
           )}
 
           {article && (
-            <div className="bg-slate-950 border border-slate-800 rounded-xl p-4">
+            <div className="bg-ink-950 border border-ink-800 rounded-xl p-4">
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
-                  <Gauge className="w-3.5 h-3.5 text-slate-500" />
-                  <span className="text-[11px] font-mono uppercase tracking-widest text-slate-500">Quality codex</span>
+                  <Gauge className="w-3.5 h-3.5 text-ink-500" />
+                  <span className="text-[11px] text-ink-500">Quality codex</span>
                 </div>
-                <span className={`text-[11px] font-mono font-bold ${article.codex.verdict === 'GO' ? 'text-emerald-400' : 'text-amber-400'}`}>
+                <span className={`text-[11px] font-semibold ${article.codex.verdict === 'GO' ? 'text-ok-400' : 'text-warn-400'}`}>
                   {article.codex.verdict}
                 </span>
               </div>
               <div className="space-y-1.5">
                 {Object.entries(article.codex.scores).map(([k, v]) => (
                   <div key={k} className="flex items-center gap-2">
-                    <span className="w-20 shrink-0 font-mono text-[10px] text-slate-400 capitalize">{k}</span>
-                    <div className="h-2 flex-1 rounded-full bg-slate-800">
+                    <span className="w-20 shrink-0 text-[10px] text-ink-400 capitalize">{k}</span>
+                    <div className="h-2 flex-1 rounded-full bg-ink-800">
                       <div className="h-2 rounded-full" style={{ width: `${Math.round(Number(v) * 100)}%`, background: article.codex.gates[k] ? 'var(--color-success, #34d399)' : '#f59e0b' }} />
                     </div>
-                    <span className="w-9 shrink-0 text-right font-mono text-[10px] text-slate-400">{v}</span>
+                    <span className="w-9 shrink-0 text-right text-[10px] text-ink-400">{v}</span>
                   </div>
                 ))}
               </div>
               {article.codex.sensitivity[0] && (
-                <div className="mt-2 text-[10px] font-mono text-slate-500">
+                <div className="mt-2 text-[10px] text-ink-500">
                   Top lever: {article.codex.sensitivity[0].driver} ({article.codex.sensitivity[0].metric} {article.codex.sensitivity[0].delta >= 0 ? '+' : ''}{article.codex.sensitivity[0].delta})
                 </div>
               )}
@@ -369,52 +369,52 @@ export const SelfReporterView: React.FC = () => {
           )}
 
           {article && (
-            <div className="bg-slate-950 border border-slate-800 rounded-xl p-4">
+            <div className="bg-ink-950 border border-ink-800 rounded-xl p-4">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-[11px] font-mono uppercase tracking-widest text-slate-500">Monte Carlo</span>
-                <span className="text-[10px] font-mono text-slate-500">{article.monteCarlo.codex.trials} trials</span>
+                <span className="text-[11px] text-ink-500">Monte Carlo</span>
+                <span className="text-[10px] text-ink-500">{article.monteCarlo.codex.trials} trials</span>
               </div>
               <div className="flex items-baseline justify-between">
-                <span className="text-[10px] font-mono text-slate-500">Odds of GO</span>
-                <span className={`font-mono text-lg font-bold ${article.monteCarlo.codex.goProbability >= 0.5 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                <span className="text-[10px] text-ink-500">Odds of GO</span>
+                <span className={`text-lg font-semibold ${article.monteCarlo.codex.goProbability >= 0.5 ? 'text-ok-400' : 'text-warn-400'}`}>
                   {Math.round(article.monteCarlo.codex.goProbability * 100)}%
                 </span>
               </div>
-              <div className="h-2 w-full rounded-full bg-slate-800">
+              <div className="h-2 w-full rounded-full bg-ink-800">
                 <div className="h-2 rounded-full" style={{ width: `${Math.round(article.monteCarlo.codex.goProbability * 100)}%`, background: '#22d3ee' }} />
               </div>
               <div className="mt-2 space-y-1">
                 {(Object.entries(article.monteCarlo.codex.metrics) as Array<[string, { p10: number; p90: number; passProbability: number }]>).map(([k, m]) => (
                   <div key={k} className="flex items-center gap-2">
-                    <span className="w-20 shrink-0 font-mono text-[10px] capitalize text-slate-400">{k}</span>
-                    <div className="relative h-1.5 flex-1 rounded-full bg-slate-800">
-                      <div className="absolute h-1.5 rounded-full bg-cyan-500/40" style={{ left: `${Math.round(m.p10 * 100)}%`, width: `${Math.max(2, Math.round((m.p90 - m.p10) * 100))}%` }} />
+                    <span className="w-20 shrink-0 text-[10px] capitalize text-ink-400">{k}</span>
+                    <div className="relative h-1.5 flex-1 rounded-full bg-ink-800">
+                      <div className="absolute h-1.5 rounded-full bg-accent-500/40" style={{ left: `${Math.round(m.p10 * 100)}%`, width: `${Math.max(2, Math.round((m.p90 - m.p10) * 100))}%` }} />
                     </div>
-                    <span className="w-9 shrink-0 text-right font-mono text-[10px] text-slate-500">{Math.round(m.passProbability * 100)}%</span>
+                    <span className="w-9 shrink-0 text-right text-[10px] text-ink-500">{Math.round(m.passProbability * 100)}%</span>
                   </div>
                 ))}
               </div>
-              <div className="mt-2 font-mono text-[10px] text-slate-500">arc holds {Math.round(article.monteCarlo.protocol.stability * 100)}% · binding {article.monteCarlo.codex.binding}</div>
+              <div className="mt-2 text-[10px] text-ink-500">arc holds {Math.round(article.monteCarlo.protocol.stability * 100)}% · binding {article.monteCarlo.codex.binding}</div>
             </div>
           )}
 
           {article && (
-            <div className="bg-slate-950 border border-slate-800 rounded-xl p-4">
+            <div className="bg-ink-950 border border-ink-800 rounded-xl p-4">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-[11px] font-mono uppercase tracking-widest text-slate-500">Prose audit</span>
-                <span className={`font-mono text-[11px] font-bold ${article.prose.score < 15 ? 'text-emerald-400' : article.prose.score < 40 ? 'text-amber-400' : 'text-rose-400'}`}>
+                <span className="text-[11px] text-ink-500">Prose audit</span>
+                <span className={`text-[11px] font-semibold ${article.prose.score < 15 ? 'text-ok-400' : article.prose.score < 40 ? 'text-warn-400' : 'text-bad-400'}`}>
                   {article.prose.score}/100 · {article.prose.band}
                 </span>
               </div>
-              <div className="h-2 w-full rounded-full bg-slate-800">
+              <div className="h-2 w-full rounded-full bg-ink-800">
                 <div className="h-2 rounded-full" style={{ width: `${article.prose.score}%`, background: article.prose.score < 15 ? '#34d399' : article.prose.score < 40 ? '#f59e0b' : '#fb7185' }} />
               </div>
               {article.prose.findings.length === 0 ? (
-                <div className="mt-2 font-mono text-[10px] text-slate-500">No anti-slop tells detected.</div>
+                <div className="mt-2 text-[10px] text-ink-500">No anti-slop tells detected.</div>
               ) : (
                 <div className="mt-2 space-y-1">
                   {article.prose.findings.slice(0, 4).map((f) => (
-                    <div key={f.id} className="font-mono text-[10px] text-slate-400"><span className="text-slate-300">{f.label}</span> ×{f.count}</div>
+                    <div key={f.id} className="font-mono text-[10px] text-ink-400"><span className="text-ink-300">{f.label}</span> ×{f.count}</div>
                   ))}
                 </div>
               )}
@@ -422,9 +422,9 @@ export const SelfReporterView: React.FC = () => {
           )}
 
           {counts && (
-            <div className="bg-slate-950 border border-slate-800 rounded-xl p-4">
-              <div className="text-[11px] font-mono uppercase tracking-widest text-slate-500 mb-3">Dispatch facts</div>
-              <div className="grid grid-cols-2 gap-2 font-mono text-[11px]">
+            <div className="bg-ink-950 border border-ink-800 rounded-xl p-4">
+              <div className="text-[11px] text-ink-500 mb-3">Dispatch facts</div>
+              <div className="grid grid-cols-2 gap-2 text-[11px]">
                 <Fact label="Jobs on" value={`${counts.jobsEnabled}/${counts.jobsTotal}`} />
                 <Fact label="Capabilities" value={String(counts.registryTotal)} />
                 <Fact label="Connections" value={`${counts.connectionsUp}/${counts.connectionsTotal}`} />
@@ -437,13 +437,13 @@ export const SelfReporterView: React.FC = () => {
             </div>
           )}
 
-          <div className="bg-slate-950 border border-slate-800 rounded-xl p-4">
+          <div className="bg-ink-950 border border-ink-800 rounded-xl p-4">
             <div className="flex items-center gap-2 mb-3">
-              <Archive className="w-3.5 h-3.5 text-slate-500" />
-              <span className="text-[11px] font-mono uppercase tracking-widest text-slate-500">Archive</span>
+              <Archive className="w-3.5 h-3.5 text-ink-500" />
+              <span className="text-[11px] text-ink-500">Archive</span>
             </div>
             {index.length === 0 ? (
-              <div className="font-mono text-xs text-slate-500">No dispatches archived.</div>
+              <div className="text-xs text-ink-500">No dispatches archived.</div>
             ) : (
               <div className="space-y-2 max-h-[420px] overflow-y-auto">
                 {index.map((entry) => (
@@ -452,16 +452,16 @@ export const SelfReporterView: React.FC = () => {
                     onClick={() => void load(entry.fingerprint)}
                     className={`w-full text-left rounded-lg border px-3 py-2 transition-all cursor-pointer ${
                       article?.fingerprint === entry.fingerprint
-                        ? 'border-cyan-600/50 bg-cyan-500/10'
-                        : 'border-slate-800 hover:border-slate-700'
+                        ? 'border-accent-600/50 bg-accent-500/10'
+                        : 'border-ink-800 hover:border-ink-700'
                     }`}
                   >
-                    <div className="font-mono text-[11px] text-slate-200 line-clamp-2">{entry.headline}</div>
-                    <div className="mt-1 flex items-center gap-2 font-mono text-[10px] text-slate-500">
+                    <div className="text-[11px] text-ink-200 line-clamp-2">{entry.headline}</div>
+                    <div className="mt-1 flex items-center gap-2 text-[10px] text-ink-500">
                       <span>{entry.id}</span>
                       <span>·</span>
                       <span>{fmtTime(entry.generatedAt)}</span>
-                      {entry.hasNarration && <span className="text-amber-400">· narrated</span>}
+                      {entry.hasNarration && <span className="text-warn-400">· narrated</span>}
                     </div>
                   </button>
                 ))}
@@ -475,8 +475,8 @@ export const SelfReporterView: React.FC = () => {
 };
 
 const Fact: React.FC<{ label: string; value: string }> = ({ label, value }) => (
-  <div className="rounded-lg border border-slate-800 bg-slate-900/50 px-2.5 py-2">
-    <div className="text-[9px] uppercase tracking-wider text-slate-500">{label}</div>
-    <div className="text-sm font-bold text-slate-100">{value}</div>
+  <div className="rounded-lg border border-ink-800 bg-ink-900/50 px-2.5 py-2">
+    <div className="text-[9px] text-ink-500">{label}</div>
+    <div className="text-sm font-semibold text-ink-100">{value}</div>
   </div>
 );

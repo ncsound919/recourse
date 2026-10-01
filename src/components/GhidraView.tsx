@@ -67,9 +67,9 @@ interface AnalyzeResult {
 }
 
 const SEV_COLOR: Record<string, string> = {
-  high: 'text-rose-300 bg-rose-950/40 border-rose-800',
-  medium: 'text-amber-300 bg-amber-950/40 border-amber-800',
-  low: 'text-sky-300 bg-sky-950/40 border-sky-800',
+  high: 'text-bad-300 bg-bad-950/40 border-bad-800',
+  medium: 'text-warn-300 bg-warn-950/40 border-warn-800',
+  low: 'text-accent-300 bg-accent-950/40 border-accent-800',
 };
 
 function fileToBase64(file: File): Promise<string> {
@@ -182,45 +182,45 @@ export const GhidraView: React.FC = () => {
 
   return (
     <div className="space-y-5 max-w-6xl">
-      <div className="rounded-2xl border border-emerald-900/60 bg-gradient-to-br from-slate-950 via-slate-900/90 to-emerald-950/40 p-5">
+      <div className="rounded-xl border border-ok-900/60 bg-ink-950 p-5">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Binary className="w-5 h-5 text-emerald-300" />
-            <h2 className="font-bold tracking-wide">GHIDRA REVERSE ENGINEERING</h2>
+            <Binary className="w-5 h-5 text-ok-300" />
+            <h2 className="font-semibold ">Ghidra reverse engineering</h2>
           </div>
-          <button onClick={refresh} className="text-slate-400 hover:text-white transition" title="Refresh now">
+          <button onClick={refresh} className="text-ink-400 hover:text-white transition" title="Refresh now">
             <RefreshCw className="w-4 h-4" />
           </button>
         </div>
-        <p className="text-[12px] text-slate-400 mt-1">
-          Real NSA <span className="font-mono">Ghidra</span> headless analysis via the stateless sidecar
-          <span className="font-mono"> python/ghidra_service</span>: functions, imports, strings, memory sections and
-          decompiled C. Findings are deterministic heuristics over that real output — never a fabricated disassembly.
+        <p className="text-[12px] text-ink-400 mt-1">
+          Real NSA <span className="">Ghidra</span> headless analysis via the stateless sidecar
+          <span className=""> python/ghidra_service</span>: functions, imports, strings, memory sections and
+          decompiled C. Findings are deterministic heuristics over that real output - never a fabricated disassembly.
         </p>
         <div className="flex flex-wrap items-center gap-3 mt-3">
-          <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-mono border ${health.online ? 'text-emerald-300 bg-emerald-950/40 border-emerald-800' : 'text-rose-300 bg-rose-950/40 border-rose-800'}`}>
-            <span className={`w-1.5 h-1.5 rounded-full ${health.online ? 'bg-emerald-400' : 'bg-rose-400'}`} />
-            SIDECAR {health.online ? 'ONLINE' : 'OFFLINE'}
+          <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] border ${health.online ? 'text-ok-300 bg-ok-950/40 border-ok-800' : 'text-bad-300 bg-bad-950/40 border-bad-800'}`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${health.online ? 'bg-ok-400' : 'bg-bad-400'}`} />
+            SIDECAR {health.online ? 'Online' : 'Offline'}
           </span>
-          <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-mono border ${health.available ? 'text-emerald-300 bg-emerald-950/40 border-emerald-800' : 'text-amber-300 bg-amber-950/40 border-amber-800'}`}>
-            GHIDRA {health.available ? 'AVAILABLE' : 'NOT INSTALLED'}
+          <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] border ${health.available ? 'text-ok-300 bg-ok-950/40 border-ok-800' : 'text-warn-300 bg-warn-950/40 border-warn-800'}`}>
+            GHIDRA {health.available ? 'Available' : 'Not installed'}
           </span>
-          {health.ghidraHome && <span className="text-[11px] font-mono text-slate-400 truncate max-w-[240px]">{health.ghidraHome}</span>}
-          {health.javaVersion && <span className="text-[11px] font-mono text-slate-500">java: {health.javaVersion}</span>}
+          {health.ghidraHome && <span className="text-[11px] text-ink-400 truncate max-w-[240px]">{health.ghidraHome}</span>}
+          {health.javaVersion && <span className="text-[11px] text-ink-500">java: {health.javaVersion}</span>}
         </div>
         {!health.available && (
-          <div className="mt-3 text-[11px] text-amber-300 flex items-start gap-1.5">
+          <div className="mt-3 text-[11px] text-warn-300 flex items-start gap-1.5">
             <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-            <span>{health.reason ?? health.error ?? 'Ghidra not detected'} — analysis will honestly return ok:false.</span>
+            <span>{health.reason ?? health.error ?? 'Ghidra not detected'} - analysis will honestly return ok:false.</span>
           </div>
         )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-4">
+        <div className="rounded-xl border border-ink-800 bg-ink-950/50 p-4">
           <div className="flex items-center gap-2 mb-3">
-            <Upload className="w-4 h-4 text-slate-400" />
-            <h3 className="font-bold text-sm tracking-wide">ARTIFACT</h3>
+            <Upload className="w-4 h-4 text-ink-400" />
+            <h3 className="font-semibold text-sm ">Artifact</h3>
           </div>
           <input
             ref={inputRef}
@@ -234,56 +234,56 @@ export const GhidraView: React.FC = () => {
           />
           <button
             onClick={() => inputRef.current?.click()}
-            className="w-full rounded-lg border border-dashed border-slate-700 hover:border-emerald-700 bg-slate-900/60 px-3 py-6 text-sm text-slate-300 transition"
+            className="w-full rounded-lg border border-dashed border-ink-700 hover:border-ok-700 bg-ink-900/60 px-3 py-6 text-sm text-ink-300 transition"
           >
-            {file ? <span className="font-mono text-emerald-300">{file.name}</span> : 'Choose a binary…'}
+            {file ? <span className="text-ok-300">{file.name}</span> : 'Choose a binary…'}
           </button>
           <button
             onClick={analyze}
             disabled={!file || busy || !health.online}
-            className="mt-3 w-full inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-900/50 hover:bg-emerald-800/60 disabled:opacity-40 border border-emerald-800 px-3 py-2 text-sm font-mono transition"
+            className="mt-3 w-full inline-flex items-center justify-center gap-2 rounded-lg bg-ok-900/50 hover:bg-ok-800/60 disabled:opacity-40 border border-ok-800 px-3 py-2 text-sm transition"
           >
             {busy ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Activity className="w-4 h-4" />}
             {busy ? 'analyzing (real Ghidra run)…' : 'ANALYZE'}
           </button>
           {result && !result.ok && (
-            <div className="mt-3 text-[11px] text-rose-300 bg-rose-950/30 border border-rose-800/50 rounded p-2">
+            <div className="mt-3 text-[11px] text-bad-300 bg-bad-950/30 border border-bad-800/50 rounded p-2">
               {result.error ?? 'analysis failed'}
               {result.log_tail && result.log_tail.length > 0 && (
-                <pre className="mt-1 text-[10px] text-rose-200/70 overflow-x-auto">{result.log_tail.join('\n')}</pre>
+                <pre className="mt-1 text-[10px] text-bad-200/70 overflow-x-auto">{result.log_tail.join('\n')}</pre>
               )}
             </div>
           )}
         </div>
 
-        <div className="lg:col-span-2 rounded-2xl border border-slate-800 bg-slate-950/50 p-4">
+        <div className="lg:col-span-2 rounded-xl border border-ink-800 bg-ink-950/50 p-4">
           <div className="flex items-center gap-2 mb-3">
-            <ShieldAlert className="w-4 h-4 text-slate-400" />
-            <h3 className="font-bold text-sm tracking-wide">FINDINGS</h3>
-            {result?.elapsedMs != null && <span className="text-[10px] font-mono text-slate-500">{result.elapsedMs} ms</span>}
+            <ShieldAlert className="w-4 h-4 text-ink-400" />
+            <h3 className="font-semibold text-sm ">Findings</h3>
+            {result?.elapsedMs != null && <span className="text-[10px] text-ink-500">{result.elapsedMs} ms</span>}
           </div>
-          {!findings && <div className="text-slate-500 text-sm py-8 text-center">Analyze an artifact to see real findings.</div>}
+          {!findings && <div className="text-ink-500 text-sm py-8 text-center">Analyze an artifact to see real findings.</div>}
           {findings && (
             <>
               <div className="flex items-center gap-3">
-                <div className={`text-3xl font-mono font-bold ${findings.riskScore >= 50 ? 'text-rose-300' : 'text-emerald-300'}`}>
+                <div className={`text-3xl font-semibold ${findings.riskScore >= 50 ? 'text-bad-300' : 'text-ok-300'}`}>
                   {findings.riskScore}
-                  <span className="text-sm text-slate-500">/100</span>
+                  <span className="text-sm text-ink-500">/100</span>
                 </div>
-                <div className="text-[11px] text-slate-400">
+                <div className="text-[11px] text-ink-400">
                   {findings.indicatorCount} indicator(s) · {findings.counts.functions} fn · {findings.counts.decompiled} decompiled
-                  <div className="text-slate-600">{findings.note}</div>
+                  <div className="text-ink-600">{findings.note}</div>
                 </div>
               </div>
               <div className="mt-3 space-y-1.5 max-h-[240px] overflow-y-auto">
                 {findings.indicators.map((ind, i) => (
-                  <div key={i} className={`rounded border px-2.5 py-1.5 text-[11px] font-mono ${SEV_COLOR[ind.severity] ?? SEV_COLOR.low}`}>
-                    <span className="uppercase font-bold mr-2">{ind.severity}</span>
-                    <span className="text-slate-300">{ind.kind}: {ind.detail}</span>
+                  <div key={i} className={`rounded border px-2.5 py-1.5 text-[11px] ${SEV_COLOR[ind.severity] ?? SEV_COLOR.low}`}>
+                    <span className="font-semibold mr-2">{ind.severity}</span>
+                    <span className="text-ink-300">{ind.kind}: {ind.detail}</span>
                   </div>
                 ))}
                 {findings.indicators.length === 0 && (
-                  <div className="text-[11px] text-emerald-300 flex items-center gap-1">
+                  <div className="text-[11px] text-ok-300 flex items-center gap-1">
                     <CheckCircle2 className="w-3.5 h-3.5" /> no heuristic indicators fired
                   </div>
                 )}
@@ -291,24 +291,24 @@ export const GhidraView: React.FC = () => {
               <button
                 onClick={feedLearner}
                 disabled={!analysis}
-                className="mt-3 inline-flex items-center gap-2 rounded-lg bg-indigo-900/50 hover:bg-indigo-800/60 disabled:opacity-40 border border-indigo-800 px-3 py-1.5 text-[12px] font-mono transition"
+                className="mt-3 inline-flex items-center gap-2 rounded-lg bg-accent-900/50 hover:bg-accent-800/60 disabled:opacity-40 border border-accent-800 px-3 py-1.5 text-[12px] transition"
               >
                 <Brain className="w-4 h-4" /> FEED TO LEARNER + REPAIR LOOP
               </button>
-              {learned && <div className="mt-2 text-[11px] font-mono text-indigo-300">{learned}</div>}
+              {learned && <div className="mt-2 text-[11px] text-accent-300">{learned}</div>}
             </>
           )}
         </div>
       </div>
 
       {analysis && (
-        <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-4">
+        <div className="rounded-xl border border-ink-800 bg-ink-950/50 p-4">
           <div className="flex items-center gap-2 mb-3">
-            <FileCode className="w-4 h-4 text-slate-400" />
-            <h3 className="font-bold text-sm tracking-wide">DECOMPILED FUNCTIONS ({analysis.decompiled.length})</h3>
+            <FileCode className="w-4 h-4 text-ink-400" />
+            <h3 className="font-semibold text-sm ">DECOMPILED FUNCTIONS ({analysis.decompiled.length})</h3>
           </div>
           {analysis.decompiled.length === 0 ? (
-            <div className="text-slate-500 text-sm">No functions decompiled.</div>
+            <div className="text-ink-500 text-sm">No functions decompiled.</div>
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
               <div className="lg:col-span-1 max-h-[420px] overflow-y-auto space-y-1">
@@ -316,19 +316,19 @@ export const GhidraView: React.FC = () => {
                   <button
                     key={d.entry}
                     onClick={() => setSelectedFn(d.name)}
-                    className={`w-full text-left rounded px-2 py-1.5 text-[11px] font-mono truncate ${selected?.name === d.name ? 'bg-emerald-950/60 text-emerald-200' : 'text-slate-400 hover:bg-slate-900'}`}
+                    className={`w-full text-left rounded px-2 py-1.5 text-[11px] truncate ${selected?.name === d.name ? 'bg-ok-950/60 text-ok-200' : 'text-ink-400 hover:bg-ink-900'}`}
                     title={d.name}
                   >
                     {d.name}
                   </button>
                 ))}
               </div>
-              <pre className="lg:col-span-3 max-h-[420px] overflow-auto rounded-lg border border-slate-800 bg-slate-900/70 p-3 text-[11px] text-slate-300">
+              <pre className="lg:col-span-3 max-h-[420px] overflow-auto rounded-lg border border-ink-800 bg-ink-900/70 p-3 text-[11px] text-ink-300">
                 {selected?.c ?? 'select a function'}
               </pre>
             </div>
           )}
-          <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2 text-[10px] font-mono text-slate-500">
+          <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2 text-[10px] text-ink-500">
             <span>format: {analysis.format}</span>
             <span>lang: {analysis.language}</span>
             <span>base: {analysis.imageBase}</span>
@@ -341,10 +341,10 @@ export const GhidraView: React.FC = () => {
         </div>
       )}
 
-      <p className="text-[10px] text-slate-600">
+      <p className="text-[10px] text-ink-600">
         Honest scope: findings are deterministic heuristics over real Ghidra output (packer hints, RWX sections, risky
-        imports, oversized functions) — indicators, not a malware verdict. The sidecar holds no Recourse state; when
-        Ghidra or its JRE is missing it reports <span className="font-mono">available:false</span> and never invents an
+        imports, oversized functions) - indicators, not a malware verdict. The sidecar holds no Recourse state; when
+        Ghidra or its JRE is missing it reports <span className="">available:false</span> and never invents an
         analysis.
       </p>
     </div>

@@ -71,22 +71,22 @@ export const VerifierMatrixView: React.FC<VerifierMatrixViewProps> = ({ onRunVer
   };
 
   return (
-    <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-5">
+    <div className="bg-ink-900/90 border border-ink-800 rounded-xl p-5">
       
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 pb-4 border-b border-slate-800">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 pb-4 border-b border-ink-800">
         <div>
           <div className="flex items-center space-x-2">
-            <Terminal className="w-5 h-5 text-indigo-400" />
-            <h2 className="text-lg font-mono font-bold text-white">Deterministic Verifier Suite Matrix</h2>
+            <Terminal className="w-5 h-5 text-accent-400" />
+            <h2 className="text-lg font-semibold text-white">Deterministic Verifier Suite Matrix</h2>
           </div>
-          <p className="text-xs text-slate-400 font-mono mt-0.5">
+          <p className="text-xs text-ink-400 mt-0.5">
             Test candidate code against AST linter, Pytest assertions, SymPy algebraic equivalence, and Knowledge Graph evidence gates.
           </p>
         </div>
 
         {/* Preset Selector */}
-        <div className="flex flex-wrap items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 font-mono text-xs">
+        <div className="flex flex-wrap items-center gap-1 bg-ink-950 p-1 rounded-lg border border-ink-800 text-xs">
           {([
             'coding',
             'math',
@@ -100,7 +100,7 @@ export const VerifierMatrixView: React.FC<VerifierMatrixViewProps> = ({ onRunVer
               key={d}
               onClick={() => loadPreset(d)}
               className={`px-2.5 py-1 rounded-md transition-all cursor-pointer ${
-                domain === d ? 'bg-indigo-600 text-white font-bold' : 'text-slate-400 hover:text-white'
+                domain === d ? 'bg-accent-600 text-white font-semibold' : 'text-ink-400 hover:text-white'
               }`}
             >
               {d.replace('_', ' ')}
@@ -114,49 +114,49 @@ export const VerifierMatrixView: React.FC<VerifierMatrixViewProps> = ({ onRunVer
         
         {/* Source Code Box */}
         <div>
-          <label className="block text-xs font-mono font-bold text-slate-300 mb-1">
+          <label className="block text-xs font-semibold text-ink-300 mb-1">
             Candidate Source Code ({domain.toUpperCase()})
           </label>
           <textarea
             value={sourceCode}
             onChange={(e) => setSourceCode(e.target.value)}
             rows={8}
-            className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-indigo-300 font-mono text-xs focus:outline-none focus:border-indigo-500 scrollbar-thin resize-none"
+            className="w-full bg-ink-950 border border-ink-800 rounded-lg p-3 text-accent-300 text-xs focus:outline-none focus:border-accent-500 scrollbar-thin resize-none"
           />
         </div>
 
         {/* Test Spec Box */}
         <div>
-          <label className="block text-xs font-mono font-bold text-slate-300 mb-1">
+          <label className="block text-xs font-semibold text-ink-300 mb-1">
             Deterministic Test Suite / Grounding Spec
           </label>
           <textarea
             value={testSuiteCode}
             onChange={(e) => setTestSuiteCode(e.target.value)}
             rows={8}
-            className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-emerald-300 font-mono text-xs focus:outline-none focus:border-indigo-500 scrollbar-thin resize-none"
+            className="w-full bg-ink-950 border border-ink-800 rounded-lg p-3 text-ok-300 text-xs focus:outline-none focus:border-accent-500 scrollbar-thin resize-none"
           />
         </div>
       </div>
 
       {/* Biotech specific inputs if selected */}
       {domain === 'biotech' && (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 my-2 p-3 bg-slate-950 rounded-lg border border-slate-800 font-mono text-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 my-2 p-3 bg-ink-950 rounded-lg border border-ink-800 text-xs">
           <div>
-            <label className="text-slate-400 block mb-1">Asset Name:</label>
+            <label className="text-ink-400 block mb-1">Asset Name:</label>
             <input
               type="text"
               value={extraParam}
               onChange={(e) => setExtraParam(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white"
+              className="w-full bg-ink-900 border border-ink-700 rounded px-2 py-1 text-white"
             />
           </div>
           <div>
-            <label className="text-slate-400 block mb-1">Oncology Leg:</label>
+            <label className="text-ink-400 block mb-1">Oncology Leg:</label>
             <select
               value={extraLeg}
               onChange={(e) => setExtraLeg(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white"
+              className="w-full bg-ink-900 border border-ink-700 rounded px-2 py-1 text-white"
             >
               <option value="debulking">Debulking</option>
               <option value="blocking">Blocking</option>
@@ -165,14 +165,14 @@ export const VerifierMatrixView: React.FC<VerifierMatrixViewProps> = ({ onRunVer
             </select>
           </div>
           <div>
-            <label className="text-slate-400 block mb-1">Evidence Tier (0-5):</label>
+            <label className="text-ink-400 block mb-1">Evidence Tier (0-5):</label>
             <input
               type="number"
               min={0}
               max={5}
               value={extraTier}
               onChange={(e) => setExtraTier(Number(e.target.value))}
-              className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white"
+              className="w-full bg-ink-900 border border-ink-700 rounded px-2 py-1 text-white"
             />
           </div>
         </div>
@@ -180,17 +180,17 @@ export const VerifierMatrixView: React.FC<VerifierMatrixViewProps> = ({ onRunVer
 
       {/* Execute Verifier Button */}
       <div className="mt-4 flex items-center justify-between">
-        <span className="text-xs font-mono text-slate-400">
+        <span className="text-xs text-ink-400">
           Executes in isolated server-side sandbox container
         </span>
 
         <button
           onClick={handleRun}
           disabled={isRunning}
-          className="flex items-center space-x-2 px-5 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-mono text-xs font-bold transition-all shadow-md shadow-indigo-500/20 disabled:opacity-50 cursor-pointer"
+          className="flex items-center space-x-2 px-5 py-2.5 rounded-lg bg-accent-600 hover:bg-accent-500 text-white text-xs font-semibold transition-all shadow-md disabled:opacity-50 cursor-pointer"
         >
           {isRunning ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-          <span>{isRunning ? 'RUNNING VERIFIER...' : 'EXECUTE VERIFIER MATRIX'}</span>
+          <span>{isRunning ? 'Running verifier...' : 'Execute verifier matrix'}</span>
         </button>
       </div>
 
@@ -198,32 +198,32 @@ export const VerifierMatrixView: React.FC<VerifierMatrixViewProps> = ({ onRunVer
       {verifierOutput && (
         <div className={`mt-5 p-4 rounded-xl border font-mono text-xs ${
           verifierOutput.passed
-            ? 'bg-slate-950 border-emerald-500/40'
-            : 'bg-slate-950 border-rose-500/40'
+            ? 'bg-ink-950 border-ok-500/40'
+            : 'bg-ink-950 border-bad-500/40'
         }`}>
-          <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+          <div className="flex items-center justify-between pb-3 border-b border-ink-800">
             <div className="flex items-center space-x-2">
               {verifierOutput.passed ? (
-                <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                <CheckCircle2 className="w-5 h-5 text-ok-400" />
               ) : (
-                <XCircle className="w-5 h-5 text-rose-400" />
+                <XCircle className="w-5 h-5 text-bad-400" />
               )}
-              <span className={`font-bold text-sm ${verifierOutput.passed ? 'text-emerald-400' : 'text-rose-400'}`}>
+              <span className={`font-semibold text-sm ${verifierOutput.passed ? 'text-ok-400' : 'text-bad-400'}`}>
                 {verifierOutput.summary}
               </span>
             </div>
 
-            <span className="text-xs bg-slate-900 border border-slate-800 px-2.5 py-1 rounded text-indigo-300 font-bold">
+            <span className="text-xs bg-ink-900 border border-ink-800 px-2.5 py-1 rounded text-accent-300 font-semibold">
               Score: {(verifierOutput.score * 100).toFixed(1)}%
             </span>
           </div>
 
           <div className="mt-3 space-y-1.5">
-            <div className="text-slate-400 text-[11px] font-bold uppercase tracking-wider mb-1">Execution Details:</div>
+            <div className="text-ink-400 text-[11px] font-semibold mb-1">Execution Details:</div>
             {verifierOutput.details.map((detail, idx) => (
               <div
                 key={idx}
-                className={detail.includes('[OK]') ? 'text-emerald-400' : detail.includes('[FAIL]') ? 'text-rose-400' : 'text-slate-300'}
+                className={detail.includes('[OK]') ? 'text-ok-400' : detail.includes('[FAIL]') ? 'text-bad-400' : 'text-ink-300'}
               >
                 {detail}
               </div>
@@ -232,8 +232,8 @@ export const VerifierMatrixView: React.FC<VerifierMatrixViewProps> = ({ onRunVer
 
           {verifierOutput.stdout && (
             <div className="mt-3">
-              <div className="text-slate-400 text-[10px] uppercase font-bold mb-1">Pytest Standard Output:</div>
-              <pre className="p-2.5 bg-slate-900 rounded border border-slate-800 text-slate-300 text-[11px] overflow-x-auto">
+              <div className="text-ink-400 text-[10px] font-semibold mb-1">Pytest Standard Output:</div>
+              <pre className="p-2.5 bg-ink-900 rounded border border-ink-800 text-ink-300 text-[11px] overflow-x-auto">
                 {verifierOutput.stdout}
               </pre>
             </div>

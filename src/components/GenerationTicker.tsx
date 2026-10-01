@@ -1,4 +1,3 @@
-'use client';
 import React, { useState, useEffect, useRef } from 'react';
 
 interface LedgerEntry {
@@ -58,32 +57,28 @@ export const GenerationTicker: React.FC<GenerationTickerProps> = ({ onOpenGen })
   if (!visible || entries.length === 0) return null;
 
   return (
-    <div className="flex items-center gap-2 overflow-x-auto mb-3 pb-1 scrollbar-hide">
+    <div className="flex items-center gap-3 overflow-x-auto scrollbar-hide">
       <button
         type="button"
         onClick={onOpenGen}
-        className="flex items-center gap-1 text-[10px] font-mono text-slate-500 hover:text-indigo-400 uppercase tracking-widest shrink-0 transition-colors cursor-pointer"
-        title="Open Generation Ledger"
+        className="shrink-0 text-xs text-ink-500 transition-colors hover:text-ink-200"
+        title="Open the generation ledger"
       >
-        <span>Live Gens</span>
-        <span className="text-[9px] text-indigo-400/80 font-semibold">({entries.length})</span>
+        Recent generations
       </button>
-      <div className="flex items-center gap-2 overflow-x-auto flex-1">
+      <div className="flex flex-1 items-center gap-1.5 overflow-x-auto scrollbar-hide">
         {entries.map((e) => (
           <button
             type="button"
             key={e.gen}
             onClick={onOpenGen}
-            title={`Generation #${e.gen}: ${Math.round(e.readinessScore * 100)}% readiness, ${e.energyConsumed}J used. Click to view full ledger.`}
-            className="flex items-center gap-1.5 border border-slate-800/80 hover:border-indigo-500/50 rounded-lg px-2 py-1 shrink-0 bg-slate-950/80 hover:bg-slate-900 text-left transition-all cursor-pointer group"
+            title={`Generation ${e.gen}: ${Math.round(e.readinessScore * 100)}% readiness, ${e.energyConsumed} J used${e.dream ? ', dream cycle' : ''}${e.axiomAdded ? `, axiom ${e.axiom || ''}` : ''}${e.legoTick ? ', lego assembly' : ''}${e.permitNextIteration === false ? ', halted' : ''}`}
+            className="flex shrink-0 items-center gap-1.5 rounded-md border border-ink-800 px-2 py-1 text-xs transition-colors hover:border-ink-700 hover:bg-ink-900"
           >
-            <span className="text-indigo-300 group-hover:text-indigo-200 font-mono font-bold text-[11px]">#{e.gen}</span>
-            <span className="text-[10px] font-mono text-slate-500">{timeAgo(e.ts)}</span>
-            <span className="text-[10px] font-mono text-emerald-400 font-medium">{Math.round(e.readinessScore * 100)}%</span>
-            {e.dream && <span className="text-[8px] font-mono font-bold px-1 rounded bg-purple-950/80 text-purple-300 border border-purple-800/60" title="Dream Cycle fired">DRM</span>}
-            {e.axiomAdded && <span className="text-[8px] font-mono font-bold px-1 rounded bg-amber-950/80 text-amber-300 border border-amber-800/60" title={`Axiom added: ${e.axiom || ''}`}>AX</span>}
-            {e.legoTick && <span className="text-[8px] font-mono font-bold px-1 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-800/60" title="Lego NAS candidate assembled">LG</span>}
-            {e.permitNextIteration === false && <span className="text-[8px] font-mono font-bold px-1 rounded bg-rose-950/80 text-rose-300 border border-rose-800/60" title="Safety halt">HALT</span>}
+            <span className="text-ink-200">{e.gen}</span>
+            <span className="text-ink-500">{timeAgo(e.ts)}</span>
+            <span className="text-ink-400">{Math.round(e.readinessScore * 100)}%</span>
+            {e.permitNextIteration === false && <span className="text-bad-300">halt</span>}
           </button>
         ))}
       </div>

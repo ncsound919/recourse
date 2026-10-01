@@ -1,7 +1,125 @@
 @import "tailwindcss";
 
-/* Hide scrollbars while keeping scrollability — used on compact mission-control
-   overflow strips (status bars, telemetry rows) for a clean NASA-console look. */
+/*
+ * Recourse design tokens.
+ *
+ * One neutral family (ink), one accent (cobalt), three status colors
+ * (ok / warn / bad). Components must not reach for Tailwind's stock hue
+ * families (indigo, purple, cyan, emerald...): every color on screen comes
+ * from this file so the dashboard reads as one system.
+ */
+@theme {
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SFMono-Regular", "Cascadia Code", Consolas, monospace;
+
+  --color-ink-50: oklch(98.4% 0.003 256);
+  --color-ink-100: oklch(96.2% 0.005 256);
+  --color-ink-200: oklch(91.5% 0.008 256);
+  --color-ink-300: oklch(84% 0.011 256);
+  --color-ink-400: oklch(70.5% 0.016 256);
+  --color-ink-500: oklch(56% 0.018 256);
+  --color-ink-600: oklch(44.5% 0.017 256);
+  --color-ink-700: oklch(35.5% 0.015 256);
+  --color-ink-800: oklch(27% 0.012 256);
+  --color-ink-900: oklch(21% 0.01 256);
+  --color-ink-950: oklch(15.5% 0.008 256);
+
+  --color-accent-50: oklch(97% 0.014 252);
+  --color-accent-100: oklch(93.5% 0.03 252);
+  --color-accent-200: oklch(88% 0.058 252);
+  --color-accent-300: oklch(80.5% 0.095 252);
+  --color-accent-400: oklch(71.5% 0.13 252);
+  --color-accent-500: oklch(63% 0.145 252);
+  --color-accent-600: oklch(55.5% 0.145 252);
+  --color-accent-700: oklch(48% 0.13 252);
+  --color-accent-800: oklch(41% 0.105 252);
+  --color-accent-900: oklch(35.5% 0.08 252);
+  --color-accent-950: oklch(26% 0.05 252);
+
+  --color-ok-50: oklch(98% 0.015 162);
+  --color-ok-100: oklch(95% 0.036 162);
+  --color-ok-200: oklch(90.5% 0.066 162);
+  --color-ok-300: oklch(84.5% 0.1 162);
+  --color-ok-400: oklch(76% 0.12 162);
+  --color-ok-500: oklch(69% 0.115 162);
+  --color-ok-600: oklch(59.5% 0.1 163);
+  --color-ok-700: oklch(50.5% 0.085 165);
+  --color-ok-800: oklch(43% 0.07 166);
+  --color-ok-900: oklch(37.5% 0.055 168);
+  --color-ok-950: oklch(26% 0.038 170);
+
+  --color-warn-50: oklch(98.7% 0.016 95);
+  --color-warn-100: oklch(96% 0.042 95);
+  --color-warn-200: oklch(92% 0.085 95);
+  --color-warn-300: oklch(87.5% 0.115 88);
+  --color-warn-400: oklch(82% 0.13 80);
+  --color-warn-500: oklch(76% 0.135 70);
+  --color-warn-600: oklch(66% 0.13 58);
+  --color-warn-700: oklch(55% 0.115 50);
+  --color-warn-800: oklch(47% 0.098 47);
+  --color-warn-900: oklch(41% 0.08 46);
+  --color-warn-950: oklch(28% 0.055 46);
+
+  --color-bad-50: oklch(97% 0.012 12);
+  --color-bad-100: oklch(94% 0.024 12);
+  --color-bad-200: oklch(89% 0.045 10);
+  --color-bad-300: oklch(81% 0.09 12);
+  --color-bad-400: oklch(71% 0.14 15);
+  --color-bad-500: oklch(64.5% 0.17 17);
+  --color-bad-600: oklch(58.5% 0.175 18);
+  --color-bad-700: oklch(51.5% 0.155 17);
+  --color-bad-800: oklch(45.5% 0.13 14);
+  --color-bad-900: oklch(41% 0.11 11);
+  --color-bad-950: oklch(27% 0.075 12);
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+    background-color: var(--color-ink-950);
+  }
+  body {
+    background-color: var(--color-ink-950);
+    color: var(--color-ink-200);
+    font-family: var(--font-sans);
+    font-feature-settings: "ss01";
+    /* Numbers line up in every table and stat without forcing mono type. */
+    font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
+  }
+  pre, code, kbd, samp, textarea {
+    font-family: var(--font-mono);
+  }
+  h1, h2, h3, h4 {
+    text-wrap: balance;
+    letter-spacing: -0.01em;
+  }
+  ::selection {
+    background-color: var(--color-accent-600);
+    color: white;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-accent-500);
+    outline-offset: 2px;
+  }
+  select {
+    background-color: var(--color-ink-900);
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-ink-700) transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Hide scrollbars while keeping scrollability (compact overflow strips). */
 @utility scrollbar-hide {
   -ms-overflow-style: none;
   scrollbar-width: none;

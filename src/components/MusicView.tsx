@@ -1,5 +1,5 @@
 /**
- * Music sector view — compose chord progressions / songs and hand them to
+ * Music sector view - compose chord progressions / songs and hand them to
  * SoundLab.
  *
  * Real data only: the progression comes from the Recourse composer via
@@ -105,12 +105,12 @@ export const MusicView: React.FC = () => {
 
   return (
     <div className="space-y-4" data-music-sector>
-      <div className="flex items-center justify-between gap-3 border-b border-zinc-800 pb-3">
+      <div className="flex items-center justify-between gap-3 border-b border-ink-800 pb-3">
         <div className="flex items-center gap-2">
-          <Music2 className="w-5 h-5 text-fuchsia-400" />
+          <Music2 className="w-5 h-5 text-accent-400" />
           <div>
-            <div className="text-sm font-black uppercase tracking-wider text-white">Music sector</div>
-            <div className="text-[11px] text-zinc-500">
+            <div className="text-sm font-semibold text-white">Music sector</div>
+            <div className="text-[11px] text-ink-500">
               Compose chord progressions &amp; songs with the Recourse composer, then perform them in SoundLab.
             </div>
           </div>
@@ -119,7 +119,7 @@ export const MusicView: React.FC = () => {
           <button
             type="button"
             onClick={() => setSeed(1 + Math.floor(Math.random() * 200))}
-            className="px-2.5 py-1.5 rounded border border-zinc-700 text-zinc-300 hover:text-white text-[10px] font-bold uppercase tracking-wider"
+            className="px-2.5 py-1.5 rounded border border-ink-700 text-ink-300 hover:text-white text-[10px] font-semibold "
           >
             New seed
           </button>
@@ -127,7 +127,7 @@ export const MusicView: React.FC = () => {
             type="button"
             onClick={generate}
             disabled={busy}
-            className="px-3 py-1.5 rounded bg-fuchsia-600/20 border border-fuchsia-500/50 text-fuchsia-200 hover:bg-fuchsia-600/30 disabled:opacity-50 text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5"
+            className="px-3 py-1.5 rounded bg-accent-600/20 border border-accent-500/50 text-accent-200 hover:bg-accent-600/30 disabled:opacity-50 text-[10px] font-semibold flex items-center gap-1.5"
           >
             {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}
             {busy ? 'Composing…' : 'Compose progression'}
@@ -137,51 +137,51 @@ export const MusicView: React.FC = () => {
 
       <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-4">
         {/* Controls */}
-        <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3 space-y-2.5 text-[11px]">
-          <label className="flex items-center justify-between gap-2 text-zinc-400">
+        <div className="rounded-lg border border-ink-800 bg-ink-950/60 p-3 space-y-2.5 text-[11px]">
+          <label className="flex items-center justify-between gap-2 text-ink-400">
             Style
-            <select value={style} onChange={(e) => setStyle(e.target.value)} className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-white max-w-[170px]">
+            <select value={style} onChange={(e) => setStyle(e.target.value)} className="bg-ink-900 border border-ink-700 rounded px-2 py-1 text-white max-w-[170px]">
               {styles.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           </label>
-          <label className="flex items-center justify-between gap-2 text-zinc-400">
+          <label className="flex items-center justify-between gap-2 text-ink-400">
             Key
-            <select value={keyPc} onChange={(e) => setKeyPc(parseInt(e.target.value))} className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-white">
+            <select value={keyPc} onChange={(e) => setKeyPc(parseInt(e.target.value))} className="bg-ink-900 border border-ink-700 rounded px-2 py-1 text-white">
               <option value={-1}>Auto</option>
               {KEY_NAMES.map((k, i) => <option key={k} value={i}>{k}</option>)}
             </select>
           </label>
-          <label className="flex items-center justify-between gap-2 text-zinc-400">
+          <label className="flex items-center justify-between gap-2 text-ink-400">
             Mode
-            <select value={mode} onChange={(e) => setMode(e.target.value as 'loop' | 'arr')} className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-white">
+            <select value={mode} onChange={(e) => setMode(e.target.value as 'loop' | 'arr')} className="bg-ink-900 border border-ink-700 rounded px-2 py-1 text-white">
               <option value="loop">Loop (SoundLab-playable)</option>
               <option value="arr">Arrangement</option>
             </select>
           </label>
-          <label className="flex items-center justify-between gap-2 text-zinc-400">
+          <label className="flex items-center justify-between gap-2 text-ink-400">
             Bars
-            <select value={bars} onChange={(e) => setBars(parseInt(e.target.value))} className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-white">
+            <select value={bars} onChange={(e) => setBars(parseInt(e.target.value))} className="bg-ink-900 border border-ink-700 rounded px-2 py-1 text-white">
               {[4, 8, 16].map((b) => <option key={b} value={b}>{b}</option>)}
             </select>
           </label>
-          <label className="flex items-center justify-between gap-2 text-zinc-400">
+          <label className="flex items-center justify-between gap-2 text-ink-400">
             Seed
-            <input type="number" value={seed} onChange={(e) => setSeed(parseInt(e.target.value) || 0)} className="w-24 bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-white" />
+            <input type="number" value={seed} onChange={(e) => setSeed(parseInt(e.target.value) || 0)} className="w-24 bg-ink-900 border border-ink-700 rounded px-2 py-1 text-white" />
           </label>
 
-          <div className="pt-2 border-t border-zinc-800 space-y-2">
-            <label className="block text-zinc-400">
+          <div className="pt-2 border-t border-ink-800 space-y-2">
+            <label className="block text-ink-400">
               SoundLab URL
               <input
                 value={soundlabBase}
                 onChange={(e) => setSoundlabBase(e.target.value)}
-                className="mt-1 w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-white"
+                className="mt-1 w-full bg-ink-900 border border-ink-700 rounded px-2 py-1 text-white"
               />
             </label>
             <button
               type="button"
               onClick={() => window.open(handoff(), '_blank', 'noopener')}
-              className="w-full px-2.5 py-1.5 rounded bg-emerald-600/20 border border-emerald-500/50 text-emerald-200 hover:bg-emerald-600/30 text-[10px] font-black uppercase tracking-wider flex items-center justify-center gap-1.5"
+              className="w-full px-2.5 py-1.5 rounded bg-ok-600/20 border border-ok-500/50 text-ok-200 hover:bg-ok-600/30 text-[10px] font-semibold flex items-center justify-center gap-1.5"
             >
               <ExternalLink className="w-3.5 h-3.5" /> Compose this in SoundLab
             </button>
@@ -189,38 +189,38 @@ export const MusicView: React.FC = () => {
               <button
                 type="button"
                 onClick={() => copy(pullUrl(), 'SoundLab piece URL')}
-                className="flex-1 px-2 py-1.5 rounded border border-zinc-700 text-zinc-300 hover:text-white text-[9px] font-bold uppercase tracking-wider flex items-center justify-center gap-1"
+                className="flex-1 px-2 py-1.5 rounded border border-ink-700 text-ink-300 hover:text-white text-[9px] font-semibold flex items-center justify-center gap-1"
               >
                 <Copy className="w-3 h-3" /> Piece URL
               </button>
               <button
                 type="button"
                 onClick={() => copy(handoff(), 'handoff link')}
-                className="flex-1 px-2 py-1.5 rounded border border-zinc-700 text-zinc-300 hover:text-white text-[9px] font-bold uppercase tracking-wider flex items-center justify-center gap-1"
+                className="flex-1 px-2 py-1.5 rounded border border-ink-700 text-ink-300 hover:text-white text-[9px] font-semibold flex items-center justify-center gap-1"
               >
                 <Copy className="w-3 h-3" /> Handoff link
               </button>
             </div>
           </div>
 
-          <p className="text-[10px] text-zinc-600 leading-snug flex gap-1">
-            <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0 text-amber-400/70" />
-            SoundLab must be running ({soundlabBase}). Arrangement mode returns chords/sections only — SoundLab plays the loop pocket.
+          <p className="text-[10px] text-ink-600 leading-snug flex gap-1">
+            <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0 text-warn-400/70" />
+            SoundLab must be running ({soundlabBase}). Arrangement mode returns chords/sections only - SoundLab plays the loop pocket.
           </p>
         </div>
 
         {/* Result */}
-        <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-4 space-y-3 min-h-[220px]">
-          {msg && <div className="text-[11px] text-amber-300 font-mono">{msg}</div>}
+        <div className="rounded-lg border border-ink-800 bg-ink-950/60 p-4 space-y-3 min-h-[220px]">
+          {msg && <div className="text-[11px] text-warn-300">{msg}</div>}
           {!song && !busy && !msg && (
-            <div className="h-full flex flex-col items-center justify-center text-zinc-600 gap-2 py-12">
+            <div className="h-full flex flex-col items-center justify-center text-ink-600 gap-2 py-12">
               <RefreshCw className="w-6 h-6" />
-              <p className="text-[11px] uppercase font-bold tracking-wider">Pick a style and compose a progression</p>
+              <p className="text-[11px] font-semibold ">Pick a style and compose a progression</p>
             </div>
           )}
           {song && (
             <>
-              <div className="flex items-center justify-between text-[11px] font-mono text-zinc-500">
+              <div className="flex items-center justify-between text-[11px] text-ink-500">
                 <span>{song.style} · {song.key} · {song.bpm} BPM · {song.bars} bars · seed {song.seed} · {song.mode}</span>
                 <span>{song.events} events</span>
               </div>
@@ -230,22 +230,22 @@ export const MusicView: React.FC = () => {
                   const { root, quality } = chordParts(c);
                   return (
                     <span key={`${c}-${i}`} className="px-3 py-2 rounded-lg border border-white/10 bg-black/40 flex flex-col items-center leading-none">
-                      <span className="text-lg font-black text-white">{root}</span>
-                      <span className="text-[10px] font-mono text-fuchsia-300 mt-0.5">{quality || 'maj'}</span>
+                      <span className="text-lg font-semibold text-white">{root}</span>
+                      <span className="text-[10px] text-accent-300 mt-0.5">{quality || 'maj'}</span>
                     </span>
                   );
                 })}
               </div>
 
               {summary && (
-                <div className="text-[10px] font-mono text-zinc-500">
+                <div className="text-[10px] text-ink-500">
                   {summary.count} chords · {summary.unique.length} unique · {summary.unique.join('  ')}
                 </div>
               )}
 
               {song.mode === 'arr' && (
-                <div className="text-[11px] text-amber-300/90">
-                  Sections: {(song.sections ?? []).map((s, i) => `${s.name ?? `S${i + 1}`}${s.bars ? ` (${s.bars}b)` : ''}`).join(' · ') || '—'}
+                <div className="text-[11px] text-warn-300/90">
+                  Sections: {(song.sections ?? []).map((s, i) => `${s.name ?? `S${i + 1}`}${s.bars ? ` (${s.bars}b)` : ''}`).join(' · ') || '-'}
                 </div>
               )}
             </>
@@ -254,8 +254,8 @@ export const MusicView: React.FC = () => {
       </div>
 
       {/* Sector evidence (honest) */}
-      <div className="text-[10px] text-zinc-600 font-mono">
-        sector <span className="text-zinc-400">{MUSIC_SECTOR.id}</span> · verified {String(MUSIC_SECTOR.verified)} · sources: {MUSIC_SECTOR.sources.join(', ')}
+      <div className="text-[10px] text-ink-600">
+        sector <span className="text-ink-400">{MUSIC_SECTOR.id}</span> · verified {String(MUSIC_SECTOR.verified)} · sources: {MUSIC_SECTOR.sources.join(', ')}
       </div>
     </div>
   );

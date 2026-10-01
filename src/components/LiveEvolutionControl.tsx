@@ -1,5 +1,5 @@
 import React from 'react';
-import { Play, Pause, FastForward, Shield, Sliders, RefreshCw } from 'lucide-react';
+import { Pause, Play } from 'lucide-react';
 import { SystemStatus, PromotionPolicy, ToolDomain } from '../types';
 
 interface LiveEvolutionControlProps {
@@ -10,92 +10,88 @@ interface LiveEvolutionControlProps {
   isStepping: boolean;
 }
 
+const DOMAINS: Array<{ id: ToolDomain; label: string }> = [
+  { id: 'coding', label: 'Coding' },
+  { id: 'math', label: 'Math' },
+  { id: 'biotech', label: 'Biotech' },
+  { id: 'systemic', label: 'Systemic' },
+  { id: 'neuro_symbolic', label: 'Neuro-symbolic' },
+  { id: 'cyber_defense', label: 'Cyber defense' },
+  { id: 'quantum_sim', label: 'Quantum sim' },
+];
+
+const POLICY_TEXT: Partial<Record<PromotionPolicy, string>> = {
+  non_regressing: 'A candidate is promoted when its score is at least the current score.',
+  strict_improve: 'A candidate must beat the current score to be promoted.',
+  human_approval: 'Candidates that pass verification wait in the approval queue.',
+  any_pass: 'Any candidate that passes verification is promoted.',
+};
+
 export const LiveEvolutionControl: React.FC<LiveEvolutionControlProps> = ({
   status,
   onToggleAuto,
   onStepEvolution,
-  _onPolicyChange,
-  isStepping
+  onPolicyChange,
+  isStepping,
 }) => {
+  const running = status.isAutoEvolving;
   return (
-    <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-5 mb-6">
-      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 pb-4 border-b border-slate-800">
-        <div>
-          <div className="flex items-center space-x-2">
-            <h2 className="text-base font-mono font-bold text-white flex items-center gap-2">
-              <Sliders className="w-4 h-4 text-indigo-400" />
-              <span>24/7 Autonomous Development Control Center</span>
-            </h2>
-            <span className={`px-2 py-0.5 text-[10px] font-mono font-bold uppercase rounded-full ${
-              status.isAutoEvolving
-                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
-                : 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
-            }`}>
-              {status.isAutoEvolving ? '● 24/7 AUTO RUNNING' : 'PAUSED'}
+    <section className="rounded-xl border border-ink-800 bg-ink-900/60 p-5">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="max-w-[65ch]">
+          <div className="flex items-center gap-2">
+            <h2 className="text-base font-semibold text-ink-50">Autonomous loop</h2>
+            <span className={`rounded px-1.5 py-0.5 text-xs ${running ? 'bg-ok-500/15 text-ok-300' : 'bg-ink-800 text-ink-300'}`}>
+              {running ? 'Running' : 'Paused'}
             </span>
           </div>
-          <p className="text-xs text-slate-400 mt-1 font-mono">
-            Recourse automatically evaluates architectural bottlenecks, mutates candidate code, and gates promotions through policy verifiers.
+          <p className="mt-1 text-sm text-ink-400">
+            Finds bottlenecks, mutates candidate code and promotes only what passes the verifier and the gate policy.
           </p>
         </div>
-
-        {/* Action Controls */}
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={() => onToggleAuto(!status.isAutoEvolving)}
-            className={`flex items-center space-x-2 px-4 py-2 rounded-lg font-mono text-xs font-bold transition-all ${
-              status.isAutoEvolving
-                ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20'
-                : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/20'
-            }`}
-          >
-            {status.isAutoEvolving ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-            <span>{status.isAutoEvolving ? 'PAUSE 24/7 RUNNER' : 'START 24/7 AUTO-DEVELOPER'}</span>
-          </button>
-        </div>
+        <button
+          onClick={() => onToggleAuto(!running)}
+          className={`flex h-9 shrink-0 items-center gap-2 self-start rounded-md px-3.5 text-sm font-medium transition-colors active:translate-y-px ${
+            running ? 'border border-ink-700 text-ink-200 hover:bg-ink-800' : 'bg-accent-600 text-white hover:bg-accent-500'
+          }`}
+        >
+          {running ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+          {running ? 'Pause loop' : 'Start loop'}
+        </button>
       </div>
 
-      {/* Domain Quick Step Trigger Bar */}
-      <div className="mt-4 pt-1 flex flex-col md:flex-row md:items-center justify-between gap-3">
-        <div className="flex items-center space-x-2 text-xs font-mono text-slate-400">
-          <FastForward className="w-3.5 h-3.5 text-cyan-400" />
-          <span>Manual Step Evolution Across 7 Frontier Domains:</span>
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          {([
-            { id: 'coding', label: 'Coding', color: 'text-indigo-400' },
-            { id: 'math', label: 'Math', color: 'text-emerald-400' },
-            { id: 'biotech', label: 'Biotech', color: 'text-rose-400' },
-            { id: 'systemic', label: 'Systemic', color: 'text-amber-400' },
-            { id: 'neuro_symbolic', label: 'Neuro-Symbolic', color: 'text-purple-400' },
-            { id: 'cyber_defense', label: 'Cyber Defense', color: 'text-red-400' },
-            { id: 'quantum_sim', label: 'Quantum Sim', color: 'text-cyan-400' }
-          ] as Array<{ id: ToolDomain; label: string; color: string }>).map(item => (
-            <button
-              key={item.id}
-              disabled={isStepping}
-              onClick={() => onStepEvolution(item.id)}
-              className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 hover:border-indigo-500/50 text-slate-300 font-mono text-xs transition-all disabled:opacity-50 hover:text-white cursor-pointer"
-            >
-              <RefreshCw className={`w-3 h-3 ${item.color} ${isStepping ? 'animate-spin' : ''}`} />
-              <span>Step {item.label}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Promotion Policy Explanation Banner */}
-      <div className="mt-4 p-3 bg-slate-950/60 rounded-lg border border-slate-800/80 text-xs font-mono flex items-start gap-2 text-slate-400">
-        <Shield className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+      <div className="mt-5 grid gap-5 border-t border-ink-800 pt-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <div>
-          <span className="text-slate-200 font-bold uppercase">Active Policy Gate ({status.activePolicy}):</span>{' '}
-          {status.activePolicy === 'non_regressing' && 'Candidates are promoted if score \u2265 current score.'}
-          {status.activePolicy === 'strict_improve' && 'Candidates must strictly improve score (\u003E current) to promote.'}
-          {status.activePolicy === 'human_approval' && 'Candidates pass verification but sit in pending queue for human review.'}
-          {status.activePolicy === 'any_pass' && 'Any candidate passing verification auto-promotes.'}
+          <div className="mb-2 text-xs text-ink-500">Run one step in a domain</div>
+          <div className="flex flex-wrap gap-1.5">
+            {DOMAINS.map((d) => (
+              <button
+                key={d.id}
+                disabled={isStepping}
+                onClick={() => onStepEvolution(d.id)}
+                className="rounded-md border border-ink-800 bg-ink-950 px-2.5 py-1.5 text-sm text-ink-300 transition-colors hover:border-ink-700 hover:text-ink-50 disabled:opacity-50"
+              >
+                {d.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <label htmlFor="gate-policy" className="mb-2 block text-xs text-ink-500">Promotion gate</label>
+          <select
+            id="gate-policy"
+            value={status.activePolicy}
+            onChange={(e) => onPolicyChange(e.target.value as PromotionPolicy)}
+            className="w-full rounded-md border border-ink-800 bg-ink-950 px-2.5 py-1.5 text-sm text-ink-200 focus:border-accent-500 focus:outline-none"
+          >
+            <option value="non_regressing">Non-regressing</option>
+            <option value="strict_improve">Strict improve</option>
+            <option value="human_approval">Human approval</option>
+            <option value="any_pass">Any pass</option>
+          </select>
+          <p className="mt-1.5 text-xs text-ink-500">{POLICY_TEXT[status.activePolicy] ?? ''}</p>
         </div>
       </div>
-    </div>
+    </section>
   );
 };

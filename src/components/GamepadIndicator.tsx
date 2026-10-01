@@ -28,21 +28,21 @@ export const GamepadIndicator: React.FC<GamepadIndicatorProps> = ({
 
   return (
     <span
-      className={`flex items-center gap-1.5 bg-slate-900 border px-3 py-1.5 rounded-lg font-mono text-xs transition-all ${
+      className={`flex items-center gap-1.5 bg-ink-900 border px-3 py-1.5 rounded-lg font-mono text-xs transition-all ${
         connected
-          ? 'border-emerald-600/60 text-emerald-300'
-          : 'border-slate-800 text-slate-600'
-      } ${flash ? 'scale-110 border-amber-400 text-amber-300 shadow-lg shadow-amber-500/30' : ''}`}
+          ? 'border-ok-600/60 text-ok-300'
+          : 'border-ink-800 text-ink-600'
+      } ${flash ? 'scale-110 border-warn-400 text-warn-300 shadow-lg' : ''}`}
       title={
         connected
-          ? `Controller: ${name || 'Gamepad'} — D-pad/stick cycles tabs, A confirms, X toggles auto, Y steps`
+          ? `Controller: ${name || 'Gamepad'} - D-pad/stick cycles tabs, A confirms, X toggles auto, Y steps`
           : 'Connect a USB gamepad to control the dashboard'
       }
     >
       <Gamepad2 className="w-3.5 h-3.5" />
       <span>{connected ? (name || 'Gamepad').slice(0, 24) : 'Controller'}</span>
       {connected && lastAction && (
-        <span className="text-amber-400 uppercase">{lastAction}</span>
+        <span className="text-warn-400 ">{lastAction}</span>
       )}
     </span>
   );

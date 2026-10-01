@@ -77,17 +77,17 @@ async function fetchPlan(kind: InsightKind): Promise<{ data: Record<string, any>
 const DOMAIN_ORDER = ['coding', 'math', 'biotech', 'systemic', 'neuro_symbolic', 'cyber_defense', 'quantum_sim'];
 
 const DOMAIN_PILL: Record<string, string> = {
-  coding: 'text-blue-400 bg-blue-500/10 border-blue-500/20',
-  math: 'text-purple-400 bg-purple-500/10 border-purple-500/20',
-  systemic: 'text-amber-400 bg-amber-500/10 border-amber-500/20',
-  cyber_defense: 'text-rose-400 bg-rose-500/10 border-rose-500/20',
-  biotech: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
-  neuro_symbolic: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/20',
-  quantum_sim: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/20'
+  coding: 'text-accent-400 bg-accent-500/10 border-accent-500/20',
+  math: 'text-accent-400 bg-accent-500/10 border-accent-500/20',
+  systemic: 'text-warn-400 bg-warn-500/10 border-warn-500/20',
+  cyber_defense: 'text-bad-400 bg-bad-500/10 border-bad-500/20',
+  biotech: 'text-ok-400 bg-ok-500/10 border-ok-500/20',
+  neuro_symbolic: 'text-accent-400 bg-accent-500/10 border-accent-500/20',
+  quantum_sim: 'text-accent-400 bg-accent-500/10 border-accent-500/20'
 };
 
 function timeAgo(ts?: number): string {
-  if (!ts) return '—';
+  if (!ts) return '-';
   const secs = Math.max(0, Math.floor((Date.now() - ts) / 1000));
   if (secs < 60) return `${secs}s ago`;
   if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
@@ -96,7 +96,7 @@ function timeAgo(ts?: number): string {
 }
 
 function _fmtClock(ts?: number): string {
-  if (!ts) return '—';
+  if (!ts) return '-';
   return new Date(ts).toLocaleTimeString();
 }
 
@@ -119,21 +119,21 @@ function eventSummary(evt: any): string {
   const d = evt?.data || {};
   const candidates = [d.tool, d.toolName, d.hybridTool, d.toolName, d.action, d.actionType, d.templateId, d.chaosType, d.gene];
   const subject = candidates.find((c) => typeof c === 'string' && c.length > 0);
-  if (subject) return `${evt.type} — ${subject}`;
+  if (subject) return `${evt.type} - ${subject}`;
   const action = pickLines(d)[0];
-  return action ? `${evt.type} — ${action}` : evt.type;
+  return action ? `${evt.type} - ${action}` : evt.type;
 }
 
 function domainPill(domain: string) {
   return (
-    <span className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold border ${DOMAIN_PILL[domain] || 'text-slate-400 bg-slate-800 border-slate-700'}`}>
+    <span className={`px-1.5 py-0.5 rounded text-[9px] font-semibold border ${DOMAIN_PILL[domain] || 'text-ink-400 bg-ink-800 border-ink-700'}`}>
       {domain.replace('_', ' ').toUpperCase()}
     </span>
   );
 }
 
 // ===========================================================================
-// Briefs — real numbers rendered as prose for voice read-aloud
+// Briefs - real numbers rendered as prose for voice read-aloud
 // ===========================================================================
 
 function buildBrief(kind: InsightKind, data: Record<string, any>): string[] {
@@ -155,7 +155,7 @@ function buildBrief(kind: InsightKind, data: Record<string, any>): string[] {
       if (gens.length) {
         lines.push(`Generation ledger records ${gens.length} generation${gens.length === 1 ? '' : 's'}${gens[0]?.gen && gens[0].gen > 1 ? ` starting at generation ${gens[0].gen}` : ''}.`);
       } else {
-        lines.push('Generation ledger empty — generations recorded before it was enabled were not persisted.');
+        lines.push('Generation ledger empty - generations recorded before it was enabled were not persisted.');
       }
       break;
     }
@@ -269,24 +269,24 @@ export const SystemInsightModal: React.FC<SystemInsightModalProps> = ({ kind, st
   const muteNote = !isVoiceEnabled();
 
   return (
-    <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
-      <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden">
+    <div className="fixed inset-0 bg-ink-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
+      <div className="bg-ink-900 border border-ink-700 rounded-xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="flex items-start justify-between gap-4 p-5 border-b border-slate-800">
+        <div className="flex items-start justify-between gap-4 p-5 border-b border-ink-800">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl border border-slate-700 bg-slate-950 text-indigo-400">
+            <div className="p-2.5 rounded-xl border border-ink-700 bg-ink-950 text-accent-400">
               <meta.Icon className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-base font-bold text-white">{meta.title}</h3>
-              <p className="text-[11px] font-mono text-slate-400 mt-0.5">{meta.subtitle}</p>
+              <h3 className="text-base font-semibold text-white">{meta.title}</h3>
+              <p className="text-[11px] text-ink-400 mt-0.5">{meta.subtitle}</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={() => kind && load(kind)}
               disabled={loading}
-              className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition cursor-pointer disabled:opacity-50"
+              className="p-2 rounded-lg bg-ink-800 hover:bg-ink-700 text-ink-300 transition cursor-pointer disabled:opacity-50"
               title="Refresh"
             >
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
@@ -294,13 +294,13 @@ export const SystemInsightModal: React.FC<SystemInsightModalProps> = ({ kind, st
             <button
               onClick={handleSpeak}
               disabled={brief.length === 0}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 text-[11px] font-mono font-bold transition cursor-pointer disabled:opacity-50"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-accent-600/20 hover:bg-accent-600/30 text-accent-300 border border-accent-500/30 text-[11px] font-semibold transition cursor-pointer disabled:opacity-50"
               title="Read this panel aloud"
             >
               <Volume2 className="w-4 h-4" />
-              <span>SPEAK BRIEF</span>
+              <span>Speak brief</span>
             </button>
-            <button onClick={onClose} className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition cursor-pointer" title="Close">
+            <button onClick={onClose} className="p-2 rounded-lg bg-ink-800 hover:bg-ink-700 text-ink-300 transition cursor-pointer" title="Close">
               <X className="w-4 h-4" />
             </button>
           </div>
@@ -308,16 +308,16 @@ export const SystemInsightModal: React.FC<SystemInsightModalProps> = ({ kind, st
 
         {/* Honest voice note */}
         {muteNote && (
-          <div className="px-5 pt-3 text-[10px] font-mono text-slate-500">
-            Voice is muted in the header — SPEAK BRIEF plays a one-off readout anyway.
+          <div className="px-5 pt-3 text-[10px] text-ink-500">
+            Voice is muted in the header - SPEAK BRIEF plays a one-off readout anyway.
           </div>
         )}
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
           {errors.length > 0 && (
-            <div className="p-3 rounded-xl bg-rose-950/40 border border-rose-800/60 text-rose-300 text-xs font-mono">
-              <div className="font-bold mb-1">Some live feeds could not be loaded</div>
+            <div className="p-3 rounded-xl bg-bad-950/40 border border-bad-800/60 text-bad-300 text-xs">
+              <div className="font-semibold mb-1">Some live feeds could not be loaded</div>
               {errors.map((e) => (
                 <div key={e}>• {e}</div>
               ))}
@@ -326,7 +326,7 @@ export const SystemInsightModal: React.FC<SystemInsightModalProps> = ({ kind, st
 
           {/* Brief prose box */}
           {brief.length > 0 && (
-            <div className="p-3 rounded-xl bg-indigo-950/30 border border-indigo-800/50 text-indigo-100 text-xs font-mono space-y-1">
+            <div className="p-3 rounded-xl bg-accent-950/30 border border-accent-800/50 text-accent-100 text-xs space-y-1">
               {brief.map((l, i) => (
                 <p key={i}>{l}</p>
               ))}
@@ -334,15 +334,15 @@ export const SystemInsightModal: React.FC<SystemInsightModalProps> = ({ kind, st
           )}
 
           {loading && !data && (
-            <div className="py-16 text-center text-slate-400 font-mono text-xs flex flex-col items-center gap-2">
-              <RefreshCw className="w-5 h-5 animate-spin text-indigo-400" />
+            <div className="py-16 text-center text-ink-400 text-xs flex flex-col items-center gap-2">
+              <RefreshCw className="w-5 h-5 animate-spin text-accent-400" />
               Fetching live state...
             </div>
           )}
 
           {data && (
             <>
-              <div className="flex items-center justify-between text-[10px] font-mono text-slate-500 border-b border-slate-800 pb-2">
+              <div className="flex items-center justify-between text-[10px] text-ink-500 border-b border-ink-800 pb-2">
                 <span>Live API data</span>
                 <span>Fetched {fetchedAt ? timeAgo(fetchedAt) : 'just now'}</span>
               </div>
@@ -366,9 +366,9 @@ export const SystemInsightModal: React.FC<SystemInsightModalProps> = ({ kind, st
 
 function Stat({ label, value, accent }: { label: string; value: React.ReactNode; accent?: string }) {
   return (
-    <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
-      <div className="text-[10px] font-mono text-slate-500 uppercase tracking-wider">{label}</div>
-      <div className={`mt-1 text-sm font-mono font-bold ${accent || 'text-white'}`}>{value}</div>
+    <div className="bg-ink-950 border border-ink-800 rounded-xl p-3">
+      <div className="text-[10px] text-ink-500 ">{label}</div>
+      <div className={`mt-1 text-sm font-semibold ${accent || 'text-white'}`}>{value}</div>
     </div>
   );
 }
@@ -397,47 +397,47 @@ function GenPanel({ data, status }: { data: Record<string, any>; status: SystemS
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        <Stat label="Generation" value={`#${s.generation ?? '?'}`} accent="text-indigo-400" />
-        <Stat label="Mode" value={s.isAutoEvolving ? '24/7 AUTO' : 'PAUSED'} accent={s.isAutoEvolving ? 'text-emerald-400' : 'text-amber-400'} />
-        <Stat label="Policy" value={(s.activePolicy || '—').replace(/_/g, ' ')} />
-        <Stat label="Readiness" value={`${Math.round((s.readinessScore ?? 0) * 100)}%`} accent="text-cyan-400" />
-        <Stat label="Model" value={s.providerStatus?.online ? (s.providerStatus.model || 'online') : 'OFFLINE'} accent={s.providerStatus?.online ? 'text-emerald-400' : 'text-slate-500'} />
-        <Stat label="Verifier Pass" value={`${Math.round((s.verifierPassRate ?? 0) * 100)}%`} accent="text-emerald-400" />
-        <Stat label="Crystallized Genes" value={s.dreamState?.totalCrystallizedGenes ?? 0} accent="text-purple-400" />
-        <Stat label="Active Defects" value={activeDefects} accent={activeDefects > 0 ? 'text-rose-400' : 'text-emerald-400'} />
+        <Stat label="Generation" value={`#${s.generation ?? '?'}`} accent="text-accent-400" />
+        <Stat label="Mode" value={s.isAutoEvolving ? '24/7 AUTO' : 'PAUSED'} accent={s.isAutoEvolving ? 'text-ok-400' : 'text-warn-400'} />
+        <Stat label="Policy" value={(s.activePolicy || '-').replace(/_/g, ' ')} />
+        <Stat label="Readiness" value={`${Math.round((s.readinessScore ?? 0) * 100)}%`} accent="text-accent-400" />
+        <Stat label="Model" value={s.providerStatus?.online ? (s.providerStatus.model || 'online') : 'OFFLINE'} accent={s.providerStatus?.online ? 'text-ok-400' : 'text-ink-500'} />
+        <Stat label="Verifier Pass" value={`${Math.round((s.verifierPassRate ?? 0) * 100)}%`} accent="text-ok-400" />
+        <Stat label="Crystallized Genes" value={s.dreamState?.totalCrystallizedGenes ?? 0} accent="text-accent-400" />
+        <Stat label="Active Defects" value={activeDefects} accent={activeDefects > 0 ? 'text-bad-400' : 'text-ok-400'} />
       </div>
 
       {lastDecisionLines.length > 0 && (
-        <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
-          <div className="text-[10px] font-mono text-slate-500 uppercase tracking-wider mb-1">Last growth decision</div>
+        <div className="bg-ink-950 border border-ink-800 rounded-xl p-3">
+          <div className="text-[10px] text-ink-500 mb-1">Last growth decision</div>
           {lastDecisionLines.map((l, i) => (
-            <p key={i} className="text-xs text-slate-300 font-mono">{l}</p>
+            <p key={i} className="text-xs text-ink-300">{l}</p>
           ))}
         </div>
       )}
 
       <div>
         <div className="flex items-center justify-between mb-2">
-          <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider">Recent recorded activity</span>
-          <span className="text-[10px] font-mono text-slate-500">{events.length} total</span>
+          <span className="text-[11px] text-ink-400 ">Recent recorded activity</span>
+          <span className="text-[10px] text-ink-500">{events.length} total</span>
         </div>
         <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
           {coalesced.map(({ evt, n }, i) => (
-            <div key={`${evt.ts}-${i}`} className="flex items-center gap-2 bg-slate-950 border border-slate-800/70 rounded-lg px-3 py-1.5 text-xs">
-              <span className="text-[10px] font-mono text-slate-500 w-14 shrink-0">{timeAgo(evt.ts)}</span>
-              <span className="text-[10px] font-mono text-indigo-300 bg-indigo-950/50 border border-indigo-900 rounded px-1.5 py-0.5 shrink-0">{evt.type}</span>
-              <span className="text-slate-300 font-mono truncate">{eventSummary(evt)}</span>
-              {n > 1 && <span className="ml-auto text-[10px] font-mono text-slate-500 shrink-0">×{n}</span>}
+            <div key={`${evt.ts}-${i}`} className="flex items-center gap-2 bg-ink-950 border border-ink-800/70 rounded-lg px-3 py-1.5 text-xs">
+              <span className="text-[10px] text-ink-500 w-14 shrink-0">{timeAgo(evt.ts)}</span>
+              <span className="text-[10px] text-accent-300 bg-accent-950/50 border border-accent-900 rounded px-1.5 py-0.5 shrink-0">{evt.type}</span>
+              <span className="text-ink-300 truncate">{eventSummary(evt)}</span>
+              {n > 1 && <span className="ml-auto text-[10px] text-ink-500 shrink-0">×{n}</span>}
             </div>
           ))}
-          {coalesced.length === 0 && <div className="text-xs text-slate-500 font-mono py-6 text-center">No provenance events recorded yet.</div>}
+          {coalesced.length === 0 && <div className="text-xs text-ink-500 py-6 text-center">No provenance events recorded yet.</div>}
         </div>
-        <p className="text-[10px] font-mono text-slate-600 mt-2">
-          Note: the generation counter advances on every 24/7 tick; ticks themselves don't each create a provenance record — this feed shows recorded work.
+        <p className="text-[10px] text-ink-600 mt-2">
+          Note: the generation counter advances on every 24/7 tick; ticks themselves don't each create a provenance record - this feed shows recorded work.
         </p>
       </div>
 
-      {/* Generation ledger — real per-generation records, persisted from each tick */}
+      {/* Generation ledger - real per-generation records, persisted from each tick */}
       {(() => {
         const entries: any[] = (data.generations?.entries || []).slice().reverse().slice(0, 40);
         const all = data.generations?.entries || [];
@@ -445,46 +445,46 @@ function GenPanel({ data, status }: { data: Record<string, any>; status: SystemS
         return (
           <div>
             <div className="flex items-center justify-between mb-2">
-              <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider">Generation ledger</span>
-              <span className="text-[10px] font-mono text-slate-500">
+              <span className="text-[11px] text-ink-400 ">Generation ledger</span>
+              <span className="text-[10px] text-ink-500">
                 {all.length} recorded {ledgerStartsAt != null && ledgerStartsAt > 1 ? `(from gen ${ledgerStartsAt})` : ''}
               </span>
             </div>
             <div className="space-y-1 max-h-72 overflow-y-auto pr-1">
               {entries.map((e) => (
-                <div key={e.gen} className="flex items-center gap-2 bg-slate-950 border border-slate-800/70 rounded-lg px-3 py-1.5 text-xs">
-                  <span className="text-indigo-300 font-mono font-bold shrink-0">Gen #{e.gen}</span>
-                  <span className="text-slate-500 font-mono text-[10px] shrink-0">{timeAgo(e.ts)}</span>
-                  <span className="font-mono text-emerald-400 shrink-0">{Math.round((e.readinessScore ?? 0) * 100)}%</span>
-                  <span className="font-mono text-slate-400 hidden sm:inline">
-                    E {typeof e.energyBudget === 'number' ? Math.round(e.energyBudget) : '—'}
+                <div key={e.gen} className="flex items-center gap-2 bg-ink-950 border border-ink-800/70 rounded-lg px-3 py-1.5 text-xs">
+                  <span className="text-accent-300 font-semibold shrink-0">Gen #{e.gen}</span>
+                  <span className="text-ink-500 text-[10px] shrink-0">{timeAgo(e.ts)}</span>
+                  <span className="text-ok-400 shrink-0">{Math.round((e.readinessScore ?? 0) * 100)}%</span>
+                  <span className="text-ink-400 hidden sm:inline">
+                    E {typeof e.energyBudget === 'number' ? Math.round(e.energyBudget) : '-'}
                     {typeof e.energyConsumed === 'number' ? ` / ${Math.round(e.energyConsumed)} used` : ''}
                   </span>
                   {typeof e.learnerEpisode === 'number' && (
-                    <span className="font-mono text-purple-300/80 hidden md:inline">ep {e.learnerEpisode} μ{e.learnerAvgReward != null ? Number(e.learnerAvgReward).toFixed(3) : '—'}</span>
+                    <span className="text-accent-300/80 hidden md:inline">ep {e.learnerEpisode} μ{e.learnerAvgReward != null ? Number(e.learnerAvgReward).toFixed(3) : '-'}</span>
                   )}
                   <span className="ml-auto flex items-center gap-1 shrink-0">
-                    {e.dream && <span className="px-1 py-0.5 rounded text-[9px] font-mono font-bold bg-purple-950 text-purple-300 border border-purple-800">DREAM</span>}
-                    {e.axiomAdded && <span className="px-1 py-0.5 rounded text-[9px] font-mono font-bold bg-amber-950 text-amber-300 border border-amber-800">AXIOM</span>}
-                    {e.legoTick && <span className="px-1 py-0.5 rounded text-[9px] font-mono font-bold bg-cyan-950 text-cyan-300 border border-cyan-800">LEGO</span>}
-                    {e.permitNextIteration === false && <span className="px-1 py-0.5 rounded text-[9px] font-mono font-bold bg-rose-950 text-rose-300 border border-rose-800">HALT</span>}
+                    {e.dream && <span className="px-1 py-0.5 rounded text-[9px] font-semibold bg-accent-950 text-accent-300 border border-accent-800">Dream</span>}
+                    {e.axiomAdded && <span className="px-1 py-0.5 rounded text-[9px] font-semibold bg-warn-950 text-warn-300 border border-warn-800">Axiom</span>}
+                    {e.legoTick && <span className="px-1 py-0.5 rounded text-[9px] font-semibold bg-accent-950 text-accent-300 border border-accent-800">LEGO</span>}
+                    {e.permitNextIteration === false && <span className="px-1 py-0.5 rounded text-[9px] font-semibold bg-bad-950 text-bad-300 border border-bad-800">HALT</span>}
                   </span>
                 </div>
               ))}
               {entries.length === 0 && (
-                <div className="text-xs text-slate-500 font-mono py-4 text-center">
-                  No generation records yet{ledgerStartsAt == null ? '' : ` — ledger begins at gen ${ledgerStartsAt}`}.
+                <div className="text-xs text-ink-500 py-4 text-center">
+                  No generation records yet{ledgerStartsAt == null ? '' : ` - ledger begins at gen ${ledgerStartsAt}`}.
                 </div>
               )}
             </div>
             {ledgerStartsAt != null && ledgerStartsAt > 1 && (
-              <p className="text-[10px] font-mono text-slate-600 mt-2">
-                Generations 1–{ledgerStartsAt - 1} predate the ledger and were never persisted, so their per-gen results cannot be reconstructed. The ledger records every generation from gen {ledgerStartsAt} forward.
+              <p className="text-[10px] text-ink-600 mt-2">
+                Generations 1-{ledgerStartsAt - 1} predate the ledger and were never persisted, so their per-gen results cannot be reconstructed. The ledger records every generation from gen {ledgerStartsAt} forward.
               </p>
             )}
             {ledgerStartsAt == null && all.length === 0 && (
-              <p className="text-[10px] font-mono text-slate-600 mt-2">
-                The ledger turns on with the next 24/7 tick — every generation after that is recorded here in real time.
+              <p className="text-[10px] text-ink-600 mt-2">
+                The ledger turns on with the next 24/7 tick - every generation after that is recorded here in real time.
               </p>
             )}
           </div>
@@ -503,24 +503,24 @@ function UpgradesPanel({ data }: { data: Record<string, any> }) {
 
   return (
     <div className="space-y-2">
-      {rows.length === 0 && <div className="text-xs text-slate-500 font-mono py-6 text-center">No promoted tools on record.</div>}
+      {rows.length === 0 && <div className="text-xs text-ink-500 py-6 text-center">No promoted tools on record.</div>}
       {rows.map(({ t, v }: any) => (
-        <div key={t.name} className="bg-slate-950 border border-slate-800 rounded-xl p-3">
+        <div key={t.name} className="bg-ink-950 border border-ink-800 rounded-xl p-3">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 min-w-0">
-              <span className="text-sm font-mono font-bold text-white truncate">{t.name}</span>
+              <span className="text-sm font-semibold text-white truncate">{t.name}</span>
               {domainPill(t.domain)}
             </div>
-            <span className="text-[10px] font-mono text-slate-500 shrink-0">v{v.version} • {timeAgo(v.created_at)}</span>
+            <span className="text-[10px] text-ink-500 shrink-0">v{v.version} • {timeAgo(v.created_at)}</span>
           </div>
-          <div className="mt-1.5 flex items-center gap-3 text-[11px] font-mono">
-            <span className={v.passed_verifier ? 'text-emerald-400' : 'text-rose-400'}>
+          <div className="mt-1.5 flex items-center gap-3 text-[11px]">
+            <span className={v.passed_verifier ? 'text-ok-400' : 'text-bad-400'}>
               {v.passed_verifier ? '✓ VERIFIED' : '✗ FAILED'} {Math.round((v.score ?? 0) * 100)}%
             </span>
-            <span className={`${t.healthStatus === 'healthy' ? 'text-emerald-400' : 'text-rose-400'}`}>{t.healthStatus}</span>
-            {String(t.entrypoint || '').includes('.selfhosted/') && <span className="text-cyan-400">SELF-HOSTED</span>}
+            <span className={`${t.healthStatus === 'healthy' ? 'text-ok-400' : 'text-bad-400'}`}>{t.healthStatus}</span>
+            {String(t.entrypoint || '').includes('.selfhosted/') && <span className="text-accent-400">Self-hosted</span>}
           </div>
-          {v.verifier_notes && <p className="mt-1 text-[10px] font-mono text-slate-500 line-clamp-2">{v.verifier_notes}</p>}
+          {v.verifier_notes && <p className="mt-1 text-[10px] text-ink-500 line-clamp-2">{v.verifier_notes}</p>}
         </div>
       ))}
     </div>
@@ -535,34 +535,34 @@ function RepairPanel({ data, status }: { data: Record<string, any>; status: Syst
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        <Stat label="Total Healed" value={sr.totalHealedCount ?? 0} accent="text-emerald-400" />
-        <Stat label="Active Defects" value={sr.activeAnomaliesCount ?? 0} accent={(sr.activeAnomaliesCount ?? 0) > 0 ? 'text-rose-400' : 'text-emerald-400'} />
-        <Stat label="Success Rate" value={`${Math.round((sr.repairSuccessRate ?? 0) * 100)}%`} accent="text-cyan-400" />
-        <Stat label="MTTR" value={sr.meanTimeToRepairMs ? `${sr.meanTimeToRepairMs}ms` : '—'} />
+        <Stat label="Total Healed" value={sr.totalHealedCount ?? 0} accent="text-ok-400" />
+        <Stat label="Active Defects" value={sr.activeAnomaliesCount ?? 0} accent={(sr.activeAnomaliesCount ?? 0) > 0 ? 'text-bad-400' : 'text-ok-400'} />
+        <Stat label="Success Rate" value={`${Math.round((sr.repairSuccessRate ?? 0) * 100)}%`} accent="text-accent-400" />
+        <Stat label="MTTR" value={sr.meanTimeToRepairMs ? `${sr.meanTimeToRepairMs}ms` : '-'} />
       </div>
 
       <div>
-        <div className="text-[11px] font-mono text-slate-400 uppercase tracking-wider mb-2">Repair & anomaly log</div>
+        <div className="text-[11px] text-ink-400 mb-2">Repair & anomaly log</div>
         <div className="space-y-1.5 max-h-80 overflow-y-auto pr-1">
           {sorted.map((a) => (
-            <div key={a.id} className="bg-slate-950 border border-slate-800/70 rounded-lg p-2.5">
+            <div key={a.id} className="bg-ink-950 border border-ink-800/70 rounded-lg p-2.5">
               <div className="flex items-center gap-2">
-                <span className={clsx('text-[10px] font-mono px-1.5 py-0.5 rounded border', a.status === 'repaired' && 'text-emerald-400 bg-emerald-950/50 border-emerald-900', a.status === 'detected' && 'text-rose-400 bg-rose-950/50 border-rose-900', a.status !== 'repaired' && a.status !== 'detected' && 'text-amber-400 bg-amber-950/50 border-amber-900')}>
+                <span className={clsx('text-[10px] px-1.5 py-0.5 rounded border', a.status === 'repaired' && 'text-ok-400 bg-ok-950/50 border-ok-900', a.status === 'detected' && 'text-bad-400 bg-bad-950/50 border-bad-900', a.status !== 'repaired' && a.status !== 'detected' && 'text-warn-400 bg-warn-950/50 border-warn-900')}>
                   {String(a.status || 'unknown').toUpperCase()}
                 </span>
-                <span className="text-xs font-mono font-bold text-white truncate">{a.toolName}</span>
+                <span className="text-xs font-semibold text-white truncate">{a.toolName}</span>
                 {domainPill(a.domain)}
-                <span className="ml-auto text-[10px] font-mono text-slate-500 shrink-0">{timeAgo(a.timestamp)}</span>
+                <span className="ml-auto text-[10px] text-ink-500 shrink-0">{timeAgo(a.timestamp)}</span>
               </div>
-              <div className="mt-1 text-[11px] font-mono text-slate-400">
-                {a.errorType} — {a.rootCause || a.description}
+              <div className="mt-1 text-[11px] text-ink-400">
+                {a.errorType} - {a.rootCause || a.description}
               </div>
               {a.repairLatencyMs != null && (
-                <div className="mt-0.5 text-[10px] font-mono text-slate-500">repair latency {a.repairLatencyMs}ms • gen {a.repairGen}</div>
+                <div className="mt-0.5 text-[10px] text-ink-500">repair latency {a.repairLatencyMs}ms • gen {a.repairGen}</div>
               )}
             </div>
           ))}
-          {sorted.length === 0 && <div className="text-xs text-slate-500 font-mono py-6 text-center">No repair activity recorded.</div>}
+          {sorted.length === 0 && <div className="text-xs text-ink-500 py-6 text-center">No repair activity recorded.</div>}
         </div>
       </div>
     </div>
@@ -581,37 +581,37 @@ function ChainPanel({ data }: { data: Record<string, any> }) {
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        <Stat label="Chain Status" value={integrity.valid ? 'VALID' : 'BROKEN'} accent={integrity.valid ? 'text-emerald-400' : 'text-rose-400'} />
+        <Stat label="Chain Status" value={integrity.valid ? 'Valid' : 'Broken'} accent={integrity.valid ? 'text-ok-400' : 'text-bad-400'} />
         <Stat label="Events" value={integrity.length ?? events.length} />
-        <Stat label="Merkle Root" value={<span className="text-[10px] text-cyan-300">{(prov.merkleRoot || '—').slice(0, 16)}…</span>} />
-        <Stat label="Last Hash" value={<span className="text-[10px] text-indigo-300">{(integrity.lastHash || '—').slice(0, 16)}…</span>} />
+        <Stat label="Merkle Root" value={<span className="text-[10px] text-accent-300">{(prov.merkleRoot || '-').slice(0, 16)}…</span>} />
+        <Stat label="Last Hash" value={<span className="text-[10px] text-accent-300">{(integrity.lastHash || '-').slice(0, 16)}…</span>} />
       </div>
 
       {!integrity.valid && integrity.brokenIndex != null && (
-        <div className="p-3 rounded-xl bg-rose-950/40 border border-rose-800/60 text-rose-300 text-xs font-mono">
-          Chain broke at event index {integrity.brokenIndex}. Tamper detected — see PROVENANCE tab.
+        <div className="p-3 rounded-xl bg-bad-950/40 border border-bad-800/60 text-bad-300 text-xs">
+          Chain broke at event index {integrity.brokenIndex}. Tamper detected - see PROVENANCE tab.
         </div>
       )}
 
       <div>
-        <div className="text-[11px] font-mono text-slate-400 uppercase tracking-wider mb-2">Event-type distribution</div>
+        <div className="text-[11px] text-ink-400 mb-2">Event-type distribution</div>
         <div className="flex flex-wrap gap-1.5">
           {topTypes.map(([t, n]) => (
-            <span key={t} className="px-2 py-1 rounded-lg bg-slate-950 border border-slate-800 text-[10px] font-mono text-slate-300">
-              {t}: <strong className="text-indigo-300">{n}</strong>
+            <span key={t} className="px-2 py-1 rounded-lg bg-ink-950 border border-ink-800 text-[10px] text-ink-300">
+              {t}: <strong className="text-accent-300">{n}</strong>
             </span>
           ))}
         </div>
       </div>
 
       <div>
-        <div className="text-[11px] font-mono text-slate-400 uppercase tracking-wider mb-2">Ledger tail</div>
+        <div className="text-[11px] text-ink-400 mb-2">Ledger tail</div>
         <div className="space-y-1 max-h-56 overflow-y-auto pr-1">
           {tail.map((e, i) => (
-            <div key={`${e.ts}-${i}`} className="flex items-center gap-2 bg-slate-950 border border-slate-800/70 rounded-lg px-3 py-1.5 text-xs font-mono">
-              <span className="text-slate-500 w-14 shrink-0 text-[10px]">{timeAgo(e.ts)}</span>
-              <span className="text-indigo-300 text-[10px] truncate">{e.type}</span>
-              <span className="ml-auto text-slate-600 text-[10px] truncate">{String(e.hash || '').slice(0, 12)}…</span>
+            <div key={`${e.ts}-${i}`} className="flex items-center gap-2 bg-ink-950 border border-ink-800/70 rounded-lg px-3 py-1.5 text-xs">
+              <span className="text-ink-500 w-14 shrink-0 text-[10px]">{timeAgo(e.ts)}</span>
+              <span className="text-accent-300 text-[10px] truncate">{e.type}</span>
+              <span className="ml-auto text-ink-600 text-[10px] truncate">{String(e.hash || '').slice(0, 12)}…</span>
             </div>
           ))}
         </div>
@@ -631,48 +631,48 @@ function GenesPanel({ data, status }: { data: Record<string, any>; status: Syste
         {DOMAIN_ORDER.map((d) => {
           const c = cov[d];
           return (
-            <div key={d} className="bg-slate-950 border border-slate-800 rounded-xl p-2.5 flex items-center justify-between">
-              <span className="text-[11px] font-mono text-slate-300">{d.replace('_', ' ')}</span>
+            <div key={d} className="bg-ink-950 border border-ink-800 rounded-xl p-2.5 flex items-center justify-between">
+              <span className="text-[11px] text-ink-300">{d.replace('_', ' ')}</span>
               {c ? (
-                <span className="text-[11px] font-mono">
-                  <strong className="text-indigo-300">{c.activeGenes}</strong>{' '}
-                  <span className="text-slate-500">@ {Math.round((c.passRate ?? 0) * 100)}%</span>
+                <span className="text-[11px]">
+                  <strong className="text-accent-300">{c.activeGenes}</strong>{' '}
+                  <span className="text-ink-500">@ {Math.round((c.passRate ?? 0) * 100)}%</span>
                 </span>
               ) : (
-                <span className="text-[10px] font-mono text-slate-600">no tools</span>
+                <span className="text-[10px] text-ink-600">no tools</span>
               )}
             </div>
           );
         })}
       </div>
 
-      <div className="flex items-center gap-2 text-[11px] font-mono text-slate-400">
-        <Server className="w-3.5 h-3.5 text-emerald-400" />
+      <div className="flex items-center gap-2 text-[11px] text-ink-400">
+        <Server className="w-3.5 h-3.5 text-ok-400" />
         <span>{sh.count ?? 0} self-hosted runtime modules</span>
         {(sh.tools || []).slice(0, 5).map((t: any) => (
-          <span key={t.name} className="px-1.5 py-0.5 rounded bg-emerald-950/60 border border-emerald-900 text-emerald-300 text-[10px]">{t.name}</span>
+          <span key={t.name} className="px-1.5 py-0.5 rounded bg-ok-950/60 border border-ok-900 text-ok-300 text-[10px]">{t.name}</span>
         ))}
       </div>
 
       <div>
-        <div className="text-[11px] font-mono text-slate-400 uppercase tracking-wider mb-2">Registry</div>
+        <div className="text-[11px] text-ink-400 mb-2">Registry</div>
         <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
           {reg.map((t: any) => {
             const cur = [...(t.versions || [])].reverse().find((x: any) => x.promoted) || [...(t.versions || [])].reverse()[0];
             const selfHosted = String(t.entrypoint || '').includes('.selfhosted/');
             return (
-              <div key={t.name} className="flex items-center gap-2 bg-slate-950 border border-slate-800/70 rounded-lg px-3 py-2">
-                <span className="text-xs font-mono font-bold text-white truncate">{t.name}</span>
+              <div key={t.name} className="flex items-center gap-2 bg-ink-950 border border-ink-800/70 rounded-lg px-3 py-2">
+                <span className="text-xs font-semibold text-white truncate">{t.name}</span>
                 {domainPill(t.domain)}
-                <span className={`text-[10px] font-mono ${t.healthStatus === 'healthy' ? 'text-emerald-400' : 'text-rose-400'}`}>{t.healthStatus}</span>
-                {selfHosted && <span className="text-[9px] font-mono text-cyan-400 border border-cyan-900 bg-cyan-950/40 px-1 py-0.5 rounded">SELF-HOSTED</span>}
-                <span className="ml-auto text-[10px] font-mono text-slate-500 shrink-0">
-                  {cur ? `${Math.round((cur.score ?? 0) * 100)}%` : '—'}
+                <span className={`text-[10px] ${t.healthStatus === 'healthy' ? 'text-ok-400' : 'text-bad-400'}`}>{t.healthStatus}</span>
+                {selfHosted && <span className="text-[9px] text-accent-400 border border-accent-900 bg-accent-950/40 px-1 py-0.5 rounded">Self-hosted</span>}
+                <span className="ml-auto text-[10px] text-ink-500 shrink-0">
+                  {cur ? `${Math.round((cur.score ?? 0) * 100)}%` : '-'}
                 </span>
               </div>
             );
           })}
-          {reg.length === 0 && <div className="text-xs text-slate-500 font-mono py-6 text-center">Registry is empty.</div>}
+          {reg.length === 0 && <div className="text-xs text-ink-500 py-6 text-center">Registry is empty.</div>}
         </div>
       </div>
     </div>
@@ -687,29 +687,29 @@ function SafetyPanel({ data, status }: { data: Record<string, any>; status: Syst
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        <Stat label="Pending Approval" value={s.pendingApprovalsCount ?? 0} accent="text-amber-400" />
-        <Stat label="Active Defects" value={s.selfRepair?.activeAnomaliesCount ?? 0} accent={(s.selfRepair?.activeAnomaliesCount ?? 0) > 0 ? 'text-rose-400' : 'text-emerald-400'} />
-        <Stat label="Gate Policy" value={(s.activePolicy || '—').replace(/_/g, ' ')} />
-        <Stat label="Auto-Evolve" value={s.isAutoEvolving ? 'RUNNING' : 'PAUSED'} accent={s.isAutoEvolving ? 'text-emerald-400' : 'text-amber-400'} />
+        <Stat label="Pending Approval" value={s.pendingApprovalsCount ?? 0} accent="text-warn-400" />
+        <Stat label="Active Defects" value={s.selfRepair?.activeAnomaliesCount ?? 0} accent={(s.selfRepair?.activeAnomaliesCount ?? 0) > 0 ? 'text-bad-400' : 'text-ok-400'} />
+        <Stat label="Gate Policy" value={(s.activePolicy || '-').replace(/_/g, ' ')} />
+        <Stat label="Auto-Evolve" value={s.isAutoEvolving ? 'Running' : 'Paused'} accent={s.isAutoEvolving ? 'text-ok-400' : 'text-warn-400'} />
       </div>
 
       {active.length === 0 ? (
-        <div className="text-xs text-slate-500 font-mono py-8 text-center">
-          No open anomalies. {s.pendingApprovalsCount ? `${s.pendingApprovalsCount} gene(s) sit in the approval queue — approve them in the GENES tab.` : 'Nothing pending.'}
+        <div className="text-xs text-ink-500 py-8 text-center">
+          No open anomalies. {s.pendingApprovalsCount ? `${s.pendingApprovalsCount} gene(s) sit in the approval queue - approve them in the GENES tab.` : 'Nothing pending.'}
         </div>
       ) : (
         <div>
-          <div className="text-[11px] font-mono text-slate-400 uppercase tracking-wider mb-2">Open anomalies</div>
+          <div className="text-[11px] text-ink-400 mb-2">Open anomalies</div>
           <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
             {active.map((a) => (
-              <div key={a.id} className="bg-rose-950/30 border border-rose-900/60 rounded-lg p-2.5">
+              <div key={a.id} className="bg-bad-950/30 border border-bad-900/60 rounded-lg p-2.5">
                 <div className="flex items-center gap-2">
-                  <AlertTriangle className={`w-3.5 h-3.5 ${a.severity === 'critical' ? 'text-rose-400' : 'text-amber-400'}`} />
-                  <span className="text-xs font-mono font-bold text-white truncate">{a.toolName}</span>
+                  <AlertTriangle className={`w-3.5 h-3.5 ${a.severity === 'critical' ? 'text-bad-400' : 'text-warn-400'}`} />
+                  <span className="text-xs font-semibold text-white truncate">{a.toolName}</span>
                   {domainPill(a.domain)}
-                  <span className="ml-auto text-[10px] font-mono text-slate-500">{timeAgo(a.timestamp)}</span>
+                  <span className="ml-auto text-[10px] text-ink-500">{timeAgo(a.timestamp)}</span>
                 </div>
-                <div className="mt-1 text-[11px] font-mono text-slate-400">{a.errorType} — {a.rootCause || a.description}</div>
+                <div className="mt-1 text-[11px] text-ink-400">{a.errorType} - {a.rootCause || a.description}</div>
               </div>
             ))}
           </div>

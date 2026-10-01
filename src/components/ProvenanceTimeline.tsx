@@ -1,13 +1,16 @@
 import React, { useState } from 'react';
-import { ShieldCheck, ShieldAlert, GitCommit, Search, Code, Clock } from 'lucide-react';
+import { ShieldCheck, ShieldAlert, Search, Code } from 'lucide-react';
 import { ProvenanceEvent, ChainVerificationResult } from '../types';
 
 interface ProvenanceTimelineProps {
   events: ProvenanceEvent[];
   integrity: ChainVerificationResult;
+  /** Overview mode: no filters, short list, link to the full log. */
+  compact?: boolean;
+  onViewAll?: () => void;
 }
 
-export const ProvenanceTimeline: React.FC<ProvenanceTimelineProps> = ({ events, integrity }) => {
+export const ProvenanceTimeline: React.FC<ProvenanceTimelineProps> = ({ events, integrity, compact, onViewAll }) => {
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState<string>('all');
   const [selectedEvent, setSelectedEvent] = useState<ProvenanceEvent | null>(null);
@@ -20,24 +23,19 @@ export const ProvenanceTimeline: React.FC<ProvenanceTimelineProps> = ({ events, 
     return matchesSearch && matchesType;
   });
 
+  const EVENT_LABEL: Partial<Record<ProvenanceEvent['type'], { text: string; cls: string }>> = {
+    tool_promoted: { text: 'Promoted', cls: 'text-ok-300' },
+    tool_human_approved: { text: 'Approved', cls: 'text-ok-300' },
+    tool_rejected: { text: 'Rejected', cls: 'text-bad-300' },
+    tool_held_back: { text: 'Held back', cls: 'text-warn-300' },
+    tool_pending_approval: { text: 'Pending', cls: 'text-warn-300' },
+    report_generated: { text: 'Report', cls: 'text-ink-300' },
+    tool_verification: { text: 'Verified', cls: 'text-ink-300' },
+  };
   const getEventBadge = (type: ProvenanceEvent['type']) => {
-    switch (type) {
-      case 'tool_promoted':
-      case 'tool_human_approved':
-        return <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">PROMOTED</span>;
-      case 'tool_rejected':
-        return <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20">REJECTED</span>;
-      case 'tool_held_back':
-        return <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">HELD BACK</span>;
-      case 'tool_pending_approval':
-        return <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">PENDING</span>;
-      case 'report_generated':
-        return <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">REPORT</span>;
-      case 'tool_verification':
-        return <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-purple-500/10 text-purple-400 border border-purple-500/20">VERIFIED</span>;
-      default:
-        return <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-800 text-slate-300">EVENT</span>;
-    }
+    const raw = String(type).replace(/_/g, ' ');
+    const l = EVENT_LABEL[type] ?? { text: raw.charAt(0).toUpperCase() + raw.slice(1), cls: 'text-ink-400' };
+    return <span className={`w-36 shrink-0 truncate text-xs ${l.cls}`} title={l.text}>{l.text}</span>;
   };
 
   const formatDate = (ts: number) => {
@@ -45,168 +43,128 @@ export const ProvenanceTimeline: React.FC<ProvenanceTimelineProps> = ({ events, 
   };
 
   return (
-    <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-5">
-      
-      {/* Header & Verification Badge */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 pb-4 border-b border-slate-800">
+    <section className="rounded-xl border border-ink-800 bg-ink-900/60 p-5">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div>
-          <div className="flex items-center space-x-2">
-            <GitCommit className="w-5 h-5 text-indigo-400" />
-            <h2 className="text-lg font-mono font-bold text-white">Immutable Provenance Audit Log</h2>
-          </div>
-          <p className="text-xs text-slate-400 font-mono mt-0.5">
-            Cryptographic SHA-256 linear hash chain verifying all autonomous adjustments, code verifications, and approvals.
+          <h2 className="text-base font-semibold text-ink-50">Provenance log</h2>
+          <p className="mt-0.5 flex items-center gap-1.5 text-sm text-ink-400">
+            {integrity.valid ? <ShieldCheck className="h-3.5 w-3.5 text-ok-400" /> : <ShieldAlert className="h-3.5 w-3.5 text-bad-400" />}
+            <span>
+              {integrity.valid ? 'Hash chain verified' : 'Hash chain broken'}, {integrity.length} events
+            </span>
           </p>
         </div>
-
-        {/* Verification Card */}
-        <div className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg border font-mono text-xs ${
-          integrity.valid
-            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
-            : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
-        }`}>
-          {integrity.valid ? <ShieldCheck className="w-4 h-4 text-emerald-400" /> : <ShieldAlert className="w-4 h-4 text-rose-400" />}
-          <div>
-            <div className="font-bold uppercase tracking-wider">
-              {integrity.valid ? 'SHA-256 Chain Verified' : 'Tamper Alert Detected'}
-            </div>
-            <div className="text-[10px] text-slate-400">
-              {integrity.length} events • Last Hash: {integrity.lastHash.substring(0, 12)}...
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Filters Bar */}
-      <div className="flex flex-col md:flex-row gap-3 my-4">
-        <div className="relative flex-1">
-          <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by hash, tool name, or event details..."
-            className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs font-mono rounded-lg pl-9 pr-3 py-2 focus:outline-none focus:border-indigo-500 placeholder-slate-600"
-          />
-        </div>
-
-        <select
-          value={filterType}
-          onChange={(e) => setFilterType(e.target.value)}
-          className="bg-slate-950 border border-slate-800 text-slate-300 text-xs font-mono rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500"
-        >
-          <option value="all">All Event Types</option>
-          <option value="tool_verification">Verification Events</option>
-          <option value="tool_promoted">Promotions</option>
-          <option value="tool_rejected">Rejections</option>
-          <option value="tool_pending_approval">Pending Approvals</option>
-          <option value="tool_human_approved">Human Approved</option>
-          <option value="report_generated">Hourly Reports</option>
-        </select>
-      </div>
-
-      {/* Timeline Stream */}
-      <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1 scrollbar-thin">
-        {filteredEvents.length === 0 ? (
-          <div className="text-center py-10 text-slate-500 font-mono text-xs">
-            No provenance events match the selected filters.
-          </div>
-        ) : (
-          filteredEvents.map((event, idx) => (
-            <div
-              key={event.hash + idx}
-              onClick={() => setSelectedEvent(event)}
-              className="bg-slate-950/80 border border-slate-800 hover:border-slate-700 rounded-lg p-3.5 transition-all cursor-pointer group"
-            >
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                
-                {/* Event Type & Target */}
-                <div className="flex items-center space-x-2">
-                  <div className="w-2 h-2 rounded-full bg-indigo-500"></div>
-                  {getEventBadge(event.type)}
-                  <span className="font-mono text-xs font-bold text-slate-200 group-hover:text-indigo-300">
-                    {event.data.tool || event.data.action || event.data.reportId || event.type}
-                  </span>
-                  {event.data.version && (
-                    <span className="text-xs font-mono text-slate-400">v{event.data.version}</span>
-                  )}
-                </div>
-
-                {/* Time & Hash */}
-                <div className="flex items-center space-x-3 text-[11px] font-mono text-slate-400">
-                  <span className="flex items-center gap-1">
-                    <Clock className="w-3 h-3 text-slate-500" />
-                    {formatDate(event.ts)}
-                  </span>
-                  <span className="bg-slate-900 border border-slate-800 rounded px-1.5 py-0.5 text-slate-400 font-mono text-[10px]">
-                    #{event.hash.substring(0, 10)}
-                  </span>
-                </div>
-              </div>
-
-              {/* Event Description Summary */}
-              <div className="mt-2 text-xs font-mono text-slate-300 flex items-center justify-between">
-                <span>
-                  {event.data.summary || event.data.reason || event.data.verifier_notes || JSON.stringify(event.data)}
-                </span>
-                <span className="text-[10px] text-indigo-400 opacity-0 group-hover:opacity-100 transition-opacity">
-                  Inspect Cryptographic Payload →
-                </span>
-              </div>
-
-              {/* SHA-256 Link Indicator */}
-              <div className="mt-2 pt-2 border-t border-slate-900 flex items-center justify-between text-[10px] font-mono text-slate-500">
-                <span>prev: {event.prev.substring(0, 16)}...</span>
-                <span>hash: {event.hash.substring(0, 16)}...</span>
-              </div>
-            </div>
-          ))
+        {compact && onViewAll && (
+          <button onClick={onViewAll} className="self-start text-sm text-accent-300 hover:text-accent-200">
+            View full log
+          </button>
         )}
       </div>
 
+      {!compact && (
+        <div className="mt-4 flex flex-col gap-3 md:flex-row">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-2.5 h-4 w-4 text-ink-500" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by hash, tool or details"
+              aria-label="Search provenance events"
+              className="w-full rounded-md border border-ink-800 bg-ink-950 py-2 pl-9 pr-3 text-sm text-ink-200 placeholder:text-ink-600 focus:border-accent-500 focus:outline-none"
+            />
+          </div>
+          <select
+            value={filterType}
+            onChange={(e) => setFilterType(e.target.value)}
+            aria-label="Event type"
+            className="rounded-md border border-ink-800 bg-ink-950 px-3 py-2 text-sm text-ink-300 focus:border-accent-500 focus:outline-none"
+          >
+            <option value="all">All events</option>
+            <option value="tool_verification">Verifications</option>
+            <option value="tool_promoted">Promotions</option>
+            <option value="tool_rejected">Rejections</option>
+            <option value="tool_pending_approval">Pending approvals</option>
+            <option value="tool_human_approved">Human approved</option>
+            <option value="report_generated">Reports</option>
+          </select>
+        </div>
+      )}
+
+      <ul className={`mt-4 divide-y divide-ink-800/70 ${compact ? '' : 'max-h-[640px] overflow-y-auto pr-1'}`}>
+        {filteredEvents.length === 0 ? (
+          <li className="py-10 text-center text-sm text-ink-500">No events match these filters.</li>
+        ) : (
+          filteredEvents.map((event, idx) => {
+            const subject = event.data.tool || event.data.action || event.data.reportId || event.type;
+            const detail = event.data.summary || event.data.reason || event.data.verifier_notes || '';
+            return (
+              <li key={event.hash + idx}>
+                <button
+                  type="button"
+                  onClick={() => setSelectedEvent(event)}
+                  className="flex w-full items-center gap-3 py-2 text-left hover:bg-ink-900/60"
+                >
+                  {getEventBadge(event.type)}
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-mono text-[13px] text-ink-100">
+                      {subject}
+                      {event.data.version && <span className="ml-1.5 text-ink-500">{event.data.version}</span>}
+                    </span>
+                    {detail && <span className="block truncate text-xs text-ink-500">{String(detail)}</span>}
+                  </span>
+                  <span className="hidden shrink-0 font-mono text-[11px] text-ink-600 sm:block">{event.hash.substring(0, 8)}</span>
+                  <span className="w-16 shrink-0 text-right text-xs text-ink-500">{formatDate(event.ts)}</span>
+                </button>
+              </li>
+            );
+          })
+        )}
+      </ul>
+
       {/* Selected Event Payload Inspector Modal */}
       {selectedEvent && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 max-w-2xl w-full shadow-2xl">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+        <div className="fixed inset-0 bg-ink-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-ink-900 border border-ink-800 rounded-xl p-5 max-w-2xl w-full shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-ink-800">
               <div className="flex items-center space-x-2">
-                <Code className="w-4 h-4 text-indigo-400" />
-                <h3 className="font-mono text-sm font-bold text-white">
+                <Code className="w-4 h-4 text-accent-400" />
+                <h3 className="text-sm font-semibold text-white">
                   Provenance Entry Inspector
                 </h3>
               </div>
               <button
                 onClick={() => setSelectedEvent(null)}
-                className="text-slate-400 hover:text-white font-mono text-xs px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 cursor-pointer"
+                className="text-ink-400 hover:text-white text-xs px-2 py-1 rounded bg-ink-800 hover:bg-ink-700 cursor-pointer"
               >
                 Close
               </button>
             </div>
 
-            <div className="mt-4 space-y-3 font-mono text-xs">
+            <div className="mt-4 space-y-3 text-xs">
               <div>
-                <span className="text-slate-400">Event Type:</span>{' '}
-                <span className="text-indigo-400 font-bold">{selectedEvent.type}</span>
+                <span className="text-ink-400">Event Type:</span>{' '}
+                <span className="text-accent-400 font-semibold">{selectedEvent.type}</span>
               </div>
               <div>
-                <span className="text-slate-400">Timestamp:</span>{' '}
-                <span className="text-slate-200">{new Date(selectedEvent.ts).toISOString()}</span>
+                <span className="text-ink-400">Timestamp:</span>{' '}
+                <span className="text-ink-200">{new Date(selectedEvent.ts).toISOString()}</span>
               </div>
               <div>
-                <span className="text-slate-400">Previous Entry Hash (prev):</span>
-                <p className="p-2 bg-slate-950 rounded border border-slate-800 text-slate-300 break-all text-[11px]">
+                <span className="text-ink-400">Previous Entry Hash (prev):</span>
+                <p className="p-2 bg-ink-950 rounded border border-ink-800 text-ink-300 break-all text-[11px]">
                   {selectedEvent.prev}
                 </p>
               </div>
               <div>
-                <span className="text-slate-400">Current Entry SHA-256 Hash:</span>
-                <p className="p-2 bg-slate-950 rounded border border-slate-800 text-emerald-400 break-all text-[11px]">
+                <span className="text-ink-400">Current Entry SHA-256 Hash:</span>
+                <p className="p-2 bg-ink-950 rounded border border-ink-800 text-ok-400 break-all text-[11px]">
                   {selectedEvent.hash}
                 </p>
               </div>
               <div>
-                <span className="text-slate-400">Payload Data:</span>
-                <pre className="p-3 bg-slate-950 rounded border border-slate-800 text-indigo-300 overflow-x-auto text-[11px] mt-1 max-h-60 scrollbar-thin">
+                <span className="text-ink-400">Payload Data:</span>
+                <pre className="p-3 bg-ink-950 rounded border border-ink-800 text-accent-300 overflow-x-auto text-[11px] mt-1 max-h-60 scrollbar-thin">
                   {JSON.stringify(selectedEvent.data, null, 2)}
                 </pre>
               </div>
@@ -215,6 +173,6 @@ export const ProvenanceTimeline: React.FC<ProvenanceTimelineProps> = ({ events, 
         </div>
       )}
 
-    </div>
+    </section>
   );
 };

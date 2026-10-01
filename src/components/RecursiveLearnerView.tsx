@@ -76,10 +76,16 @@ export const RecursiveLearnerView: React.FC<RecursiveLearnerViewProps> = ({ onNo
       const res = await fetch('/api/recourse/learn/replay', { method: 'POST' }).then(r => r.json());
       if (res?.success && res.replay) {
         if (onNotify) {
-          if (res.replay.matchesHead) {
-            onNotify(`Ledger Verified: ${res.replay.replayed} episodes deterministic.`);
+          const r = res.replay;
+          if (r.matchesHead) {
+            onNotify(`Ledger Verified: ${r.replayed} episodes deterministic.`);
+          } else if (r.partial) {
+            const drift = r.driftAtEpisode !== null ? ` — gene set drifted at episode ${r.driftAtEpisode}` : '';
+            onNotify(`Ledger Replay Incomplete: ${r.replayed}/${r.totalEpisodes} episodes reproduced${drift}.`);
+          } else if (r.driftAtEpisode !== null) {
+            onNotify(`Ledger Inputs Drifted at episode ${r.driftAtEpisode}: recorded genes no longer resolve.`);
           } else {
-            onNotify(`Ledger Diverged at episode ${res.replay.divergedAtEpisode}!`);
+            onNotify(`Ledger Diverged at episode ${r.divergedAtEpisode}!`);
           }
         }
       }
@@ -92,9 +98,9 @@ export const RecursiveLearnerView: React.FC<RecursiveLearnerViewProps> = ({ onNo
 
   if (!state) {
     return (
-      <div className="flex items-center justify-center p-12 text-slate-500 font-mono text-sm">
+      <div className="flex items-center justify-center p-12 text-ink-500 text-sm">
         <Activity className="w-4 h-4 mr-2 animate-pulse" />
-        INITIALIZING RECURSIVE LEARNER...
+        Initializing recursive learner...
       </div>
     );
   }
@@ -102,22 +108,21 @@ export const RecursiveLearnerView: React.FC<RecursiveLearnerViewProps> = ({ onNo
   return (
     <div className="space-y-6">
       {/* Header Card */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 relative overflow-hidden shadow-xl">
-        <div className="absolute -right-12 -bottom-12 w-64 h-64 bg-emerald-600/10 rounded-full blur-3xl pointer-events-none" />
+      <div className="bg-ink-900 border border-ink-800 rounded-xl p-6 relative overflow-hidden shadow-xl">
         
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
           <div className="flex items-center gap-3">
-            <span className="p-3 bg-emerald-950 border border-emerald-800 rounded-xl text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.2)]">
+            <span className="p-3 bg-ok-950 border border-ok-800 rounded-xl text-ok-400">
               <BrainCircuit className="w-6 h-6" />
             </span>
             <div>
-              <h2 className="text-xl font-bold text-white tracking-wide flex items-center gap-2">
-                RECURSIVE LEARNER
-                <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-xs rounded-full font-mono">
+              <h2 className="text-xl font-semibold text-white flex items-center gap-2">
+                Recursive learner
+                <span className="px-2 py-0.5 bg-ok-500/20 text-ok-300 border border-ok-500/40 text-xs rounded-full">
                   Beta-Posterior Core
                 </span>
               </h2>
-              <p className="text-slate-400 text-xs mt-1 font-mono">
+              <p className="text-ink-400 text-xs mt-1">
                 Continuous Evaluation & Meta-Parameter Tuning
               </p>
             </div>
@@ -146,24 +151,24 @@ export const RecursiveLearnerView: React.FC<RecursiveLearnerViewProps> = ({ onNo
                 }
               }}
               disabled={isLearning}
-              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl font-mono text-xs font-bold transition shadow-md shadow-indigo-600/20 cursor-pointer"
+              className="flex items-center gap-2 px-4 py-2 bg-accent-600 hover:bg-accent-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition shadow-md cursor-pointer"
             >
               <Sparkles className="w-3.5 h-3.5" />
-              <span>SYNTHESIZE TEMPLATE</span>
+              <span>Synthesize template</span>
             </button>
 
             <button
               onClick={runEpisode}
               disabled={isLearning}
-              className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 border border-slate-700 rounded-xl font-mono text-xs font-bold transition cursor-pointer"
+              className="flex items-center gap-2 px-4 py-2 bg-ink-800 hover:bg-ink-700 disabled:opacity-50 text-ink-200 border border-ink-700 rounded-xl text-xs font-semibold transition cursor-pointer"
             >
-              <Zap className="w-4 h-4 text-emerald-400" />
-              <span>RUN 1 EPISODE</span>
+              <Zap className="w-4 h-4 text-ok-400" />
+              <span>Run 1 episode</span>
             </button>
             <button
               onClick={() => runBatch(10)}
               disabled={isLearning}
-              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white shadow-lg shadow-emerald-600/20 rounded-xl font-mono text-xs font-bold transition cursor-pointer"
+              className="flex items-center gap-2 px-4 py-2 bg-ok-600 hover:bg-ok-500 disabled:opacity-50 text-white shadow-lg rounded-xl text-xs font-semibold transition cursor-pointer"
             >
               <Play className="w-4 h-4" />
               <span>RUN 10x BATCH</span>
@@ -171,7 +176,7 @@ export const RecursiveLearnerView: React.FC<RecursiveLearnerViewProps> = ({ onNo
             <button
               onClick={verifyLedger}
               disabled={isLearning}
-              className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl transition cursor-pointer"
+              className="p-2 bg-ink-800 hover:bg-ink-700 text-ink-300 border border-ink-700 rounded-xl transition cursor-pointer"
               title="Verify Deterministic Ledger"
             >
               <History className="w-4 h-4" />
@@ -180,26 +185,26 @@ export const RecursiveLearnerView: React.FC<RecursiveLearnerViewProps> = ({ onNo
         </div>
 
         {/* HUD Metrics */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 pt-5 border-t border-slate-800 font-mono text-xs">
-          <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800/80">
-            <span className="text-slate-500 text-[10px] block mb-1">TOTAL EPISODES</span>
-            <span className="text-xl font-bold text-white">{state.episode}</span>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 pt-5 border-t border-ink-800 text-xs">
+          <div className="bg-ink-950/60 p-4 rounded-xl border border-ink-800/80">
+            <span className="text-ink-500 text-[10px] block mb-1">Total episodes</span>
+            <span className="text-xl font-semibold text-white">{state.episode}</span>
           </div>
-          <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800/80">
-            <span className="text-slate-500 text-[10px] block mb-1">SELF SCORE (EMA)</span>
-            <span className="text-xl font-bold text-emerald-400">
+          <div className="bg-ink-950/60 p-4 rounded-xl border border-ink-800/80">
+            <span className="text-ink-500 text-[10px] block mb-1">Self score (ema)</span>
+            <span className="text-xl font-semibold text-ok-400">
               {(state.selfScore * 100).toFixed(1)}%
             </span>
           </div>
-          <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800/80">
-            <span className="text-slate-500 text-[10px] block mb-1">CALIBRATION ERROR</span>
-            <span className="text-xl font-bold text-amber-400">
+          <div className="bg-ink-950/60 p-4 rounded-xl border border-ink-800/80">
+            <span className="text-ink-500 text-[10px] block mb-1">Calibration error</span>
+            <span className="text-xl font-semibold text-warn-400">
               {state.calibrationError.toFixed(4)}
             </span>
           </div>
-          <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800/80">
-            <span className="text-slate-500 text-[10px] block mb-1">META: LEARNING RATE</span>
-            <span className="text-xl font-bold text-indigo-400">
+          <div className="bg-ink-950/60 p-4 rounded-xl border border-ink-800/80">
+            <span className="text-ink-500 text-[10px] block mb-1">Meta: learning rate</span>
+            <span className="text-xl font-semibold text-accent-400">
               {state.meta.learningRate.toFixed(3)}
             </span>
           </div>
@@ -209,36 +214,36 @@ export const RecursiveLearnerView: React.FC<RecursiveLearnerViewProps> = ({ onNo
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Column: Top Genes & Beliefs */}
         <div className="lg:col-span-2 space-y-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-4 font-mono">
-              <div className="flex items-center gap-2 text-white font-bold text-sm">
-                <Sparkles className="w-4 h-4 text-emerald-400" />
-                TOP GENE BELIEFS (POSTERIOR)
+          <div className="bg-ink-900 border border-ink-800 rounded-xl p-5">
+            <div className="flex items-center justify-between border-b border-ink-800 pb-3 mb-4">
+              <div className="flex items-center gap-2 text-white font-semibold text-sm">
+                <Sparkles className="w-4 h-4 text-ok-400" />
+                Top gene beliefs (posterior)
               </div>
-              <span className="text-xs text-slate-500">{(state as any).geneCount} Total Genes</span>
+              <span className="text-xs text-ink-500">{(state as any).geneCount} Total Genes</span>
             </div>
 
-            <div className="space-y-3 font-mono text-xs">
+            <div className="space-y-3 text-xs">
               {((state as any).topGenes || []).length > 0 ? (
                 ((state as any).topGenes || []).map((gene: any, idx: number) => (
-                  <div key={idx} className="bg-slate-950 p-3 rounded-xl border border-slate-800 flex items-center justify-between">
+                  <div key={idx} className="bg-ink-950 p-3 rounded-xl border border-ink-800 flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-lg bg-slate-900 border border-slate-700 flex items-center justify-center text-slate-400 font-bold">
+                      <div className="w-8 h-8 rounded-lg bg-ink-900 border border-ink-700 flex items-center justify-center text-ink-400 font-semibold">
                         {idx + 1}
                       </div>
                       <div>
-                        <div className="font-bold text-emerald-300">{gene.geneName || `Gene-${idx}`}</div>
-                        <div className="text-[10px] text-slate-500">{gene.domain} • {gene.attempts} attempts</div>
+                        <div className="font-semibold text-ok-300">{gene.geneName || `Gene-${idx}`}</div>
+                        <div className="text-[10px] text-ink-500">{gene.domain} • {gene.attempts} attempts</div>
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="text-white font-bold">{((gene.posteriorMean || 0) * 100).toFixed(1)}%</div>
-                      <div className="text-[10px] text-slate-500">Posterior Mean</div>
+                      <div className="text-white font-semibold">{((gene.posteriorMean || 0) * 100).toFixed(1)}%</div>
+                      <div className="text-[10px] text-ink-500">Posterior Mean</div>
                     </div>
                   </div>
                 ))
               ) : (
-                <div className="text-center p-8 text-slate-500 italic">No genes evaluated yet. Run an episode.</div>
+                <div className="text-center p-8 text-ink-500 italic">No genes evaluated yet. Run an episode.</div>
               )}
             </div>
           </div>
@@ -246,24 +251,24 @@ export const RecursiveLearnerView: React.FC<RecursiveLearnerViewProps> = ({ onNo
 
         {/* Right Column: Ledger & Directives */}
         <div className="space-y-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
-            <div className="flex items-center gap-2 text-white font-bold text-sm border-b border-slate-800 pb-3 mb-4 font-mono">
-              <Layers className="w-4 h-4 text-indigo-400" />
-              ACTIVE DIRECTIVES
+          <div className="bg-ink-900 border border-ink-800 rounded-xl p-5">
+            <div className="flex items-center gap-2 text-white font-semibold text-sm border-b border-ink-800 pb-3 mb-4">
+              <Layers className="w-4 h-4 text-accent-400" />
+              Active directives
             </div>
-            <div className="space-y-2 font-mono text-xs">
+            <div className="space-y-2 text-xs">
               {state.directives.length > 0 ? (
                 state.directives.map((dir, idx) => (
-                  <div key={idx} className="p-3 rounded-xl bg-slate-950 border border-slate-800 border-l-2" style={{ borderLeftColor: dir.kind === 'amplify' ? '#10b981' : dir.kind === 'synthesize_template' ? '#6366f1' : dir.kind === 'retire' ? '#ef4444' : '#f59e0b' }}>
+                  <div key={idx} className="p-3 rounded-xl bg-ink-950 border border-ink-800 border-l-2" style={{ borderLeftColor: dir.kind === 'amplify' ? '#10b981' : dir.kind === 'synthesize_template' ? '#6366f1' : dir.kind === 'retire' ? '#ef4444' : '#f59e0b' }}>
                     <div className="flex justify-between items-center mb-1">
-                      <span className="font-bold text-white uppercase text-[10px]">{dir.kind.replace('_', ' ')}</span>
-                      <span className="text-[10px] text-slate-500">Ep {dir.episode}</span>
+                      <span className="font-semibold text-white text-[10px]">{dir.kind.replace('_', ' ')}</span>
+                      <span className="text-[10px] text-ink-500">Ep {dir.episode}</span>
                     </div>
-                    <div className="text-slate-200 font-bold">{dir.geneName}</div>
-                    <div className="text-[10px] text-slate-400 mt-1">{dir.reason}</div>
+                    <div className="text-ink-200 font-semibold">{dir.geneName}</div>
+                    <div className="text-[10px] text-ink-400 mt-1">{dir.reason}</div>
                     {dir.templateId && (
-                      <div className="mt-2 pt-2 border-t border-slate-800/80 flex items-center justify-between">
-                        <span className="text-[10px] text-indigo-400">Tpl: {dir.templateId}</span>
+                      <div className="mt-2 pt-2 border-t border-ink-800/80 flex items-center justify-between">
+                        <span className="text-[10px] text-accent-400">Tpl: {dir.templateId}</span>
                         <button
                           onClick={async () => {
                             try {
@@ -280,7 +285,7 @@ export const RecursiveLearnerView: React.FC<RecursiveLearnerViewProps> = ({ onNo
                               if (onNotify) onNotify(`Error: ${e.message}`);
                             }
                           }}
-                          className="px-2 py-0.5 bg-indigo-950 hover:bg-indigo-900 border border-indigo-800 text-indigo-300 rounded text-[10px] transition cursor-pointer"
+                          className="px-2 py-0.5 bg-accent-950 hover:bg-accent-900 border border-accent-800 text-accent-300 rounded text-[10px] transition cursor-pointer"
                         >
                           Synthesize
                         </button>
@@ -289,31 +294,31 @@ export const RecursiveLearnerView: React.FC<RecursiveLearnerViewProps> = ({ onNo
                   </div>
                 ))
               ) : (
-                <div className="text-center p-4 text-slate-500 italic border border-dashed border-slate-800 rounded-xl">No active directives.</div>
+                <div className="text-center p-4 text-ink-500 italic border border-dashed border-ink-800 rounded-xl">No active directives.</div>
               )}
             </div>
           </div>
 
           {lastReport && (
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
-              <div className="flex items-center gap-2 text-white font-bold text-sm border-b border-slate-800 pb-3 mb-4 font-mono">
-                <History className="w-4 h-4 text-amber-400" />
-                LAST EPISODE REPORT
+            <div className="bg-ink-900 border border-ink-800 rounded-xl p-5">
+              <div className="flex items-center gap-2 text-white font-semibold text-sm border-b border-ink-800 pb-3 mb-4">
+                <History className="w-4 h-4 text-warn-400" />
+                Last episode report
               </div>
-              <div className="space-y-2 font-mono text-xs text-slate-400">
+              <div className="space-y-2 text-xs text-ink-400">
                 <div className="flex justify-between">
                   <span>Episode</span>
-                  <span className="text-white font-bold">{lastReport.episode}</span>
+                  <span className="text-white font-semibold">{lastReport.episode}</span>
                 </div>
                 <div className="flex justify-between">
                   <span>Genes Evaluated</span>
-                  <span className="text-emerald-400">{lastReport.genesEvaluated}</span>
+                  <span className="text-ok-400">{lastReport.genesEvaluated}</span>
                 </div>
                 <div className="flex justify-between">
                   <span>Avg Reward</span>
-                  <span className="text-amber-400">{lastReport.avgReward.toFixed(4)}</span>
+                  <span className="text-warn-400">{lastReport.avgReward.toFixed(4)}</span>
                 </div>
-                <div className="mt-3 pt-3 border-t border-slate-800 break-all text-[9px] text-slate-600">
+                <div className="mt-3 pt-3 border-t border-ink-800 break-all text-[9px] text-ink-600">
                   Hash: {lastReport.stateHash}
                 </div>
               </div>

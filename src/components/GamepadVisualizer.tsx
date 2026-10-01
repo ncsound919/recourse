@@ -274,41 +274,41 @@ export const GamepadVisualizer: React.FC<GamepadVisualizerProps> = ({
       </svg>
 
       {/* Status + last action readout */}
-      <div className="flex flex-wrap items-center justify-center gap-3 mt-4 font-mono text-xs">
+      <div className="flex flex-wrap items-center justify-center gap-3 mt-4 text-xs">
         <span
           className={`px-3 py-1 rounded-full border ${
             snapshot.connected
-              ? 'border-emerald-600/60 text-emerald-300 bg-emerald-950/40'
-              : 'border-slate-700 text-slate-500 bg-slate-900'
+              ? 'border-ok-600/60 text-ok-300 bg-ok-950/40'
+              : 'border-ink-700 text-ink-500 bg-ink-900'
           }`}
         >
           {snapshot.connected ? '● CONNECTED' : '○ NO CONTROLLER'}
         </span>
         <span
-          className="px-3 py-1 rounded-full border border-slate-700 text-slate-300 bg-slate-900"
+          className="px-3 py-1 rounded-full border border-ink-700 text-ink-300 bg-ink-900"
           style={{
             transition: 'color 120ms linear, border-color 120ms linear',
             color: lastAction ? activeColor : undefined,
             borderColor: lastAction ? activeColor : undefined,
           }}
         >
-          {lastAction ? `ACTION: ${lastAction.toUpperCase()}` : 'ACTION: —'}
+          {lastAction ? `ACTION: ${lastAction.toUpperCase()}` : 'ACTION: -'}
         </span>
       </div>
       {snapshot.connected && snapshot.name && (
-        <p className="mt-2 text-center font-mono text-[11px] text-slate-500 truncate max-w-[420px] mx-auto">
+        <p className="mt-2 text-center text-[11px] text-ink-500 truncate max-w-[420px] mx-auto">
           {snapshot.name}
         </p>
       )}
 
       {/* Raw input readout: shows exactly which indices this controller reports */}
-      <div className="mt-4 mx-auto max-w-[420px] rounded-lg border border-slate-800 bg-slate-900/70 p-3 font-mono text-[11px]">
-        <p className="text-slate-500 mb-1">
+      <div className="mt-4 mx-auto max-w-[420px] rounded-lg border border-ink-800 bg-ink-900/70 p-3 text-[11px]">
+        <p className="text-ink-500 mb-1">
           RAW INPUT{snapshot.connected ? '' : ' (no controller)'}
         </p>
-        <p className="text-slate-400 leading-relaxed">
+        <p className="text-ink-400 leading-relaxed">
           buttons pressed:{' '}
-          <span className="text-emerald-400">
+          <span className="text-ok-400">
             {snapshot.connected && snapshot.buttons.length
               ? snapshot.buttons
                   .map((p, i) => (p ? i : null))
@@ -317,9 +317,9 @@ export const GamepadVisualizer: React.FC<GamepadVisualizerProps> = ({
               : 'none'}
           </span>
         </p>
-        <p className="text-slate-400 leading-relaxed">
+        <p className="text-ink-400 leading-relaxed">
           axes:
-          <span className="text-sky-400">
+          <span className="text-accent-400">
             {' '}
             {snapshot.connected && snapshot.axes.length
               ? snapshot.axes.map((a, i) => `${i}:${a.toFixed(2)}`).join('  ')

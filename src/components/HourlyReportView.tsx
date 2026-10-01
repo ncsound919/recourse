@@ -14,16 +14,16 @@ export const HourlyReportView: React.FC<HourlyReportViewProps> = ({
   isGenerating
 }) => {
   return (
-    <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-5">
+    <div className="bg-ink-900/90 border border-ink-800 rounded-xl p-5">
       
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 pb-4 border-b border-slate-800">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 pb-4 border-b border-ink-800">
         <div>
           <div className="flex items-center space-x-2">
-            <FileText className="w-5 h-5 text-indigo-400" />
-            <h2 className="text-lg font-mono font-bold text-white">Hourly Self-Upgrade Digest & Changelog</h2>
+            <FileText className="w-5 h-5 text-accent-400" />
+            <h2 className="text-lg font-semibold text-white">Hourly Self-Upgrade Digest & Changelog</h2>
           </div>
-          <p className="text-xs text-slate-400 font-mono mt-0.5">
+          <p className="text-xs text-ink-400 mt-0.5">
             Automated hourly reports documenting autonomous architectural adjustments, verification rates, and hash chain diffs.
           </p>
         </div>
@@ -31,57 +31,43 @@ export const HourlyReportView: React.FC<HourlyReportViewProps> = ({
         <button
           onClick={onGenerateReport}
           disabled={isGenerating}
-          className="flex items-center space-x-2 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-mono text-xs font-bold transition-all shadow-md shadow-indigo-500/20 disabled:opacity-50 cursor-pointer"
+          className="flex items-center space-x-2 px-4 py-2 rounded-lg bg-accent-600 hover:bg-accent-500 text-white text-xs font-semibold transition-all shadow-md disabled:opacity-50 cursor-pointer"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${isGenerating ? 'animate-spin' : ''}`} />
-          <span>{isGenerating ? 'GENERATING REPORT...' : 'GENERATE HOURLY REPORT NOW'}</span>
+          <span>{isGenerating ? 'Generating report...' : 'Generate hourly report now'}</span>
         </button>
       </div>
 
       {/* Reports Feed */}
       <div className="mt-5 space-y-4">
         {reports.length === 0 ? (
-          <div className="text-center py-10 text-slate-500 font-mono text-xs">
+          <div className="text-center py-10 text-ink-500 text-xs">
             No hourly reports generated yet. Click above to trigger the first report digest.
           </div>
         ) : (
           reports.map(report => (
-            <div
-              key={report.id}
-              className="bg-slate-950 border border-slate-800 hover:border-slate-700 rounded-xl p-5 transition-all"
-            >
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-800">
-                <div className="flex items-center space-x-3">
-                  <span className="px-2.5 py-1 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded font-mono text-xs font-bold">
-                    {report.id}
-                  </span>
-                  <span className="text-xs font-mono text-slate-300 font-bold flex items-center gap-1">
-                    <Clock className="w-3.5 h-3.5 text-slate-500" />
-                    {report.dateFormatted}
-                  </span>
+            <article key={report.id} className="rounded-lg border border-ink-800 bg-ink-950/60 p-5">
+              <header className="flex flex-col gap-2 border-b border-ink-800 pb-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-2 text-sm">
+                  <Clock className="h-3.5 w-3.5 text-ink-500" />
+                  <span className="font-medium text-ink-100">{report.dateFormatted}</span>
+                  <span className="font-mono text-[11px] text-ink-600">{report.id}</span>
                 </div>
-
-                <div className="flex items-center space-x-3 text-xs font-mono">
-                  <span className="text-emerald-400 font-bold">{report.promotedCount} Promoted</span>
-                  <span className="text-slate-600">•</span>
-                  <span className="text-amber-400 font-bold">{report.pendingCount} Pending</span>
-                  <span className="text-slate-600">•</span>
-                  <span className="text-rose-400 font-bold">{report.rejectedCount} Rejected</span>
-                </div>
-              </div>
-
-              {/* Markdown Content */}
-              <div className="mt-4 font-mono text-xs text-slate-300 leading-relaxed whitespace-pre-wrap bg-slate-900/50 p-4 rounded-lg border border-slate-800/80">
-                {report.summaryMarkdown}
-              </div>
-
-              <div className="mt-3 flex items-center justify-between text-[11px] font-mono text-slate-500">
-                <span className="flex items-center gap-1 text-emerald-400">
-                  <ShieldCheck className="w-3.5 h-3.5" /> Immutable Chain Linked ({report.eventsCount} events)
-                </span>
-                <span>Timestamp: {report.timestamp}</span>
-              </div>
-            </div>
+                <dl className="flex items-center gap-4 text-xs">
+                  <div className="flex gap-1"><dd className="text-ink-100">{report.promotedCount}</dd><dt className="text-ink-500">promoted</dt></div>
+                  <div className="flex gap-1"><dd className={report.pendingCount ? 'text-warn-300' : 'text-ink-100'}>{report.pendingCount}</dd><dt className="text-ink-500">pending</dt></div>
+                  <div className="flex gap-1"><dd className={report.rejectedCount ? 'text-bad-300' : 'text-ink-100'}>{report.rejectedCount}</dd><dt className="text-ink-500">rejected</dt></div>
+                </dl>
+              </header>
+              <pre className="mt-4 max-h-80 overflow-y-auto whitespace-pre-wrap font-mono text-xs leading-relaxed text-ink-300">
+                {/* Older stored reports carry a mis-decoded em-dash. */}
+                {String(report.summaryMarkdown ?? '').replace(/\u00e2\u20ac\u201d/g, '-')}
+              </pre>
+              <footer className="mt-3 flex items-center gap-1.5 text-xs text-ink-500">
+                <ShieldCheck className="h-3.5 w-3.5 text-ok-400" />
+                <span>Linked in the provenance chain, {report.eventsCount} events</span>
+              </footer>
+            </article>
           ))
         )}
       </div>
