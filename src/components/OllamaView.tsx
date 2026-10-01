@@ -2,21 +2,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Server, 
-  Cpu, 
   Zap, 
-  Play, 
   CheckCircle, 
   MessageSquare, 
   Terminal, 
-  Sliders, 
   Database, 
-  TrendingUp,
-  Volume2,
-  Sparkles,
   RefreshCw,
   Layers,
-  Activity,
-  AlertTriangle
+  Activity
 } from 'lucide-react';
 import { speak, playChirp } from '../lib/voice';
 
@@ -43,7 +36,7 @@ export const OllamaView: React.FC = () => {
   const [hardware, setHardware] = useState<any>(null);
   const [selectedModel, setSelectedModel] = useState('qwen3.8-4b-distill:q4_k_m');
   const [prompt, setPrompt] = useState('');
-  const [systemMessage, setSystemMessage] = useState('You are a helpful local coder.');
+  const [systemMessage] = useState('You are a helpful local coder.');
   const [chatHistory, setChatHistory] = useState<Array<{ role: 'user' | 'assistant'; content: string; metrics?: OllamaMetrics }>>([]);
   const [loading, setLoading] = useState(false);
   const [currentMetrics, setCurrentMetrics] = useState<OllamaMetrics | null>(null);
@@ -76,7 +69,7 @@ export const OllamaView: React.FC = () => {
       } else {
         setStatus('offline');
       }
-    } catch (e) {
+    } catch {
       setStatus('offline');
     }
   };
