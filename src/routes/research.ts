@@ -62,12 +62,14 @@ export function createResearchRouter(deps: ResearchRouterDeps): Router {
 
   router.get('/science/findings', (req, res) => {
     const limit = Math.max(1, Math.min(500, Number(req.query.limit) || 50));
-    res.json({ success: true, count: recentFindings(limit).length, findings: recentFindings(limit) });
+    const findings = recentFindings(limit);
+    res.json({ success: true, count: findings.length, findings });
   });
 
   router.get('/science/cycles', (req, res) => {
     const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 20));
-    res.json({ success: true, count: recentCycles(limit).length, cycles: recentCycles(limit) });
+    const cycles = recentCycles(limit);
+    res.json({ success: true, count: cycles.length, cycles });
   });
 
   router.post('/science/cycle', async (_req, res) => {

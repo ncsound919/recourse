@@ -1,3 +1,5 @@
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it, expect, beforeAll } from 'vitest';
 import {
   decompose,
@@ -13,7 +15,7 @@ import { appendInsight, readLedger, verifyLedgerChain, recentInsights } from '..
 import { trendHealth, trendDecompose, trendChangepoint, trendScan } from '../src/lib/trendSidecarClient.js';
 
 // Isolate ledger tests from the real discovery ledger (data/trend-ledger.jsonl).
-const TEST_LEDGER = `${process.cwd()}\\data\\test-trend-ledger.jsonl`;
+const TEST_LEDGER = join(tmpdir(), `recourse-test-trend-ledger-${process.pid}.jsonl`);
 beforeAll(() => {
   process.env.TREND_LEDGER_FILE = TEST_LEDGER;
   require('fs').rmSync(TEST_LEDGER, { force: true });

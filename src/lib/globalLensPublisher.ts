@@ -133,10 +133,10 @@ const DOMAIN_TAGGED_KINDS = new Set(['music_therapy_trial', 'tuning_contrast', '
  * tagged to another domain (e.g. music_therapy_*) are NEVER included, so a
  * music-therapy benchmark can't become another domain's paper.
  */
-export function findingsForDomain(
+export function findingsForDomain<F extends ScienceFinding>(
   spec: PublishDomainSpec,
-  findings: Array<ScienceFinding & { artifact?: ResearchArtifact }>,
-): Array<ScienceFinding & { artifact?: ResearchArtifact }> {
+  findings: F[],
+): F[] {
   const terms = domainTopicTerms(spec);
   const topical = findings.filter((f) => {
     const text = `${f.claim} ${f.provenance} ${JSON.stringify(f.numbers ?? {})} ${f.kind}`.toLowerCase();

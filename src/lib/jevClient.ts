@@ -20,6 +20,8 @@
  *   -> { "model": "...", "answers": { "<id>": { ... } }, "usage": { ... } }
  */
 
+import { resolveSecret } from './keywireSecret.js';
+
 export type JevState = string | unknown[] | Record<string, unknown>;
 
 export interface JevChoiceQuestion {
@@ -68,10 +70,73 @@ const GATEWAY_MODEL_DEFAULT = 'typesafe-ai/jev';
 const LOCAL_BASE_URL_DEFAULT = 'http://127.0.0.1:8080';
 const LOCAL_MODEL_DEFAULT = 'jev-latest';
 
+/** Keywire vault key name for the Vercel AI Gateway / TypeSafe credential.
+ *  `TYPESAFE_API_KEY` in env is an accepted alias (see jevConfig). */
+const GATEWAY_KEY_NAME = 'AI_GATEWAY_API_KEY';
+
+type GatewayKeySource = 'keywire' | 'env' | 'none' | 'unresolved';
+let resolvedGatewayKey: string | undefined;
+let gatewayKeySource: GatewayKeySource = 'unresolved';
+let gatewayKeyResolvedAt = 0;
+let gatewayKeyInflight: Promise<string> | null = null;
+/** Re-resolve after this long so a key rotated in Keywire is picked up without
+ *  a restart (and a vault that was down at first call gets another chance). */
+const GATEWAY_KEY_TTL_MS = Number(process.env.JEV_GATEWAY_KEY_TTL_MS) || 10 * 60_000;
+
+/** Explicit env config, in the documented precedence order (empty strings skipped). */
+function envGatewayKey(): string {
+  return (process.env.TYPESAFE_API_KEY || process.env.AI_GATEWAY_API_KEY || '').trim();
+}
+
+/**
+ * Resolve the gateway key Keywire-FIRST (env fallback). Single-flight — concurrent
+ * callers share one vault round-trip — and refreshed every GATEWAY_KEY_TTL_MS.
+ * Returns the key ('' when neither vault nor env has one). Never throws.
+ */
+export async function ensureJevGatewayKey(): Promise<string> {
+  if (gatewayKeySource !== 'unresolved' && Date.now() - gatewayKeyResolvedAt < GATEWAY_KEY_TTL_MS) {
+    return resolvedGatewayKey ?? '';
+  }
+  if (gatewayKeyInflight) return gatewayKeyInflight;
+  gatewayKeyInflight = (async () => {
+    try {
+      const r = await resolveSecret(GATEWAY_KEY_NAME, { preferKeywire: true });
+      if (r.source === 'keywire') {
+        resolvedGatewayKey = r.value;
+        gatewayKeySource = 'keywire';
+      } else {
+        // Vault miss: fall back to explicit env with the documented precedence
+        // (TYPESAFE_API_KEY, then AI_GATEWAY_API_KEY).
+        const envKey = envGatewayKey();
+        resolvedGatewayKey = envKey || undefined;
+        gatewayKeySource = envKey ? 'env' : 'none';
+      }
+      gatewayKeyResolvedAt = Date.now();
+      return resolvedGatewayKey ?? '';
+    } finally {
+      gatewayKeyInflight = null;
+    }
+  })();
+  return gatewayKeyInflight;
+}
+
+/** Test hook — forget the resolved key so the next call re-resolves. */
+export function resetJevGatewayKey(): void {
+  resolvedGatewayKey = undefined;
+  gatewayKeySource = 'unresolved';
+  gatewayKeyResolvedAt = 0;
+  gatewayKeyInflight = null;
+}
+
+/** Where the gateway key came from — observable via /api/recourse/decision/jev/status. */
+export function jevGatewayKeySource(): GatewayKeySource {
+  return gatewayKeySource;
+}
+
 export function jevConfig(): JevConfig {
   const gateway: JevTierConfig = {
     baseUrl: (process.env.TYPESAFE_BASE_URL || GATEWAY_BASE_URL_DEFAULT).replace(/\/+$/, ''),
-    apiKey: (process.env.TYPESAFE_API_KEY || process.env.AI_GATEWAY_API_KEY || '').trim(),
+    apiKey: (resolvedGatewayKey || envGatewayKey()).trim(),
     model: process.env.TYPESAFE_MODEL || GATEWAY_MODEL_DEFAULT,
   };
   const local: JevTierConfig = {
@@ -105,6 +170,8 @@ export interface JevStatus {
   tiers: JevTierStatus[];
   online: boolean;
   checkedAt?: number;
+  /** Where the gateway key was resolved from: Keywire vault (primary) or env. */
+  keySource?: GatewayKeySource;
 }
 
 type TierCache = { online: boolean | null; at: number; error: string | undefined };
@@ -137,6 +204,7 @@ async function probeTier(id: 'gateway' | 'local', tier: JevTierConfig, now: numb
 /** Probes both tiers (gateway + localjev). Reports honestly per tier — never a
  *  fabricated "ready". */
 export async function jevStatus(force = false): Promise<JevStatus> {
+  await ensureJevGatewayKey();
   const c = jevConfig();
   const now = Date.now();
   const [gateway, local] = await Promise.all([
@@ -149,6 +217,7 @@ export async function jevStatus(force = false): Promise<JevStatus> {
     tiers: [gateway, local],
     online: gateway.online || local.online,
     checkedAt: now,
+    keySource: gatewayKeySource,
   };
 }
 
@@ -261,6 +330,7 @@ async function postSystemOne(
  * Only when BOTH fail is the result `source:'offline'` — nothing is fabricated.
  */
 export async function decideSystemOne(input: SystemOneInput): Promise<JevResult> {
+  await ensureJevGatewayKey();
   const c = jevConfig();
   const started = Date.now();
   if (!jevEnabled()) {

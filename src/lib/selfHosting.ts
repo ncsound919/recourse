@@ -23,6 +23,7 @@ import type { ToolDomain } from '../types';
 import type { SelfHostDescriptor, SelfHostMethod } from './templatePlugin';
 import { executeTestSuite, prepareExecutableCode } from './executionSandbox';
 import { validateGrants } from './wasmSandbox/grants';
+import { screenInProcessCode } from './codeSafety';
 import type { CapabilityGrants } from './wasmSandbox/types';
 
 export type ArtifactKind = 'function' | 'cli' | 'api' | 'mcp' | 'a2a' | 'loop';
@@ -444,6 +445,38 @@ export function removeSelfHostedTool(
   return { success: true, removedFile: entry.file };
 }
 
+/**
+ * Self-hosted modules are `import()`ed into the SERVER's own realm (boot
+ * re-verify + 'direct' execution) with full Node privileges — the isolate that
+ * verified the suite is not in the loop there, and code that is inert in the
+ * isolate (`if (typeof process !== 'undefined') ...`) is live here. Model code
+ * is produced from prompts that include untrusted web/corpus text. So a source
+ * is only ever imported in-process when it passes the in-process safety screen
+ * AND the on-disk file matches the manifest hash it was verified under. Tools
+ * that legitimately use host capabilities (grants, CLI `process.argv`) are
+ * sandbox-only: they verify statically and execute through the WASM sandbox.
+ */
+function selfHostSafetyError(sourceCode: string): string | null {
+  const v = screenInProcessCode(sourceCode);
+  return v.ok ? null : `in-process import refused: source uses host capabilities (${v.violations.join('; ')}); run it in sandbox mode`;
+}
+
+/** Verify a module WITHOUT executing it: manifest hash, parse, adapter exports. */
+function staticModuleCheck(entry: SelfHostedManifestEntry, absFile: string): string | null {
+  const text = fs.readFileSync(absFile, 'utf-8');
+  if (moduleHash(text) !== entry.hash) return `Module file ${entry.file} does not match its manifest hash`;
+  try {
+    transformSync(text, { loader: 'js', format: 'esm', target: 'es2022' });
+  } catch (err: any) {
+    return `Module parse failed: ${err?.message || String(err)}`;
+  }
+  const exportsList = [...text.matchAll(/export\s*\{([^}]*)\}/g)].map((m) => m[1]).join(',');
+  const exported = new Set(exportsList.split(',').map((x) => x.trim().split(/\s+as\s+/).pop()!.trim()).filter(Boolean));
+  const hasFn = (n: string) => exported.has(n) || new RegExp(`export\\s+(async\\s+)?function\\s+${n}\\b`).test(text);
+  if (!hasFn('execute') || !hasFn('describe')) return 'Module does not export execute()/describe() adapter';
+  return null;
+}
+
 /** Dynamic import of the live module, cache-busted by content hash. */
 async function importSelfHostedModule(
   entry: SelfHostedManifestEntry,
@@ -456,6 +489,12 @@ async function importSelfHostedModule(
   const cacheKey = `${entry.file}@${entry.hash}`;
   const cached = MODULE_CACHE.get(cacheKey);
   if (cached) return cached;
+  const unsafe = selfHostSafetyError(entry.sourceCode ?? '');
+  if (unsafe) throw new Error(unsafe);
+  const onDisk = moduleHash(fs.readFileSync(absFile, 'utf-8'));
+  if (onDisk !== entry.hash) {
+    throw new Error(`Module file ${entry.file} does not match its manifest hash (modified after verification); refusing to import`);
+  }
   const url = `${pathToFileURL(absFile).href}?h=${entry.hash.slice(0, 12)}`;
   const mod = await import(url);
   MODULE_CACHE.set(cacheKey, mod);
@@ -475,21 +514,36 @@ export async function verifySelfHostedEntry(
   if (!fs.existsSync(absFile)) {
     return { passed: false, detail: `Module file missing: ${entry.file}` };
   }
-  let module: any;
-  try {
-    module = await importSelfHostedModule(entry, root);
-  } catch (err: any) {
-    return {
-      passed: false,
-      detail: `Module import failed: ${err?.message || String(err)}`,
-      moduleLoadError: err?.message || String(err)
-    };
-  }
-  if (typeof module.execute !== 'function' || typeof module.describe !== 'function') {
-    return { passed: false, detail: 'Module does not export execute()/describe() adapter' };
+  if (selfHostSafetyError(entry.sourceCode ?? '')) {
+    // Sandbox-only tool: never import it into the server realm. Check the
+    // module statically; the suite itself still runs in the isolate below.
+    const staticErr = staticModuleCheck(entry, absFile);
+    if (staticErr) return { passed: false, detail: staticErr, moduleLoadError: staticErr };
+  } else {
+    let module: any;
+    try {
+      module = await importSelfHostedModule(entry, root);
+    } catch (err: any) {
+      return {
+        passed: false,
+        detail: `Module import failed: ${err?.message || String(err)}`,
+        moduleLoadError: err?.message || String(err)
+      };
+    }
+    if (typeof module.execute !== 'function' || typeof module.describe !== 'function') {
+      return { passed: false, detail: 'Module does not export execute()/describe() adapter' };
+    }
   }
 
-  const suiteRun = executeTestSuite(entry.sourceCode, entry.testSuiteCode || 'assert true;');
+  const suiteCode = entry.testSuiteCode || '';
+  if (!suiteCode.trim()) {
+    return {
+      passed: false,
+      detail: 'No stored acceptance suite — refusing green self-host verification with zero assertions',
+    };
+  }
+
+  const suiteRun = executeTestSuite(entry.sourceCode, suiteCode);
 
   // Independent second opinion: run the same suite inside the WASM sandbox.
   // Additive only — the in-process/isolated verifier above remains the gate,
@@ -497,7 +551,7 @@ export async function verifySelfHostedEntry(
   let sandboxSuite: SelfHostVerifyVerdict['sandboxSuite'];
   try {
     const sandbox = await import('./selfHostSandbox');
-    const run = await sandbox.verifySuiteInSandbox(entry.sourceCode, entry.testSuiteCode || 'assert true;');
+    const run = await sandbox.verifySuiteInSandbox(entry.sourceCode, suiteCode);
     if (run && run.ranInSandbox) {
       sandboxSuite = {
         ran: true,

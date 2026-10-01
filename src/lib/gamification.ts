@@ -20,7 +20,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { recentCycles, recentFindings } from './scienceConductor.js';
+import { recentCycles } from './scienceConductor.js';
 import { recentMathCycles, recentMathFindings } from './mathConductor.js';
 import { getMathAttempts } from './goalLedger.js';
 

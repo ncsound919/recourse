@@ -52,6 +52,13 @@ describe('apiGuardDecision', () => {
     expect(apiGuardDecision(req({ ip: '192.168.1.20' }), { ...base, secretConfigured: false })).toMatchObject({ allow: false, status: 403 });
   });
 
+  it('cannot be bypassed with a mixed-case path (Express routes case-insensitively)', () => {
+    for (const path of ['/API/recourse/execute', '/Api/recourse/execute', '/aPi/recourse/execute']) {
+      expect(apiGuardDecision(req({ path, ip: '192.168.1.20' }), base)).toMatchObject({ allow: false, status: 401 });
+      expect(apiGuardDecision(req({ path, headers: { origin: 'https://evil.example' } }), base).allow).toBe(false);
+    }
+  });
+
   it('accepts any caller presenting the secret', () => {
     expect(apiGuardDecision(req({ ip: '10.0.0.9' }), { ...base, secretValid: true })).toMatchObject({ allow: true, reason: 'secret' });
   });

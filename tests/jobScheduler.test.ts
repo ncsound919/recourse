@@ -225,6 +225,16 @@ describe('nextRunForCron', () => {
     expect(nextRunForCron('0 0 * * 0', base)).toBeGreaterThan(base);
   });
 
+  it('uses standard day-of-week numbering (0 and 7 = Sunday)', () => {
+    // base is Sunday 2026-09-06 10:15 UTC; the next Sunday midnight is 09-13.
+    for (const expr of ['0 0 * * 0', '0 0 * * 7']) {
+      const d = new Date(nextRunForCron(expr, base));
+      expect(d.getUTCDay()).toBe(0);
+      expect(d.getUTCDate()).toBe(13);
+    }
+    expect(new Date(nextRunForCron('0 0 * * 1', base)).getUTCDate()).toBe(7); // Monday
+  });
+
   it('handles a zero step as a step of one without hanging', () => {
     expect(nextRunForCron('*/0 * * * *', base)).toBe(base + 60_000);
   });

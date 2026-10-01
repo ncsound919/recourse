@@ -180,10 +180,13 @@ export function nextRunForCron(expr: string, from: number): number {
     dayStart.setUTCHours(0, 0, 0, 0);
     dayStart.setTime(dayStart.getTime() + day * 24 * 3600 * 1000);
     const m = dayStart.getUTCMonth() + 1;
-    const dow = (dayStart.getUTCDay() + 6) % 7; // 0=Monday..6=Sunday
+    const dow = dayStart.getUTCDay(); // standard cron: 0=Sunday..6=Saturday (7 also Sunday)
     const dom = dayStart.getUTCDate();
     if (!monAll && !parseField(monField, 1, 12).has(m)) continue;
-    if (!dowAll && !parseField(dowField, 0, 6).has(dow)) continue;
+    if (!dowAll) {
+      const dows = parseField(dowField, 0, 7);
+      if (!dows.has(dow) && !(dow === 0 && dows.has(7))) continue;
+    }
     if (!domAll && !parseField(domField, 1, 31).has(dom)) continue;
     for (const h of [...hours].sort((a, b) => a - b)) {
       for (const minute of [...minutes].sort((a, b) => a - b)) {

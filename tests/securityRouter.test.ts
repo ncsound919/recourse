@@ -35,7 +35,7 @@ async function setup(b: SecurityBridge, authed = true) {
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   servers.push(server);
   const base = `http://127.0.0.1:${(server.address() as any).port}`;
-  const headers = authed ? { 'Content-Type': 'application/json', 'x-secret': 's' } : { 'Content-Type': 'application/json' };
+  const headers: Record<string, string> = authed ? { 'Content-Type': 'application/json', 'x-secret': 's' } : { 'Content-Type': 'application/json' };
   return { base, headers };
 }
 

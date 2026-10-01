@@ -213,7 +213,7 @@ describe('renderDashboard — real markdown assembly', () => {
     expect(content).toContain('- 🔴 Overdue: **0**');
 
     expect(content).toMatch(
-      /^\| ✅ \| Solve Collatz total-stopping time for n up to 1,000 \| 2026-09-30 \| \d+\.\d \| ████████████████ 100% \| metric 1 >= target 1: 1 passing attempt\(s\) out of 1 for Collatz total-stopping time for n up to N \(best score=1\.00\) \|$/m,
+      /^\| ✅ \| Solve Collatz total-stopping time for n up to 1,000 \| 2026-09-30 \| -?\d+\.\d \| ████████████████ 100% \| metric 1 >= target 1: 1 passing attempt\(s\) out of 1 for Collatz total-stopping time for n up to N \(best score=1\.00\) \|$/m,
     );
     expect(content).toMatch(/^\| .* \| 🔍 bounded \| 0 \| 0 \| 0\.00 \|$/m);
     expect(content).toMatch(/^\| Riemann Hypothesis .* \| 🌌 open \| 1 \| 0 \| 0\.25 \|$/m);

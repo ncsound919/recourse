@@ -34,12 +34,9 @@
 
 import fs from 'fs';
 import path from 'path';
-import {
-  HARD_MATH_PROBLEMS,
-  type HardMathProblem,
-} from './hardMathProblems.js';
+import { HARD_MATH_PROBLEMS } from './hardMathProblems.js';
 import { computeIssueProgress, type IssueRecord } from './issueTracker.js';
-import { getMathAttempts, getGoalProgress, type MathAttempt } from './goalLedger.js';
+import { getMathAttempts } from './goalLedger.js';
 
 // --- Persistence -------------------------------------------------------------
 

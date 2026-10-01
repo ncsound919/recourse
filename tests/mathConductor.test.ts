@@ -1,3 +1,5 @@
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import {
   runMathCycle,
@@ -14,7 +16,7 @@ beforeAll(() => {
   process.env.MATH_FORGE_ENABLED = '0';
   process.env.SCIENCE_AXIOM_BUILD = '0';
   process.env.MATH_AXIOM_BUILD = '0';
-  process.env.MATH_LOOP_DIR = `${process.cwd()}\\data\\test-math-loop`;
+  process.env.MATH_LOOP_DIR = join(tmpdir(), `recourse-test-math-loop-${process.pid}`);
 });
 afterAll(() => {
   delete process.env.MATH_FORGE_ENABLED;

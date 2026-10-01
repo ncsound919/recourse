@@ -23,8 +23,8 @@ import {
   leaderboard,
   BADGES,
 } from './gamification.js';
-import { recentCycles, recentFindings, getConductorStatus } from './scienceConductor.js';
-import { recentMathCycles, recentMathFindings, mathConductorStatus } from './mathConductor.js';
+import { recentCycles, getConductorStatus } from './scienceConductor.js';
+import { recentMathCycles, mathConductorStatus } from './mathConductor.js';
 import { keywireHealth } from './keywireBridge.js';
 import { verifyLedgerChain } from './trendLedger.js';
 import { getMathAttempts } from './goalLedger.js';

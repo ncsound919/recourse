@@ -143,9 +143,8 @@ export function createKgRouter(): Router {
     res.json({
       success: true,
       diseaseId: diseaseId ?? null,
-      params: bundle.params,
       provenance: bundle.provenance,
-      ...result,
+      ...result, // result.params is the swept bundle.params
     });
   });
 

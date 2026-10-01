@@ -185,6 +185,30 @@ describe('mathConductor — LLM forge path', () => {
     expect(cycle.attemptSourceCode).not.toContain('```');
   });
 
+  it('a candidate that defines its own no-op assert cannot pass a wrong answer', async () => {
+    const dir = tmpDir();
+    tempDirs.push(dir);
+    process.env.MATH_FORGE_ENABLED = '1';
+    h.chatCompleteRoute.mockResolvedValue({
+      content: 'function assert() {}\nexport function collatzTotalStopping(n) { return 0; }',
+    });
+    const mc = await freshConductor(dir);
+    const cycle = await mc.runMathCycle();
+    expect(cycle.attemptPassed).toBe(false);
+  });
+
+  it('a candidate with a top-level return cannot skip the suite', async () => {
+    const dir = tmpDir();
+    tempDirs.push(dir);
+    process.env.MATH_FORGE_ENABLED = '1';
+    h.chatCompleteRoute.mockResolvedValue({
+      content: 'export function collatzTotalStopping(n) { return 0; }\nreturn true;',
+    });
+    const mc = await freshConductor(dir);
+    const cycle = await mc.runMathCycle();
+    expect(cycle.attemptPassed).toBe(false);
+  });
+
   it('reports the assertion message when model code fails the suite', async () => {
     const dir = tmpDir();
     tempDirs.push(dir);

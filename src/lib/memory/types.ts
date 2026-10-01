@@ -36,11 +36,14 @@ export interface SemanticFact {
 export interface EpisodeStoreDriver {
   append(episode: Episode): void
   list(): Episode[]
+  /** Row count without materializing every row (optional; falls back to list().length). */
+  count?(): number
 }
 
 export interface SemanticStoreDriver {
   append(fact: SemanticFact): void
   list(): SemanticFact[]
+  count?(): number
 }
 
 export interface ConsolidationOptions {

@@ -67,7 +67,7 @@ export function createCorpusRouter(deps: CorpusRouterDeps): Router {
     if (project) items = items.filter((a) => a.project === project);
     if (kind) items = items.filter((a) => a.kind === kind);
     if (q) items = items.filter((a) => a.name.toLowerCase().includes(q) || a.topics.includes(q) || a.excerpt.toLowerCase().includes(q));
-    items = items.sort((a, b) => b.words - a.words).slice(0, limit);
+    items = [...items].sort((a, b) => b.words - a.words).slice(0, limit); // copy: `items` may be the live state array
     res.json({ success: true, artifacts: items, total: artifacts.length, filtered: items.length });
   });
 

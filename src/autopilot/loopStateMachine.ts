@@ -476,7 +476,7 @@ export async function resumeAfterVeto(options: ResumeOptions): Promise<LoopOutco
         gapId: updated.gapId,
         pre,
         post,
-        ledgerRoot: options.ledgerRoot,
+        ledgerRoot: options.ledgerRoot ?? DEFAULT_LEDGER_ROOT,
       });
       // Feed the real business outcome (scorecard delta) to the learner's
       // external reward ledger. This is the signal that was previously written

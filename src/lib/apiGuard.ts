@@ -92,8 +92,12 @@ export function apiGuardDecision(
   req: Pick<Request, 'method' | 'path' | 'headers'> & { socket?: { remoteAddress?: string } },
   opts: ApiGuardOptions & { secretValid: boolean; secretConfigured: boolean },
 ): ApiGuardVerdict {
-  const prefixes = opts.prefixes ?? ['/api/'];
-  const path = req.path || '/';
+  const prefixes = (opts.prefixes ?? ['/api/']).map((p) => p.toLowerCase());
+  // Express routing is case-INSENSITIVE by default (app and every Router), so
+  // `POST /API/recourse/execute` reaches the `/api/recourse/execute` handler.
+  // Matching the raw path here let any mixed-case spelling skip the guard
+  // entirely (remote + cross-site CSRF). Normalize before every comparison.
+  const path = (req.path || '/').toLowerCase();
   if (!prefixes.some((p) => path.startsWith(p))) return { allow: true, reason: 'out-of-scope' };
 
   const method = (req.method || 'GET').toUpperCase();

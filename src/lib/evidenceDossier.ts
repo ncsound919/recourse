@@ -46,7 +46,7 @@ export interface EvidenceDossierInput {
   params: OdeSimulationParams;
   paramProvenance: Array<{ key: string; origin: string; evidence?: string; confidence?: number }>;
   arms?: Array<{ arm: string; finalVolume: number; reachable: boolean }>;
-  extinction?: { extinctionProbability: number; nRuns: number };
+  extinction?: { extinctionProbability: number; nRuns: number } | null;
   sbml?: { hash: string; ok: boolean };
   physicell?: { hash: string; ok: boolean };
 }

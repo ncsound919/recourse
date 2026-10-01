@@ -2,7 +2,14 @@
  * Real Oncology Knowledge Graph & Biochemical Target Ontology
  * Validates clinical claims against empirical biomedical literature,
  * target pathways, and clinical trial evidence tiers.
+ *
+ * Literature cross-validation: when the PDF sidecar is available, the verifier
+ * fetches the cited paper and checks whether the claim's mechanism and target
+ * appear in the extracted text. When the sidecar is down or the citation has no
+ * fetchable URL, the check is honestly reported as unavailable — never
+ * fabricated.
  */
+import { pdfExtractUrl, pdfSidecarHealth } from './pdfSidecarClient.js';
 
 export interface OncologyEntity {
   id: string;
@@ -180,5 +187,126 @@ export function validateBiotechClaimAgainstKG(claim: {
       : `HELD: Tier ${tier} is below the Phase 1 safety floor (tier >= 2) for promotion`,
     details,
     entity: known
+  };
+}
+
+export interface LiteratureCheckResult {
+  checked: boolean;
+  available: boolean;
+  urlExtracted: string | null;
+  mechanismFound: boolean;
+  targetFound: boolean;
+  tierConsistent: boolean | null;
+  summary: string;
+  details: string[];
+}
+
+/** Extract a URL from a citation string. Returns null if none found. */
+function extractUrl(citation: string): string | null {
+  const match = citation.match(/https?:\/\/[^\s,;)]+/i);
+  return match ? match[0] : null;
+}
+
+/** Check if a claim's key terms appear in extracted paper text. */
+function checkTermsInText(text: string, claim: { asset_name: string; mechanism?: string }): {
+  mechanismFound: boolean;
+  targetFound: boolean;
+} {
+  const lower = text.toLowerCase();
+  const assetLower = claim.asset_name.toLowerCase();
+  const targetFound = lower.includes(assetLower);
+  let mechanismFound = false;
+  if (claim.mechanism) {
+    const terms = claim.mechanism
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((t) => t.length > 4);
+    if (terms.length > 0) {
+      const matches = terms.filter((t) => lower.includes(t)).length;
+      mechanismFound = matches >= Math.ceil(terms.length * 0.3);
+    }
+  }
+  return { mechanismFound, targetFound };
+}
+
+/**
+ * Cross-validate a biotech claim against the cited literature via the PDF
+ * sidecar. Honest: when the sidecar is down or the citation has no URL, the
+ * result reports `available:false` — never a fabricated pass/fail.
+ */
+export async function crossValidateWithLiterature(claim: {
+  asset_name: string;
+  mechanism?: string;
+  evidence_tier?: number;
+  source?: string;
+}): Promise<LiteratureCheckResult> {
+  const details: string[] = [];
+  const url = claim.source ? extractUrl(claim.source) : null;
+
+  if (!url) {
+    return {
+      checked: true,
+      available: false,
+      urlExtracted: null,
+      mechanismFound: false,
+      targetFound: false,
+      tierConsistent: null,
+      summary: 'Literature check unavailable: no fetchable URL in citation',
+      details: ['Citation does not contain an http(s) URL; literature cross-validation skipped'],
+    };
+  }
+
+  const health = await pdfSidecarHealth();
+  if (!health.ok) {
+    return {
+      checked: true,
+      available: false,
+      urlExtracted: url,
+      mechanismFound: false,
+      targetFound: false,
+      tierConsistent: null,
+      summary: 'Literature check unavailable: PDF sidecar is down',
+      details: [`PDF sidecar unreachable: ${health.error ?? 'unknown error'}`],
+    };
+  }
+
+  const extracted = await pdfExtractUrl(url, { maxPages: 10, timeoutMs: 15000 });
+  if (!extracted.ok || !extracted.text) {
+    return {
+      checked: true,
+      available: true,
+      urlExtracted: url,
+      mechanismFound: false,
+      targetFound: false,
+      tierConsistent: null,
+      summary: extracted.scanned_only_image_pdf
+        ? 'Literature check: scanned/image-only PDF — no extractable text'
+        : 'Literature check: PDF extraction failed',
+      details: [extracted.error ?? 'no text extracted'],
+    };
+  }
+
+  const { mechanismFound, targetFound } = checkTermsInText(extracted.text, claim);
+  const tierConsistent = null; // Tier verification would require parsing the paper's methods section
+
+  const summary = mechanismFound || targetFound
+    ? `Literature cross-validated: claim terms found in extracted paper text (${extracted.total_chars ?? 0} chars)`
+    : 'Literature check: claim terms NOT found in extracted paper text';
+
+  details.push(`Extracted ${extracted.total_chars ?? 0} chars from ${extracted.page_count ?? '?'} pages`);
+  details.push(`Asset name "${claim.asset_name}" ${targetFound ? 'found' : 'NOT found'} in paper text`);
+  if (claim.mechanism) {
+    details.push(`Mechanism terms ${mechanismFound ? 'found' : 'NOT found'} in paper text`);
+  }
+
+  return {
+    checked: true,
+    available: true,
+    urlExtracted: url,
+    mechanismFound,
+    targetFound,
+    tierConsistent,
+    summary,
+    details,
   };
 }

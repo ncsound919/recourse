@@ -33,6 +33,7 @@
  *     invoked without real data.
  */
 
+import { readJsonlTail } from './jsonlTail.js';
 import fs from 'fs';
 import path from 'path';
 import {
@@ -1862,24 +1863,10 @@ export function stopScienceConductor(): { stopped: boolean; reason?: string } {
 
 /** Read recent findings from disk (newest last). */
 export function recentFindings(limit = 50): ScienceFinding[] {
-  try {
-    const raw = fs.readFileSync(FINDINGS_FILE, 'utf-8').trim();
-    if (!raw) return [];
-    const lines = raw.split('\n');
-    return lines.slice(-limit).map((l) => JSON.parse(l) as ScienceFinding);
-  } catch {
-    return [];
-  }
+  return readJsonlTail<ScienceFinding>(FINDINGS_FILE, limit);
 }
 
 /** Read recent cycles from disk (newest last). */
 export function recentCycles(limit = 20): ScienceCycle[] {
-  try {
-    const raw = fs.readFileSync(CYCLES_FILE, 'utf-8').trim();
-    if (!raw) return [];
-    const lines = raw.split('\n');
-    return lines.slice(-limit).map((l) => JSON.parse(l) as ScienceCycle);
-  } catch {
-    return [];
-  }
+  return readJsonlTail<ScienceCycle>(CYCLES_FILE, limit);
 }

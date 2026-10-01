@@ -928,7 +928,7 @@ function belongsToTable(tableId: string, sectionId: string): boolean {
 /** The subset of a chat result the reporter relies on; keeps test stubs simple. */
 export interface ReporterChatResult {
   ok: boolean;
-  content: string;
+  content: string | null;
   status: string;
   model?: string;
   error?: string;

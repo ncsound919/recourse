@@ -57,7 +57,7 @@ export function createReportsRouter(deps: ReportsRouterDeps): Router {
       if (e.type === 'tool_repaired' || e.type === 'template_repair_synthesized') repaired++;
     });
 
-    const markdown = `## Hourly Report â€” Gen ${deps.statusRef().generation} (${dateFormatted})
+    const markdown = `## Hourly Report — Gen ${deps.statusRef().generation} (${dateFormatted})
 
 ### Architectural Adjustments Summary
 - **${promoted} tool(s) promoted** across 7 frontier domains
@@ -109,7 +109,10 @@ export function createReportsRouter(deps: ReportsRouterDeps): Router {
     res.json({ success: true, report: newReport });
   });
 
-  router.get('/reports', (req, res) => {
+  // Hourly digests. This used to be GET /reports, but the orchestration router
+  // (mounted earlier) owns that path for research report files, so this
+  // handler was unreachable and the dashboard rendered file names as reports.
+  router.get('/reports/hourly', (_req, res) => {
     res.json({ reports: deps.reportsRef() });
   });
   return router;

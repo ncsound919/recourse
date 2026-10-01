@@ -86,7 +86,7 @@ describe('findRelevantSkills + buildSkillContext', () => {
 
 describe('skillAwareChat', () => {
   it('is a passthrough when the catalog is empty', async () => {
-    const chat = vi.fn(async (_m: ChatMessage[], _o?: Record<string, unknown>) => completion('plain'));
+    const chat = vi.fn(async (_m: ChatMessage[], _o?: any) => completion('plain'));
     configureSkillAwareness({ getCatalog: () => [], provider: provider(), chat });
     const msgs: ChatMessage[] = [{ role: 'user', content: 'audit seo' }];
     const res = await skillAwareChat(msgs, { json: true });
@@ -96,7 +96,7 @@ describe('skillAwareChat', () => {
   });
 
   it('is a passthrough when nothing matches the task', async () => {
-    const chat = vi.fn(async (_m: ChatMessage[], _o?: Record<string, unknown>) => completion('plain'));
+    const chat = vi.fn(async (_m: ChatMessage[], _o?: any) => completion('plain'));
     configureSkillAwareness({ getCatalog: () => CATALOG, provider: provider(), chat });
     const res = await skillAwareChat([{ role: 'user', content: 'quantum chromodynamics lagrangian' }], {});
     expect(res.content).toBe('plain');
@@ -105,7 +105,7 @@ describe('skillAwareChat', () => {
 
   it('injects the matched skill but skips the tool loop when tools are disabled', async () => {
     vi.stubEnv('AGENT_SKILLS_AUTONOMY_TOOLS', '0');
-    const chat = vi.fn(async (_m: ChatMessage[], _o?: Record<string, unknown>) => completion('{"answer":1}'));
+    const chat = vi.fn(async (_m: ChatMessage[], _o?: any) => completion('{"answer":1}'));
     configureSkillAwareness({ getCatalog: () => CATALOG, provider: provider(), chat, readSkill: (s) => `BODY:${s.name}` });
     const res = await skillAwareChat([{ role: 'system', content: 'sys' }, { role: 'user', content: 'audit seo' }], { json: true });
     expect(res.content).toBe('{"answer":1}');
@@ -117,7 +117,7 @@ describe('skillAwareChat', () => {
 
   it('runs the skill tool loop and returns the model final answer', async () => {
     const chat = vi
-      .fn(async (_m: ChatMessage[], _o?: Record<string, unknown>) => completion(''))
+      .fn(async (_m: ChatMessage[], _o?: any) => completion(''))
       .mockResolvedValueOnce(completion(null, {
         finishReason: 'tool_calls',
         toolCalls: [{ id: 'c1', type: 'function', function: { name: 'skills_list', arguments: '{"query":"seo"}' } }],
@@ -131,7 +131,7 @@ describe('skillAwareChat', () => {
 
   it('falls back to a strict JSON call when the tool loop ends without JSON', async () => {
     const chat = vi
-      .fn(async (_m: ChatMessage[], _o?: Record<string, unknown>) => completion(''))
+      .fn(async (_m: ChatMessage[], _o?: any) => completion(''))
       .mockResolvedValueOnce(completion(null, {
         finishReason: 'tool_calls',
         toolCalls: [{ id: 'c1', type: 'function', function: { name: 'skills_list', arguments: '{}' } }],
@@ -153,7 +153,7 @@ describe('skillAwareChat', () => {
       toolCalls: [{ id: 'c1', type: 'function', function: { name: 'skills_list', arguments: '{}' } }],
     };
     const chat = vi
-      .fn(async (_m: ChatMessage[], _o?: Record<string, unknown>) => completion(''))
+      .fn(async (_m: ChatMessage[], _o?: any) => completion(''))
       .mockResolvedValueOnce(completion('preamble one', toolCall))
       .mockResolvedValueOnce(completion('preamble two', toolCall))
       .mockResolvedValueOnce(completion('final plain answer'));
@@ -164,7 +164,7 @@ describe('skillAwareChat', () => {
   });
 
   it('reports offline without a second model call', async () => {
-    const chat = vi.fn(async (_m: ChatMessage[], _o?: Record<string, unknown>) => ({
+    const chat = vi.fn(async (_m: ChatMessage[], _o?: any) => ({
       ok: false,
       status: 'offline' as const,
       model: 'test',

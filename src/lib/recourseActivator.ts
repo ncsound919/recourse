@@ -95,11 +95,11 @@ const memoryDrivers = createMemoryDrivers();
 // Resume ids from whatever already persisted so restarts never reuse ids.
 export const episodicStore = new EpisodicStore({
   driver: memoryDrivers.episodeDriver,
-  startSequence: memoryDrivers.episodeDriver.list().length,
+  startSequence: memoryDrivers.episodeDriver.count?.() ?? memoryDrivers.episodeDriver.list().length,
 });
 export const semanticStore = new SemanticStore(
   memoryDrivers.semanticDriver,
-  memoryDrivers.semanticDriver.list().length,
+  memoryDrivers.semanticDriver.count?.() ?? memoryDrivers.semanticDriver.list().length,
 );
 
 /** Honest status of the tiered-memory backend + row counts. */
@@ -112,8 +112,8 @@ export function memoryStoreStatus(): {
   return {
     kind: memoryDrivers.kind,
     dbPath: memoryDrivers.dbPath ?? null,
-    episodes: episodicStore.all().length,
-    facts: semanticStore.facts().length,
+    episodes: memoryDrivers.episodeDriver.count?.() ?? episodicStore.all().length,
+    facts: memoryDrivers.semanticDriver.count?.() ?? semanticStore.facts().length,
   };
 }
 
@@ -246,7 +246,7 @@ export function autoDispatchSwarmTasks(
     .sort(
       (a, b) =>
         b.crystallizationReadiness - a.crystallizationReadiness ||
-        a.createdAt.localeCompare(b.createdAt),
+        (a.createdAt ?? '').localeCompare(b.createdAt ?? ''),
     )
     .slice(0, 6);
 
@@ -471,9 +471,9 @@ export async function runSkillPromotionPass(
 ): Promise<SkillPromotionPassResult> {
   const minWins = opts.minDistinctProblemWins ?? 2;
   const outRoot = opts.outRoot ?? skillPromotionOutDir();
-  const candidates = promotionCandidates(episodicStore.all(), { minDistinctProblemWins: minWins });
-  const entries = listSelfHostedEntries();
   const episodes = episodicStore.all();
+  const candidates = promotionCandidates(episodes, { minDistinctProblemWins: minWins });
+  const entries = listSelfHostedEntries();
 
   const resolveArtifact = (candidate: { geneId: string }): SkillArtifact | undefined => {
     const toolNames = new Set(

@@ -19,7 +19,7 @@
  *    reported honestly as `{ ok:false, ... }` — never a fabricated finding.
  */
 
-import { spawn } from 'node:child_process';
+import { runJsonLine } from './jsonLineRunner.js';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -156,56 +156,7 @@ export function runHackingtool(cmd: HackingtoolCommand, opts: HackingtoolRunOpti
   const runner = opts.runner ?? hackingtoolRunnerPath();
   const timeoutMs = opts.timeoutMs ?? 20_000;
 
-  return new Promise((resolve) => {
-    let proc: ReturnType<typeof spawn>;
-    try {
-      proc = spawn(python, [runner], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
-    } catch (err) {
-      resolve({ ok: false, error: `hackingtool spawn failed: ${err instanceof Error ? err.message : String(err)}` });
-      return;
-    }
-
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      try { proc.kill(); } catch { /* already dead */ }
-      resolve({ ok: false, error: `hackingtool runner timed out after ${timeoutMs}ms` });
-    }, timeoutMs);
-
-    let out = '';
-    let errOut = '';
-    proc.stdout.on('data', (d: Buffer) => { out += d.toString('utf-8'); });
-    proc.stderr.on('data', (d: Buffer) => { errOut += d.toString('utf-8'); });
-    proc.on('error', (e) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve({ ok: false, error: `hackingtool runner error: ${e.message}` });
-    });
-    proc.on('close', (code) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      try {
-        const line = out.trim().split('\n').pop() || '{}';
-        const parsed = JSON.parse(line) as { ok?: boolean; error?: string; refused?: boolean };
-        if (parsed.ok === false) {
-          resolve({ ok: false, error: parsed.error || 'hackingtool op failed', refused: parsed.refused === true });
-          return;
-        }
-        resolve({ ok: true, data: parsed as Record<string, unknown> });
-      } catch {
-        resolve({
-          ok: false,
-          error: `hackingtool runner returned non-JSON (exit ${code ?? '?'}): ${(errOut || out).slice(0, 200)}`,
-        });
-      }
-    });
-
-    proc.stdin.write(JSON.stringify({ dir: hackingtoolCheckoutDir(), ...cmd }) + '\n');
-    proc.stdin.end();
-  });
+  return runJsonLine({ python, runner, payload: { dir: hackingtoolCheckoutDir(), ...cmd }, timeoutMs, label: 'hackingtool runner' });
 }
 
 // ---------------------------------------------------------------------------

@@ -155,16 +155,22 @@ export function createDevelopRouter(deps: DevelopRouterDeps): Router {
   });
 
   /** Brain gateway: ask Dev-Brain or the deterministic brain to decide / rank /
-   *  triage Recourse's next action or analyze deeply. */
+   *  triage Recourse's next action or analyze deeply.
+   *
+   *  brain: 'dev-brain' routes to the decision engine (DEV_BRAIN_URL);
+   *  anything else routes to the deterministic brain (BRAIN_URL).
+   *  useJev: true asks Dev-Brain for the calibrated JEV advisory alongside the
+   *  deterministic matrix. The matrix stays authoritative; JEV only ranks. */
   router.post('/develop/brain', async (req, res) => {
     try {
-      const { brain, action, problem, candidates, strategy } = req.body ?? {};
+      const { brain, action, problem, candidates, strategy, useJev } = req.body ?? {};
       const result = await deps.runBrainGateway({
         brain: typeof brain === 'string' ? brain : undefined,
         action: (['decide', 'triage', 'fusion', 'deep'] as string[]).includes(action) ? action as DevBrainAction | 'deep' : undefined,
         problem: typeof problem === 'string' ? problem : undefined,
         candidates: Array.isArray(candidates) ? candidates as DevBrainCandidate[] : undefined,
         strategy: strategy as DevBrainStrategy | undefined,
+        useJev: useJev === true,
       });
       res.json(result);
     } catch (err: any) {

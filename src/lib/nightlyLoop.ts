@@ -13,7 +13,6 @@
  * throws is recorded as failed with the real error. The report reflects only
  * measured before/after deltas — never an invented improvement.
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { readJsonFile, writeJsonFile } from './durableJson.js';
 import { renderUpgradeReport, type Snapshot } from './upgradeReport.js';

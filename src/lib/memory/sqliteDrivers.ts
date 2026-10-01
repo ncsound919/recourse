@@ -66,6 +66,7 @@ export function createSqliteMemoryDrivers(dbPath: string = defaultMemoryDbPath()
      VALUES (@id, @timestamp, @problemFingerprint, @toolName, @outcome, @score, @geneIds, @summary, @provenanceId)`,
   );
   const selectEpisodes = db.prepare(`SELECT * FROM episodes ORDER BY seq ASC`);
+  const countEpisodes = db.prepare(`SELECT COUNT(*) AS n FROM episodes`);
   const appendEpisode = db.transaction((e: Episode) => {
     insertEpisode.run({
       id: e.id,
@@ -85,6 +86,7 @@ export function createSqliteMemoryDrivers(dbPath: string = defaultMemoryDbPath()
      VALUES (@id, @problemFingerprint, @statement, @confidence, @evidenceEpisodeIds, @createdAt)`,
   );
   const selectFacts = db.prepare(`SELECT * FROM semantic_facts ORDER BY seq ASC`);
+  const countFacts = db.prepare(`SELECT COUNT(*) AS n FROM semantic_facts`);
   const appendFact = db.transaction((f: SemanticFact) => {
     insertFact.run({
       id: f.id,
@@ -113,6 +115,9 @@ export function createSqliteMemoryDrivers(dbPath: string = defaultMemoryDbPath()
       append(episode: Episode): void {
         appendEpisode(episode);
       },
+      count(): number {
+        return Number((countEpisodes.get() as { n: number }).n);
+      },
       list(): Episode[] {
         return (selectEpisodes.all() as any[]).map((row) => ({
           id: String(row.id),
@@ -130,6 +135,9 @@ export function createSqliteMemoryDrivers(dbPath: string = defaultMemoryDbPath()
     semanticDriver: {
       append(fact: SemanticFact): void {
         appendFact(fact);
+      },
+      count(): number {
+        return Number((countFacts.get() as { n: number }).n);
       },
       list(): SemanticFact[] {
         return (selectFacts.all() as any[]).map((row) => ({

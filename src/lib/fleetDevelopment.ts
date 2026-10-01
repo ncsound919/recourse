@@ -742,6 +742,17 @@ const DEV_BRAIN_PATH: Record<DevBrainAction, string> = {
   strategy: '/api/strategy/decide',
 };
 
+/**
+ * JEV-advised counterparts. Dev-Brain's `/api/decide/jev` runs the same
+ * deterministic matrix and then adds a calibrated advisory from LocalJev
+ * (:8080) or the TypeSafe gateway, so it answers the same `decide` question
+ * with strictly more information. Only `decide` has a JEV variant; the other
+ * actions stay deterministic-only and say so rather than pretending.
+ */
+const DEV_BRAIN_JEV_PATH: Partial<Record<DevBrainAction, string>> = {
+  decide: '/api/decide/jev',
+};
+
 /** Build the exact Dev-Brain POST body (candidates keyed by `name`). */
 export function buildDevBrainBody(problem: string, candidates: DevBrainCandidate[], strategy?: DevBrainStrategy) {
   return {
@@ -766,6 +777,22 @@ export interface DevBrainResult {
   matrix?: DevBrainMatrix;
   status?: number;
   error?: string;
+  /** True when the request was routed through Dev-Brain's JEV-advisory path. */
+  jevRequested?: boolean;
+  /** Dev-Brain's JEV block: source tier, ranked recommendation, confidence. */
+  jev?: DevBrainJevAdvisory;
+  /** Set when JEV was asked for but could not answer. Never fabricated. */
+  jevUnavailableReason?: string;
+}
+
+/** The JEV half of Dev-Brain's `/api/decide/jev` response. */
+export interface DevBrainJevAdvisory {
+  source?: string;
+  model?: string;
+  recommendationId?: string;
+  confidence?: number;
+  options?: Array<{ id: string; name?: string; probability?: number; confidence?: number }>;
+  raw?: unknown;
 }
 
 /** Call Dev-Brain with a decision/triage/fusion request. Honest offline handling. */
@@ -776,33 +803,60 @@ export async function callDevBrain(opts: {
   strategy?: DevBrainStrategy;
   url?: string;
   timeoutMs?: number;
+  /**
+   * Ask Dev-Brain for the JEV-calibrated advisory alongside the matrix.
+   * Ignored for actions with no JEV variant, which report why.
+   */
+  useJev?: boolean;
 }): Promise<DevBrainResult> {
   const base = (opts.url ?? process.env.DEV_BRAIN_URL ?? 'http://localhost:3450').replace(/\/+$/, '');
+  const wantJev = opts.useJev === true;
+  const jevPath = wantJev ? DEV_BRAIN_JEV_PATH[opts.action] : undefined;
+  const path = jevPath ?? DEV_BRAIN_PATH[opts.action];
+  const jevUnsupportedReason =
+    wantJev && !jevPath
+      ? `JEV advisory is not available for action "${opts.action}"; only "decide" has a JEV variant. Deterministic result used.`
+      : undefined;
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 20_000);
     try {
-      const res = await fetch(`${base}${DEV_BRAIN_PATH[opts.action]}`, {
+      const res = await fetch(`${base}${path}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(buildDevBrainBody(opts.problem, opts.candidates ?? [], opts.strategy)),
         signal: controller.signal,
       });
-      if (!res.ok) return { ok: false, status: res.status, error: `Dev-Brain ${DEV_BRAIN_PATH[opts.action]} HTTP ${res.status}` };
-      const data = (await res.json()) as DevBrainMatrix;
-      if (!data || !Array.isArray(data.options)) return { ok: false, error: 'Dev-Brain returned no matrix options' };
+      if (!res.ok) return { ok: false, status: res.status, error: `Dev-Brain ${path} HTTP ${res.status}`, jevRequested: wantJev, jevUnavailableReason: jevUnsupportedReason };
+      const payload = (await res.json()) as DevBrainMatrix & {
+        /** Present only on the JEV route, which wraps the matrix one level down. */
+        matrix?: DevBrainMatrix;
+        jev?: DevBrainJevAdvisory;
+      };
+      // The JEV route wraps the same matrix under `matrix`; the plain route
+      // returns it at the top level.
+      const data = (payload?.matrix ?? payload) as DevBrainMatrix;
+      if (!data || !Array.isArray(data.options)) return { ok: false, error: 'Dev-Brain returned no matrix options', jevRequested: wantJev, jevUnavailableReason: jevUnsupportedReason };
       const ordered = [...data.options].sort((a, b) => (b.weightPercentage ?? 0) - (a.weightPercentage ?? 0));
+      const jev = payload?.jev;
+      const jevUnavailableReason2 =
+        wantJev && !jev
+          ? 'Dev-Brain returned no JEV advisory (no JEV tier reachable). The deterministic matrix is authoritative.'
+          : jevUnsupportedReason;
       return {
         ok: true,
         recommendedId: data.recommendedOptionId,
         orderedIds: ordered.map((o) => o.id).filter(Boolean),
         matrix: data,
+        jevRequested: wantJev,
+        ...(jev ? { jev: { ...jev, raw: jev } } : {}),
+        ...(jevUnavailableReason2 ? { jevUnavailableReason: jevUnavailableReason2 } : {}),
       };
     } finally {
       clearTimeout(timer);
     }
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, error: err instanceof Error ? err.message : String(err), jevRequested: wantJev, jevUnavailableReason: jevUnsupportedReason };
   }
 }
 

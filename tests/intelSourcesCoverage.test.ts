@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { intelSourceStatuses, pullBbtchArchetypes, rankProposalsWithStrategy } from '../src/lib/intelSources';
+import { intelSourceStatuses, pullBbtchArchetypes, pullOmniresearchIdeas, rankProposalsWithStrategy } from '../src/lib/intelSources';
 import type { IntelProposal } from '../src/lib/intelInvention';
 
 const ENV_KEYS = ['BBTECH_URL', 'BBTECH_API_KEY', 'DEV_BRAIN_URL', 'OMNIRESEARCH_URL'];
@@ -180,6 +180,60 @@ describe('pullBbtchArchetypes — real archetype fetch', () => {
     const r = await pullBbtchArchetypes();
     expect(r.ok).toBe(false);
     expect(r.error).toBe('raw string failure');
+  });
+});
+
+describe('pullOmniresearchIdeas — structured improvement proposals from Omni', () => {
+  it('maps Omni proposals to IntelIdea records with refs + a confidence score', async () => {
+    process.env.OMNIRESEARCH_URL = 'http://om.test/';
+    let captured: { url: string; body: any } | undefined;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      captured = { url: String(input), body: JSON.parse(String(init?.body)) };
+      return new Response(
+        JSON.stringify({
+          proposals: [
+            { title: 'Better repair ranking', description: 'use a bandit', domain: 'systemic', technique: 'bandit', targetFunction: 'rankRepairs', rationale: 'less thrash', confidence: 0.8, references: [{ title: 'Paper', url: 'http://p/1' }] },
+            { title: '', description: 'ignored (no title)' },
+          ],
+        }),
+        { status: 200 },
+      );
+    }));
+
+    const r = await pullOmniresearchIdeas({ focus: 'healing', maxProposals: 5 });
+    expect(r.ok).toBe(true);
+    expect(r.ideas).toHaveLength(1);
+    expect(r.ideas[0].title).toBe('Better repair ranking');
+    expect(r.ideas[0].domain).toBe('systemic');
+    expect(r.ideas[0].score).toBe(80); // confidence 0.8 -> 80
+    expect(r.ideas[0].url).toBe('http://p/1');
+    expect(captured?.url).toBe('http://om.test/api/agent/recourse-improvement-research');
+    expect(captured?.body.focus).toBe('healing');
+    expect(captured?.body.maxProposals).toBe(5);
+  });
+
+  it('is an honest no-op when OMNIRESEARCH_URL is unset (never calls the network)', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const r = await pullOmniresearchIdeas({});
+    expect(r.ok).toBe(false);
+    expect(r.ideas).toEqual([]);
+    expect(r.error).toContain('OMNIRESEARCH_URL not configured');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('surfaces HTTP and thrown failures honestly (never fabricated ideas)', async () => {
+    process.env.OMNIRESEARCH_URL = 'http://om.test';
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 502 })));
+    const r1 = await pullOmniresearchIdeas({});
+    expect(r1.ok).toBe(false);
+    expect(r1.ideas).toEqual([]);
+    expect(r1.error).toContain('HTTP 502');
+
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('ECONNREFUSED 127.0.0.1:3012'); }));
+    const r2 = await pullOmniresearchIdeas({});
+    expect(r2.ok).toBe(false);
+    expect(r2.error).toContain('ECONNREFUSED');
   });
 });
 

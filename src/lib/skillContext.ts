@@ -125,10 +125,13 @@ export async function findRelevantSkillsHybrid(catalog: SkillDef[], taskText: st
     const { vec: q } = await embedText(taskText);
     const have = new Set(lexical.map((s) => s.id));
     const scored: Array<{ s: SkillDef; score: number }> = [];
-    for (const s of catalog) {
-      if (have.has(s.id)) continue;
-      const v = await embedSkill(s);
-      if (v) scored.push({ s, score: cosine(q, v) });
+    // Embed in small parallel batches: the first hybrid query on a cold cache
+    // used to embed the whole catalog (hundreds of skills) one request at a time.
+    const pending = catalog.filter((s) => !have.has(s.id));
+    for (let i = 0; i < pending.length; i += 8) {
+      const batch = pending.slice(i, i + 8);
+      const vecs = await Promise.all(batch.map((s) => embedSkill(s)));
+      batch.forEach((s, j) => { const v = vecs[j]; if (v) scored.push({ s, score: cosine(q, v) }); });
     }
     scored.sort((a, b) => b.score - a.score);
     const fill = scored.filter((x) => x.score >= 0.35).slice(0, limit - lexical.length).map((x) => x.s);

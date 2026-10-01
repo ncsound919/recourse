@@ -40,7 +40,7 @@ export function createServicesRouter(): Router {
   // --- translation engines ---
   router.get('/translation/status', async (_req, res) => {
     const ids: TranslationEngineId[] = ['bbtech', 'golf-surgery'];
-    const engines = [];
+    const engines: Array<Record<string, unknown>> = [];
     for (const id of ids) {
       const cfg = engineConfig(id);
       const h = await translationHealth(id, { timeoutMs: 8000 });

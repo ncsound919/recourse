@@ -286,6 +286,42 @@ export function currentToolSource(tool: ToolEntry): { source: string; name: stri
  * any current gene's live source passes the hidden suite in the real sandbox.
  * Reports a per-tier breakdown so a flat overall score cannot hide a failing tier.
  */
+/** Names a suite could be calling that are never gene-defined. */
+const SUITE_NON_GENE_CALLS = new Set([
+  'assert', 'if', 'for', 'while', 'switch', 'catch', 'function', 'return', 'typeof', 'new', 'void', 'await',
+  'Math', 'JSON', 'Number', 'String', 'Boolean', 'Array', 'Object', 'Symbol', 'BigInt', 'Date', 'RegExp',
+  'Map', 'Set', 'WeakMap', 'WeakSet', 'Promise', 'Error', 'TypeError', 'RangeError',
+  'isNaN', 'isFinite', 'parseInt', 'parseFloat', 'structuredClone',
+]);
+
+/** Identifiers the suite calls (`name(` / `new Name(`), minus builtins/keywords. */
+function suiteCalledNames(suite: string): string[] {
+  const names = new Set<string>();
+  for (const m of suite.matchAll(/(?<![.\w$])([A-Za-z_$][\w$]*)\s*\(/g)) {
+    if (!SUITE_NON_GENE_CALLS.has(m[1])) names.add(m[1]);
+  }
+  return [...names];
+}
+
+/** Verdict memo: (source, suite) -> passed. Sources and suites change rarely,
+ *  so repeat benchmark cycles become near-free. Bounded FIFO. */
+const verdictCache = new Map<string, boolean>();
+const VERDICT_CACHE_MAX = 50_000;
+function cachedPasses(source: string, suite: string): boolean {
+  const key = crypto.createHash('sha1').update(source).update('\0').update(suite).digest('base64');
+  const hit = verdictCache.get(key);
+  if (hit !== undefined) return hit;
+  const passed = executeTestSuite(source, suite).passed;
+  if (verdictCache.size >= VERDICT_CACHE_MAX) verdictCache.delete(verdictCache.keys().next().value as string);
+  verdictCache.set(key, passed);
+  return passed;
+}
+
+/** Test hook. */
+export function clearBenchmarkVerdictCache(): void {
+  verdictCache.clear();
+}
+
 export function runBenchmark(registry: ToolEntry[]): BenchmarkRun {
   const sources: Array<{ source: string; name: string }> = [];
   for (const t of registry) {
@@ -302,7 +338,16 @@ export function runBenchmark(registry: ToolEntry[]): BenchmarkRun {
     const tier = problem.tier ?? 'baseline';
     if (!byTier[tier]) byTier[tier] = { solved: 0, total: 0 };
     byTier[tier].total += 1;
-    const solved = sources.some((gene) => executeTestSuite(gene.source, problem.hiddenSuite).passed);
+    // Only genes that at least MENTION a function the suite calls can pass it;
+    // running all ~1k registry sources through a fresh isolate per unsolved
+    // problem blocked the event loop for over a minute per cycle. If the suite
+    // calls no non-builtin name, fall back to trying every gene.
+    const called = [...new Set([...(problem.functionName ? [problem.functionName] : []), ...suiteCalledNames(problem.hiddenSuite)])];
+    const wordRes = called.map((n) => new RegExp(`(?<![\\w$])${n.replace(/\$/g, '\\$')}(?![\\w$])`));
+    const candidates = wordRes.length
+      ? sources.filter((gene) => wordRes.some((re) => re.test(gene.source)))
+      : sources;
+    const solved = candidates.some((gene) => cachedPasses(gene.source, problem.hiddenSuite));
     if (solved) {
       solvedIds.push(problem.id);
       byTier[tier].solved += 1;

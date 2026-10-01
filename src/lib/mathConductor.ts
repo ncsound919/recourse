@@ -30,6 +30,7 @@
  *     the goal ledger: mathAttempts where passed=true and tier='solvable').
  */
 
+import { readJsonlTail } from './jsonlTail.js';
 import fs from 'fs';
 import path from 'path';
 import {
@@ -86,13 +87,6 @@ export function mathCyclesFilePath(): string {
 
 export function mathFindingsFilePath(): string {
   return path.join(mathLoopDir(), 'findings.jsonl');
-}
-
-const CYCLES_FILE = mathCyclesFilePath();
-const FINDINGS_FILE = mathFindingsFilePath();
-
-function ensureDir(): void {
-  fs.mkdirSync(mathLoopDir(), { recursive: true });
 }
 
 function appendJsonl(file: string, row: unknown): void {
@@ -342,6 +336,9 @@ function normalizeAssertions(acceptanceTest: string): string {
   return acceptanceTest.replace(/\bassert\s+(?!\()([^;\n]+);/g, 'assert($1);');
 }
 
+/** Returned by the harness only after the last suite statement executed. */
+const SUITE_COMPLETE = '__recourse_acceptance_suite_complete__';
+
 function runAcceptanceTest(
   sourceCode: string,
   toolName: string,
@@ -352,11 +349,20 @@ function runAcceptanceTest(
   try {
     installMathReferenceGlobals();
 const runnable = sourceCode.replace(/^export\s+(?:default\s+)?/gm, '');
-    const suite = normalizeAssertions(acceptanceTest);
+    // The suite calls a harness-private `__acceptAssert__` (a `const`), not
+    // `assert`. Previously the harness declared `function assert` BEFORE the
+    // candidate, so a candidate that defined its own `assert` helper (common
+    // in model output) silently replaced it — hoisting makes the last function
+    // declaration win — and every assertion became whatever the candidate's
+    // helper did. A candidate redeclaring `__acceptAssert__` is a SyntaxError.
+    // The sentinel return proves the suite actually ran to the end (a
+    // top-level `return` in the candidate would otherwise skip it).
+    const suite = normalizeAssertions(acceptanceTest).replace(/(^|[^.\w$])assert\s*\(/g, '$1__acceptAssert__(');
     const wrapped =
       `"use strict";\n` +
-      `function assert(cond, msg) { if (!cond) { throw new Error('AssertionError' + (msg ? ': ' + msg : '')); } }\n` +
-      `${runnable}\n${suite}\nreturn true;`;
+      `const __acceptAssert__ = (cond, msg) => { if (!cond) { throw new Error('AssertionError' + (msg ? ': ' + msg : '')); } };\n` +
+      `function assert(cond, msg) { return __acceptAssert__(cond, msg); }\n` +
+      `${runnable}\n${suite}\nreturn ${JSON.stringify(SUITE_COMPLETE)};`;
     if (!trustedSource) {
       // Model-written candidate: evaluate in a fresh isolate. It gets no host
       // realm and no reference registry — a candidate must compute its answer
@@ -364,6 +370,7 @@ const runnable = sourceCode.replace(/^export\s+(?:default\s+)?/gm, '');
       if (isIsolateAvailable()) {
         const r = runBodyInIsolate(wrapped, { timeoutMs: 5000, memoryLimitMb: 128 });
         if (!r.ok) throw new Error(r.error || 'isolated acceptance run failed');
+        if (r.value !== SUITE_COMPLETE) throw new Error('acceptance suite did not run to completion');
         return { passed: true, score: 1, error: null };
       }
       const refusal = inProcessFallbackRefusal(`${runnable}\n${suite}`);
@@ -374,7 +381,7 @@ const runnable = sourceCode.replace(/^export\s+(?:default\s+)?/gm, '');
       assertInProcessSafe(suite);
     }
     const fn = new Function(wrapped);
-    fn();
+    if (fn() !== SUITE_COMPLETE) throw new Error('acceptance suite did not run to completion');
     return { passed: true, score: 1, error: null };
   } catch (err) {
     const msg = (err as Error)?.message ?? String(err);
@@ -515,7 +522,7 @@ export async function runMathCycle(): Promise<MathCycle> {
   let axiomBuilt = false;
   let axiomToolName: string | null = null;
   let axiomArchetype: string | null = null;
-  if (axiomReachable() && process.env.SCIENCE_AXIOM_BUILD !== '0' && process.env.MATH_AXIOM_BUILD !== '0' && sourceCode) {
+  if (sourceCode && process.env.SCIENCE_AXIOM_BUILD !== '0' && process.env.MATH_AXIOM_BUILD !== '0' && (await axiomReachable())) {
     axiomArchetype = `math_${problem.tier}_${slugify(problem.id)}`;
     axiomToolName = `ax_${axiomArchetype}`;
     try {
@@ -680,21 +687,9 @@ export function mathConductorStatus(): {
 }
 
 export function recentMathCycles(limit = 20): MathCycle[] {
-  try {
-    const raw = fs.readFileSync(mathCyclesFilePath(), 'utf-8').trim();
-    if (!raw) return [];
-    return raw.split('\n').slice(-limit).map((l) => JSON.parse(l) as MathCycle);
-  } catch {
-    return [];
-  }
+  return readJsonlTail<MathCycle>(mathCyclesFilePath(), limit);
 }
 
 export function recentMathFindings(limit = 50): MathFinding[] {
-  try {
-    const raw = fs.readFileSync(mathFindingsFilePath(), 'utf-8').trim();
-    if (!raw) return [];
-    return raw.split('\n').slice(-limit).map((l) => JSON.parse(l) as MathFinding);
-  } catch {
-    return [];
-  }
+  return readJsonlTail<MathFinding>(mathFindingsFilePath(), limit);
 }

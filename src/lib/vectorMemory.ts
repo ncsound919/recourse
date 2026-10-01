@@ -22,7 +22,8 @@
 import crypto from 'node:crypto';
 
 export const VEC_DIM = 768;
-export type MemoryKind = 'gene' | 'lesson' | 'hypothesis' | 'signal' | 'snapshot';
+export const MEMORY_KINDS = ['gene', 'lesson', 'hypothesis', 'signal', 'snapshot'] as const;
+export type MemoryKind = (typeof MEMORY_KINDS)[number];
 
 export interface MemoryDoc {
   id: string;

@@ -93,7 +93,7 @@ describe('evaluateGrowthDecision', () => {
     const ingest = r.candidateActions.filter((a) => a.actionType === 'github_research_import');
     expect(ingest).toHaveLength(1);
     expect(ingest[0].targetToolName).toBe('algo-b1');
-    expect(ingest[0].suggestedParameters.blueprintId).toBe('b1');
+    expect(ingest[0].suggestedParameters!.blueprintId).toBe('b1');
   });
 
   it('adds a dream-crystallization action only when a thought is ready', () => {
@@ -111,8 +111,8 @@ describe('evaluateGrowthDecision', () => {
     const cross = r.candidateActions.find((a) => a.actionType === 'cross_domain_hybridization')!;
     expect(cross).toBeDefined();
     expect(cross.id).toBe('act_crossover_5');
-    expect(cross.suggestedParameters.parentA).toBe('p1');
-    expect(cross.suggestedParameters.parentB).toBe('p2');
+    expect(cross.suggestedParameters!.parentA).toBe('p1');
+    expect(cross.suggestedParameters!.parentB).toBe('p2');
   });
 
   it('sorts deterministically by utility desc then id, ranks are contiguous, and calls are reproducible', () => {

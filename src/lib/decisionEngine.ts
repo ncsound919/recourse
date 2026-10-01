@@ -79,9 +79,13 @@ export function evaluateGrowthDecision(
   registry.forEach(tool => {
     domainCounts[tool.domain] = (domainCounts[tool.domain] || 0) + 1;
     const promoted = tool.versions.find(v => v.promoted) || tool.versions[tool.versions.length - 1];
-    if (promoted) {
-      domainScoresAcc[tool.domain].totalScore += promoted.score || 0.8;
-      domainScoresAcc[tool.domain].count += 1;
+    // Unknown domains (e.g. from API clients sending unvalidated domain
+    // strings) must not crash the sweep: skip them here. The templates/build
+    // route validates domains at intake; this is defense in depth.
+    const acc = domainScoresAcc[tool.domain];
+    if (promoted && acc) {
+      acc.totalScore += promoted.score || 0.8;
+      acc.count += 1;
     }
   });
 

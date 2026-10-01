@@ -75,6 +75,13 @@ export function createTemplatesRouter(deps: TemplatesRouterDeps): Router {
       if (!tpl) {
         return res.status(404).json({ success: false, error: `Template "${templateId}" not found` });
       }
+      // Validate the domain at intake: unvalidated strings used to poison the
+      // registry and crash the growth-decision sweep (domainScoresAcc miss).
+      const VALID_DOMAINS = ['coding', 'math', 'biotech', 'systemic', 'neuro_symbolic', 'cyber_defense', 'quantum_sim'];
+      const requestedDomain = (domain || tpl.domain) as string;
+      if (!VALID_DOMAINS.includes(requestedDomain)) {
+        return res.status(400).json({ success: false, error: `Unknown domain "${requestedDomain}". Valid: ${VALID_DOMAINS.join(', ')}` });
+      }
 
       let cleanCompName = (componentName || `${tpl.id}_${crypto.randomBytes(2).toString('hex')}`)
         .replace(/[^a-zA-Z0-9_]/g, '_');

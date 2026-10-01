@@ -59,23 +59,37 @@ export const zeta: (s: number) => number = zetaStdlib;
 // Shared Collatz memo (module-level so repeated queries are fast and exact).
 // ---------------------------------------------------------------------------
 
-const collatzMemo = new Map<number, number>();
-collatzMemo.set(1, 0);
+// Bounded typed-array memo: the old Map memoized EVERY trajectory value, and
+// trajectories climb far above n, so range scans grew it without limit (tens of
+// millions of entries for a 10^6 bound). Only n < COLLATZ_MEMO_LIMIT is cached
+// (8 MiB, allocated on first use); larger values are walked, not stored.
+const COLLATZ_MEMO_LIMIT = 1 << 21;
+let collatzMemo: Int32Array | null = null;
 
 function collatzTotalSteps(n: number): number {
   if (!Number.isInteger(n) || n < 1) throw new Error(`collatz requires positive integer, got ${n}`);
+  if (!collatzMemo) {
+    collatzMemo = new Int32Array(COLLATZ_MEMO_LIMIT).fill(-1);
+    collatzMemo[1] = 0;
+  }
+  const memo = collatzMemo;
   const stack: number[] = [];
   let x = n;
-  while (!collatzMemo.has(x)) {
+  while (x >= COLLATZ_MEMO_LIMIT || memo[x] < 0) {
+    if (x === 1) break;
+    if (x > (Number.MAX_SAFE_INTEGER - 1) / 3) {
+      throw new Error(`collatz trajectory of ${n} exceeds exact double precision`);
+    }
     stack.push(x);
     x = x % 2 === 0 ? x / 2 : 3 * x + 1;
   }
-  let steps = collatzMemo.get(x) as number;
+  let steps = x === 1 ? 0 : memo[x];
   while (stack.length > 0) {
     const y = stack.pop() as number;
-    collatzMemo.set(y, ++steps);
+    steps++;
+    if (y < COLLATZ_MEMO_LIMIT) memo[y] = steps;
   }
-  return collatzMemo.get(n) as number;
+  return steps;
 }
 
 // ---------------------------------------------------------------------------
@@ -199,13 +213,11 @@ function countCriticalZeros(T: number): { count: number; lastImPart: number | nu
       let lo = t0;
       let hi = t1;
       let flo = z0;
-      let fhi = z1;
       for (let i = 0; i < 64; i++) {
         const mid = (lo + hi) / 2;
         const fm = hardyZ(mid);
         if (flo * fm <= 0) {
           hi = mid;
-          fhi = fm;
         } else {
           lo = mid;
           flo = fm;
@@ -229,7 +241,7 @@ function collatzTotalStopping(N: number): number | { maxSteps: number; argmax: n
   // the {maxSteps, argmax} range statistic for a search bound. The suite calls
   // it with samples 1..27 (scalar) and bound 1000 (range); we split at 1000 so
   // the two documented modes agree. Both branches are real Collatz math on a
-  // shared memoized table (verified: t(27)=111, max over [1,1000] = 174 @ 871).
+  // shared memoized table (verified: t(27)=111, max over [1,1000] = 178 @ 871).
   if (N < 1000) return collatzTotalSteps(N);
   let maxSteps = 0;
   let argmax = 1;

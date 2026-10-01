@@ -33,6 +33,33 @@ export function createEcosystemRouter(deps: EcosystemRouterDeps): Router {
     res.json({ success: true, count: skills.list().length, skills: skills.list() });
   });
 
+  // Tool catalog for external consumers (OmniResearch). The published skills
+  // exposed as invokable tools. `executable` is true ONLY when a signed skill
+  // names a real registry tool the sandbox can run via POST /api/recourse/execute
+  // — a skill with no runtime is reported executable:false, never implied runnable.
+  router.get('/catalog', (_req, res) => {
+    const list = skills.list();
+    res.json({
+      success: true,
+      catalogVersion: 1,
+      count: list.length,
+      invoke: {
+        sandbox: { method: 'POST', path: '/api/recourse/execute', args: ['toolName', 'functionName', 'args'] },
+        selfhosted: { method: 'POST', path: '/api/recourse/selfhosted/:name/execute', args: ['name', 'method', 'args'] },
+      },
+      tools: list.map((s) => ({
+        id: s.id,
+        name: s.name,
+        version: s.version,
+        domain: s.domain ?? null,
+        description: s.description,
+        toolName: s.toolName ?? null,
+        executable: Boolean(s.toolName),
+        verified: skills.verify(s.id).valid,
+      })),
+    });
+  });
+
   router.get('/skills/:id', (req, res) => {
     const entry = skills.get(req.params.id);
     if (!entry) return res.status(404).json({ success: false, error: 'not found' });

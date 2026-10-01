@@ -60,7 +60,7 @@ export interface ReadoutRouterDeps {
   provenanceEventsRef(): ProvenanceEvent[];
   serveCapability(capId: string, ctx: unknown): Promise<unknown>;
   failureLedger: FailureEntry[];
-  outcomeLedger: { reward(n: number): number | null };
+  outcomeLedger: { reward(n: number): number | null | undefined };
   selfUseStatus(): Record<string, unknown>;
   systemSnapshotsRef(): SystemSnapshot[];
   systemBaselineRef(): SystemSnapshot | null;

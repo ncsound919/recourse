@@ -163,7 +163,7 @@ export async function runFleetDogfoodCycle(opts: DogfoodOptions = {}): Promise<F
   }
 
   // ---- UNIFY -------------------------------------------------------------
-  let map = null;
+  let map: ReturnType<typeof readSynergyMap> | null = null;
   try { map = readSynergyMap(); } catch { map = null; }
   const candidates = map?.candidates ?? [];
   const graph: CrossDomainGraphResult = buildCrossDomainGraph({

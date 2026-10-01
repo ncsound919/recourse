@@ -13,14 +13,11 @@ import {
   runSkillPromotionPass,
 } from '../lib/recourseActivator.js';
 import { buildFleetMemoryEntry } from '../lib/fleetMemory.js';
+import { MEMORY_KINDS, type MemoryKind, type VectorMemory } from '../lib/vectorMemory.js';
 import { requireMutationAuth } from '../lib/mutationAuth.js';
 
 export interface MemoryRouterDeps {
-  ensureVectorMemory(): Promise<{
-    status(): Promise<unknown>;
-    recall(q: string, kind: string | null, topK: number): Promise<Array<{ id: string; kind: string; text: string; score: number }>>;
-    remember(kind: string, id: string, text: string, meta?: unknown): Promise<unknown>;
-  }>;
+  ensureVectorMemory(): Promise<Pick<VectorMemory, 'status' | 'recall' | 'remember'>>;
   indexSystemMemory(): Promise<{ indexed: number; status: unknown }>;
   openhubFleetSignal(): Promise<{
     beliefs: unknown[];
@@ -55,7 +52,7 @@ export function createMemoryRouter(deps: MemoryRouterDeps): Router {
     try {
       const minClusterSize = Math.max(1, Number(req.body?.minClusterSize) || 2);
       const created = consolidateSemanticMemory({ minClusterSize });
-      res.json({ success: true, created: created.length, facts: created, ...memoryStoreStatus() });
+      res.json({ success: true, ...memoryStoreStatus(), created: created.length, createdFacts: created });
     } catch (e: any) {
       res.status(500).json({ success: false, error: e.message });
     }
@@ -78,7 +75,12 @@ export function createMemoryRouter(deps: MemoryRouterDeps): Router {
   router.get('/memory/recall', async (req, res) => {
     try {
       const q = String(req.query.q || '');
-      const kind = (req.query.kind as string) || null;
+      const rawKind = typeof req.query.kind === 'string' && req.query.kind ? req.query.kind : null;
+      // An unknown kind used to be passed straight through and silently matched nothing.
+      if (rawKind && !(MEMORY_KINDS as readonly string[]).includes(rawKind)) {
+        return res.status(400).json({ success: false, error: `unknown kind "${rawKind}" (expected one of ${MEMORY_KINDS.join(', ')})` });
+      }
+      const kind = rawKind as MemoryKind | null;
       const topK = Math.min(Number(req.query.topK || 5), 20);
       const mem = await deps.ensureVectorMemory();
       const hits = q ? await mem.recall(q, kind, topK) : [];
@@ -98,7 +100,7 @@ export function createMemoryRouter(deps: MemoryRouterDeps): Router {
         return res.status(status).json({ success: false, error: entry.error });
       }
       const mem = await deps.ensureVectorMemory();
-      await mem.remember(entry.kind!, entry.id!, entry.text!, entry.meta);
+      await mem.remember(entry.kind as MemoryKind, entry.id!, entry.text!, entry.meta as Record<string, any> | undefined);
       res.json({ success: true, indexed: 1, id: entry.id, kind: entry.kind, source: entry.meta?.source, status: await mem.status() });
     } catch (e: any) {
       res.status(500).json({ success: false, error: e.message });

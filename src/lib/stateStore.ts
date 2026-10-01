@@ -40,6 +40,7 @@
 
 import { existsSync, openSync, readSync, closeSync, readFileSync, rmSync, renameSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import Database from "better-sqlite3";
 
 export interface StateStoreOptions {
@@ -162,24 +163,44 @@ export function createStateStore(opts: StateStoreOptions): StateStore {
   // A no-op save (nothing changed) touches nothing on disk — this is what stops
   // the boot storm / high-cadence jobs from rewriting a ~120MB payload every
   // tick (the OOM cause). The transaction still makes each write all-or-nothing.
+  //
+  // Change detection compares a SHA-1 digest of each key's JSON against the
+  // digest last written, held in memory. (The previous version re-read EVERY
+  // row out of SQLite on every save just to diff it — tens of MB of string
+  // allocation per debounce tick for what is usually a one-key change.)
   const upsert = db.transaction((entries: ReadonlyArray<readonly [string, string]>) => {
     for (const [k, v] of entries) insertStmt.run(k, v);
   });
+  const digest = (json: string): string => createHash("sha1").update(json).digest("base64");
+  let lastWritten: Map<string, string> | null = null;
+  const seedDigests = (): Map<string, string> => {
+    const m = new Map<string, string>();
+    for (const row of selectAllStmt.all() as Array<{ key: string; value: string }>) {
+      m.set(row.key, digest(row.value));
+    }
+    return m;
+  };
 
   const write = (): void => {
     try {
       const payload = opts.getPayload();
-      const current = new Map<string, string>();
-      for (const row of selectAllStmt.all() as Array<{ key: string; value: string }>) {
-        current.set(row.key, row.value);
-      }
+      const known = (lastWritten ??= seedDigests());
       const changed: Array<[string, string]> = [];
+      const changedDigests: Array<[string, string]> = [];
       for (const [k, v] of Object.entries(payload)) {
         const json = JSON.stringify(v);
         if (json === undefined) continue; // JSON.stringify drops undefined-valued keys
-        if (current.get(k) !== json) changed.push([k, json]);
+        const d = digest(json);
+        if (known.get(k) !== d) {
+          changed.push([k, json]);
+          changedDigests.push([k, d]);
+        }
       }
-      if (changed.length > 0) upsert(changed);
+      if (changed.length > 0) {
+        upsert(changed);
+        // Only record digests once the transaction committed.
+        for (const [k, d] of changedDigests) known.set(k, d);
+      }
       opts.saveGoalLedger?.();
     } catch (err) {
       console.warn("[Recourse Engine] Could not persist state to disk:", err);
@@ -196,15 +217,29 @@ export function createStateStore(opts: StateStoreOptions): StateStore {
       }, debounceMs);
     },
     load<T extends Record<string, unknown>>(): T | null {
+      // Parse row-by-row. Previously ONE corrupt row made load() return null,
+      // the server booted on defaults, and the next save() overwrote every key
+      // with those defaults — total state loss from a single bad value.
+      let rows: Array<{ key: string; value: string }>;
       try {
-        const rows = selectAllStmt.all() as Array<{ key: string; value: string }>;
-        if (!rows.length) return null;
-        const obj: Record<string, unknown> = {};
-        for (const row of rows) obj[row.key] = JSON.parse(row.value);
-        return obj as T;
-      } catch {
+        rows = selectAllStmt.all() as Array<{ key: string; value: string }>;
+      } catch (err) {
+        console.warn("[Recourse Engine] Could not read persisted state:", err);
         return null;
       }
+      if (!rows.length) return null;
+      const obj: Record<string, unknown> = {};
+      const digests = new Map<string, string>();
+      for (const row of rows) {
+        try {
+          obj[row.key] = JSON.parse(row.value);
+          digests.set(row.key, digest(row.value));
+        } catch {
+          console.warn(`[Recourse Engine] Persisted state key "${row.key}" is not valid JSON; skipping it (row left intact on disk until overwritten).`);
+        }
+      }
+      lastWritten = digests;
+      return obj as T;
     },
     flush() {
       if (timer) {
@@ -233,9 +268,12 @@ export function createStateStore(opts: StateStoreOptions): StateStore {
       return { before, after };
     },
     close() {
+      // A pending debounced save must land before the handle closes — the old
+      // version cleared the timer and silently dropped the last <=1.5s of state.
       if (timer) {
         clearTimeout(timer);
         timer = null;
+        write();
       }
       db.close();
     },
