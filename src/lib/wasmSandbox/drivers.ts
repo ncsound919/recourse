@@ -55,6 +55,34 @@ export function resolveInsideRoot(root: string, requested: string): string {
   return abs
 }
 
+const NET_TIMEOUT_MS = 15_000
+const NET_MAX_BODY_BYTES = 2 * 1024 * 1024
+
+/** Read at most `max` bytes of a response body (the rest is cancelled). */
+async function readCapped(res: Response, max: number): Promise<string> {
+  if (!res.body) return ''
+  const reader = res.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (total + value.byteLength > max) {
+        chunks.push(value.subarray(0, max - total))
+        total = max
+        await reader.cancel().catch(() => {})
+        break
+      }
+      chunks.push(value)
+      total += value.byteLength
+    }
+  } finally {
+    reader.releaseLock()
+  }
+  return Buffer.concat(chunks, total).toString('utf-8')
+}
+
 export function createNodeDrivers(opts: NodeDriverOptions = {}): NodeDrivers {
   const fsRoot = path.resolve(opts.fsRoot ?? defaultSandboxFsRoot())
   fs.mkdirSync(fsRoot, { recursive: true })
@@ -71,6 +99,12 @@ export function createNodeDrivers(opts: NodeDriverOptions = {}): NodeDrivers {
     },
   }
 
+  // Physical containment for granted network calls:
+  //  - redirect:'manual' — the grant allowlist is checked against the REQUESTED
+  //    URL only; following redirects let an allowlisted host bounce the call to
+  //    any other host (cloud metadata, this server's own /api, the LAN).
+  //    A 3xx is returned to the sandboxed code as-is, never followed.
+  //  - a hard timeout, and a cap on the response body read into the host heap.
   const netDriver = async (
     url: string,
     init?: { method?: HttpMethod; body?: string },
@@ -78,8 +112,10 @@ export function createNodeDrivers(opts: NodeDriverOptions = {}): NodeDrivers {
     const res = await fetch(url, {
       method: init?.method ?? 'GET',
       body: init?.body,
+      redirect: 'manual',
+      signal: AbortSignal.timeout(NET_TIMEOUT_MS),
     })
-    return { status: res.status, body: await res.text() }
+    return { status: res.status, body: await readCapped(res, NET_MAX_BODY_BYTES) }
   }
 
   const secretsSource =

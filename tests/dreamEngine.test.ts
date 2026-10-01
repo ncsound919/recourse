@@ -134,8 +134,9 @@ describe('REM phase (rule-based, model offline)', () => {
     expect(t.provenance).toEqual(['parameter_mutation', 'genesis_seed']);
     expect(t.parentId).toBeUndefined();
     expect(t.genome?.kind).toBe('cyclomatic_pressure_scorer');
-    expect(t.intensity).toBe(0.89);
-    expect(t.crystallizationReadiness).toBe(0.62);
+    // Evidence-derived, not drawn: verified genome -> 0.85 intensity / 0.60 readiness.
+    expect(t.intensity).toBe(0.85);
+    expect(t.crystallizationReadiness).toBe(0.6);
     expect(t.id).toBe('dt_734ab6bd');
     expect(t.id).toBe(expectedThoughtId(12345, 1, 'coding', 'cyclomatic_pressure_scorer', ['parameter_mutation', 'genesis_seed']));
     expect(r.dreamState.recentThoughts[0].id).toBe(t.id);
@@ -155,8 +156,8 @@ describe('REM phase (rule-based, model offline)', () => {
     expect(created.provenance).toEqual(['edge_case_stress', 'mutated:parent1']);
     expect(created.genome?.kind).toBe('lagrange_extrapolator');
     expect(created.genome?.params).toEqual({ epsilon: 9.598614e-7, clamp: 3092.8504, decimals: 3.9707367 });
-    expect(created.intensity).toBe(0.59);
-    expect(created.crystallizationReadiness).toBe(0.57);
+    expect(created.intensity).toBe(0.85);
+    expect(created.crystallizationReadiness).toBe(0.6);
     expect(created.id).toBe('dt_3dc28b19');
     expect(created.id).toBe(expectedThoughtId(8, 1, 'math', 'lagrange_extrapolator', ['edge_case_stress', 'mutated:parent1']));
   });
@@ -245,8 +246,9 @@ describe('cross-pollination phase', () => {
     expect(t.provenance).toEqual(['cross_pollination', 'base:b_coding', 'transplant:a_math']);
     expect(t.parentId).toBe('b_coding');
     expect(t.secondParentId).toBe('a_math');
-    expect(t.intensity).toBe(0.74);
-    expect(t.crystallizationReadiness).toBe(0.59);
+    // Verified hybrid: 0.85 + the two-parent credit.
+    expect(t.intensity).toBe(0.9);
+    expect(t.crystallizationReadiness).toBe(0.6);
     expect(r.phaseReport).toBe('Cross-pollinated a coding gene with transplanted parameters');
   });
 
@@ -271,8 +273,10 @@ describe('cross-pollination phase', () => {
     expect(t.provenance).toEqual(['cross_pollination', 'base:xa', 'transplant:xb']);
     expect(t.parentId).toBe('xa');
     expect(t.secondParentId).toBe('xb');
-    expect(t.crystallizationReadiness).toBe(0.34);
-    expect(t.intensity).toBe(0.64);
+    // Failed verification: 6 of 7 checks green still does not out-score a pass —
+    // readiness is 0.2 + 0.15 * 6/7, intensity 0.5 + 0.15 * 6/7 + hybrid credit.
+    expect(t.crystallizationReadiness).toBe(0.33);
+    expect(t.intensity).toBe(0.68);
     expect(t.id).toBe('dt_ebd3f405');
     expect(t.id).toBe(expectedThoughtId(3, 1, 'math', 'lagrange_extrapolator', ['cross_pollination', 'base:xa', 'transplant:xb']));
     expect(r.phaseReport).toBe('Cross-pollinated a math gene with transplanted parameters');
@@ -527,7 +531,7 @@ describe('memory consolidation phase', () => {
     for (let i = 0; i < 6; i++) {
       last = await engine.tick();
     }
-    const s = last.dreamState;
+    const s = last!.dreamState;
     expect(s.tick).toBe(6);
     expect(s.currentPhase).toBe('rem_counterfactual_sim');
     expect(s.dreamCyclesCompleted).toBe(1);
@@ -539,7 +543,7 @@ describe('memory consolidation phase', () => {
       learnerCalibration: 0.5,
       sampledAtTick: 6,
     });
-    expect(last.phaseReport).toBe('Consolidated real signals: readiness 85.0% | lego assemblies: 3 | learner ep 12 | calibration 0.500');
+    expect(last!.phaseReport).toBe('Consolidated real signals: readiness 85.0% | lego assemblies: 3 | learner ep 12 | calibration 0.500');
     expect(s.cognitiveCoherence).toBe(1);
   });
 });
@@ -632,7 +636,7 @@ describe('model generator integration', () => {
     expect(r.newThought?.premise).toBe('Hypothesis under test.');
     expect(r.newThought?.hypothesis).toBe('Untitled model hypothesis.');
     expect(r.newThought?.origin).toBe('api_model');
-    expect(r.newThought?.crystallizationReadiness).toBe(0.55);
+    expect(r.newThought?.crystallizationReadiness).toBe(0.6);
     expect(r.newThought?.id).toBe('dt_e3285c16');
     expect(r.newThought?.id).toBe(expectedThoughtId(407, 1, 'neuro_symbolic', 'model', []));
   });
@@ -649,7 +653,7 @@ describe('model generator integration', () => {
     const r = await engine.tick();
     expect(r.newThought?.origin).toBe('api_model');
     expect(r.newThought?.simulatedOutcome).toContain('passed real sandbox');
-    expect(r.newThought?.crystallizationReadiness).toBe(0.55);
+    expect(r.newThought?.crystallizationReadiness).toBe(0.6);
   });
 
   it('labels a failing candidate with no [FAIL] line as having no tests supplied', async () => {
@@ -664,6 +668,68 @@ describe('model generator integration', () => {
     expect(r.newThought?.simulatedOutcome).toBe('model hypothesis code did not pass yet: no tests supplied');
     expect(r.newThought?.crystallizationReadiness).toBe(0.2);
     expect(r.newThought?.origin).toBe('api_model');
+  });
+});
+
+describe('evidence-derived readiness and intensity', () => {
+  /** One REM thought per seed, classified by what the sandbox reported. */
+  async function sampleThoughts(): Promise<Array<{ verified: boolean; readiness: number; intensity: number }>> {
+    const out: Array<{ verified: boolean; readiness: number; intensity: number }> = [];
+    for (const seed of [1, 3, 7, 8, 12, 42, 777, 12345]) {
+      const store = new InMemoryDreamStore();
+      const st = baseState(seed);
+      st.recentThoughts = [];
+      await store.save(st);
+      const engine = new DreamingEngine(store, seed);
+      const t = (await engine.tick()).newThought!;
+      const checks = t.invariantChecks ?? [];
+      out.push({
+        verified: checks.length > 0 && checks.every((c) => c.passed),
+        readiness: t.crystallizationReadiness,
+        intensity: t.intensity,
+      });
+    }
+    return out;
+  }
+
+  it('gives a verified thought the same readiness and intensity at every seed', async () => {
+    const verified = (await sampleThoughts()).filter((s) => s.verified);
+    expect(verified.length).toBeGreaterThan(2);
+    // Not a range any more: readiness 0.6 / intensity 0.85 for every verified
+    // thought, whatever the seed drew.
+    expect(new Set(verified.map((s) => s.readiness))).toEqual(new Set([0.6]));
+    expect(new Set(verified.map((s) => s.intensity))).toEqual(new Set([0.85]));
+  });
+
+  it('never scores a failed verification at or above a verified one', async () => {
+    // A failing sandbox verdict, on both the model path and a genome that
+    // cannot compile: neither may reach the numbers a verified thought gets.
+    const failingModel = new InMemoryDreamStore();
+    const modelEngine = new DreamingEngine(failingModel, 900, async () => ({
+      premise: 'p',
+      hypothesis: 'h',
+      sourceCode: 'export function off(x) { return x + 1; }',
+      testSuiteCode: 'assert off(1) === 999;',
+    }));
+    const bad = (await modelEngine.tick()).newThought!;
+    expect(bad.invariantChecks?.some((c) => c.passed)).toBe(false);
+    expect(bad.crystallizationReadiness).toBeLessThan(0.6);
+    expect(bad.intensity).toBeLessThan(0.85);
+    expect(bad.crystallizationReadiness).toBeGreaterThanOrEqual(0.2);
+  });
+
+  it('keeps an unverified thought above the induction threshold so it is still re-tested', async () => {
+    const store = new InMemoryDreamStore();
+    const engine = new DreamingEngine(store, 901, async () => ({
+      premise: 'p',
+      hypothesis: 'h',
+      sourceCode: 'export function off(x) { return x + 1; }',
+      testSuiteCode: 'assert off(1) === 999;',
+    }));
+    const t = (await engine.tick()).newThought!;
+    // 0.45 is the theorem-induction cutoff: below it, a failing thought would
+    // never be re-tested and could never recover.
+    expect(t.intensity).toBeGreaterThanOrEqual(0.45);
   });
 });
 

@@ -276,6 +276,8 @@ export function buildSuiteStatements(
       const ch = raw[i];
       if (quote) {
         cur += ch;
+        // Backslash escapes the next char: 'it\'s' must not end the string.
+        if (ch === '\\' && i + 1 < raw.length) { cur += raw[i + 1]; i += 2; continue; }
         if (ch === quote) quote = null;
         i++;
         continue;
@@ -302,6 +304,7 @@ export function buildSuiteStatements(
       const ch = s[i];
       if (quote) {
         cur += ch;
+        if (ch === '\\' && i + 1 < s.length) { cur += s[i + 1]; i++; continue; }
         if (ch === quote) quote = null;
         continue;
       }
@@ -334,7 +337,7 @@ export function buildSuiteStatements(
       const label = args.length >= 2 ? `assert(${call[1]});` : line;
       return `__assert((${check}), ${JSON.stringify(label)});`;
     }
-    const nodeStyle = line.match(/^assert\.(equal|strictEqual|notEqual|notStrictEqual|deepEqual|ok)\((.*)\);?$/);
+    const nodeStyle = line.match(/^assert\.(equal|strictEqual|notEqual|notStrictEqual|deepEqual|deepStrictEqual|ok)\((.*)\);?$/);
     if (nodeStyle) {
       const kind = nodeStyle[1];
       const args = splitTopLevelArgs(nodeStyle[2]);
@@ -343,7 +346,8 @@ export function buildSuiteStatements(
       else if (kind === 'strictEqual') check = `(${args[0]} === ${args[1]})`;
       else if (kind === 'notEqual') check = `(${args[0]} != ${args[1]})`;
       else if (kind === 'notStrictEqual') check = `(${args[0]} !== ${args[1]})`;
-      else if (kind === 'deepEqual') check = `(JSON.stringify(${args[0]}) === JSON.stringify(${args[1]}))`;
+      else if (kind === 'deepEqual') check = `__deq(${args[0]}, ${args[1]}, false)`;
+      else if (kind === 'deepStrictEqual') check = `__deq(${args[0]}, ${args[1]}, true)`;
       else check = `Boolean(${args[0]})`; // ok
       if (args.length >= 2) return `__assert(${check}, ${JSON.stringify(line)});`;
       return null;
@@ -461,18 +465,11 @@ export function executeTestSuite(
       if (body.length > 0) {
         runner(customConsole, assertFn);
       } else {
-        // Honest fallback: no assertions declared — the only claim we can make
-        // is that the code executes and returns a defined value.
-        const runResult = executeToolFunction(sourceCode);
-        if (runResult.success && runResult.returnValue !== undefined) {
-          passedCount = 1;
-          testDetails.push('[PASS] Isolated kernel execution returned a defined value');
-        } else {
-          recordFailure(
-            `[FAIL] Execution failed: ${runResult.error || 'returned undefined'}`,
-            `Execution failed: ${runResult.error || 'returned undefined'}`
-          );
-        }
+        // Honesty gate: a suite with zero assertions demonstrates nothing. "It
+        // ran" is not a pass — refuse instead of crediting a vacuous green.
+        recordFailure(
+          '[FAIL] No assertions declared — a green run with zero assertions is not a pass'
+        );
       }
     } catch (abortErr: any) {
       recordFailure(`[FAIL] Test body aborted with uncaught error: ${abortErr.message}`);

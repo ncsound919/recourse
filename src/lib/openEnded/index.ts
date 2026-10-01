@@ -20,6 +20,7 @@ export { OpenEndedArchive } from './archive.js';
 export type { ArchivedProblem, ArchiveCell, ArchiveSnapshot, ArchiveAddResult, ArchiveDoc } from './archive.js';
 
 export { runOpenEndedCycle, rewardForResult, capabilityKeyFor } from './engine.js';
+export { propertyVectorsForProblem } from './propertyVectors.js';
 export type { OpenEndedDeps, OpenEndedCycleResult, OpenEndedMintConfig, SolverResult } from './engine.js';
 
 export { parseSearchReplace, applySearchReplace, runPatchAttempt, patchPrompt } from './patchMode.js';

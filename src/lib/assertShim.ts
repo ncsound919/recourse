@@ -19,5 +19,13 @@ export const ASSERT_SHIM = [
   'assert.strictEqual = function (a, b, m) { if (a !== b) throw new Error(String(m || "assert.strictEqual failed")); };',
   'assert.notEqual = function (a, b, m) { if (a == b) throw new Error(String(m || "assert.notEqual failed")); };',
   'assert.notStrictEqual = function (a, b, m) { if (a === b) throw new Error(String(m || "assert.notStrictEqual failed")); };',
-  'assert.deepEqual = function (a, b, m) { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(String(m || "assert.deepEqual failed")); };',
+  // Structural equality (key-order independent — JSON.stringify compared
+  // {a:1,b:2} and {b:2,a:1} as different). `strict` uses Object.is on leaves.
+  'const __deq = function (a, b, strict) { if (strict ? Object.is(a, b) : (a == b)) return true; if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false; if (Array.isArray(a) !== Array.isArray(b)) return false; const ka = Object.keys(a), kb = Object.keys(b); if (ka.length !== kb.length) return false; for (const k of ka) { if (!Object.prototype.hasOwnProperty.call(b, k) || !__deq(a[k], b[k], strict)) return false; } return true; };',
+  'assert.deepEqual = function (a, b, m) { if (!__deq(a, b, false)) throw new Error(String(m || "assert.deepEqual failed")); };',
+  'assert.deepStrictEqual = function (a, b, m) { if (!__deq(a, b, true)) throw new Error(String(m || "assert.deepStrictEqual failed")); };',
+  'assert.notDeepEqual = function (a, b, m) { if (__deq(a, b, false)) throw new Error(String(m || "assert.notDeepEqual failed")); };',
+  'assert.notDeepStrictEqual = function (a, b, m) { if (__deq(a, b, true)) throw new Error(String(m || "assert.notDeepStrictEqual failed")); };',
+  'assert.throws = function (fn, _e, m) { let threw = false; try { fn(); } catch (e) { threw = true; } if (!threw) throw new Error(String((typeof _e === "string" ? _e : m) || "assert.throws failed")); };',
+  'assert.doesNotThrow = function (fn, m) { try { fn(); } catch (e) { throw new Error(String(m || ("assert.doesNotThrow failed: " + (e && e.message)))); } };',
 ].join('\n');

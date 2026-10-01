@@ -32,7 +32,7 @@ export interface ToolEntry {
   versions: ToolVersion[];
   currentVersion?: string;
   pendingVersions?: ToolVersion[];
-  healthStatus?: 'healthy' | 'degraded' | 'corrupted' | 'healing';
+  healthStatus?: 'healthy' | 'degraded' | 'corrupted' | 'healing' | 'unverified';
   anomalyCount?: number;
 }
 
@@ -87,9 +87,13 @@ export type ProvenanceEventType =
   | 'benchmark_attested'
   | 'open_ended_cycle'
   | 'open_ended_patch'
-  | 'global_lens_publish';
+  | 'global_lens_publish'
+  | 'dream_registry_reconciled'
+  | 'tool_registry_reverified';
 
 export interface ProvenanceEvent {
+  /** Hash scheme. Absent = legacy v1 (hash does not bind content); 2 = canonical content hash. */
+  v?: 2;
   prev: string;
   hash: string;
   type: ProvenanceEventType;
@@ -354,6 +358,13 @@ export interface SelfRepairStatus {
   regressedRepairs?: number;
   /** Smoke-only heals (no regression suite) — excluded from the rate. */
   unverifiableRepairs?: number;
+  /** Every repair attempt: healed, verifier-failed, or smoke-only. Persisted
+   *  with the rest of status, so a restart cannot silently reset the
+   *  denominator behind "we healed N tools". */
+  repairAttempts?: number;
+  /** Attempts that never earned a verified heal — the verifier rejected the
+   *  patch, or it only passed a smoke check with no regression suite. */
+  unverifiedRepairAttempts?: number;
   lastHealedTool?: string;
   lastHealTimestamp?: number;
 }

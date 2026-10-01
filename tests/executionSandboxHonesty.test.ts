@@ -84,4 +84,17 @@ assert b.get('k') === 42;`
     expect(r.testDetails.filter((d) => d.startsWith('[FAIL]')).length).toBe(1);
     expect(r.testDetails.filter((d) => d.startsWith('[PASS]')).length).toBe(1);
   });
+
+  it('refuses a green pass when the suite declares zero assertions', () => {
+    // An empty suite demonstrates nothing; "it ran" must never be a pass.
+    // (Both the isolated-vm and in-process paths refuse; only the details differ.)
+    const r = executeTestSuite('function run() { return 42; }', '');
+    expect(r.passed).toBe(false);
+  });
+
+  it('refuses a suite whose body has no assert statement', () => {
+    // Setup-only body (no assertion) must not pass on "it executed".
+    const r = executeTestSuite('function run() { return 42; }', 'const x = 1;');
+    expect(r.passed).toBe(false);
+  });
 });

@@ -195,6 +195,32 @@ function hintsFor(functionName: string, acceptanceTest: string, referenceSource:
   };
 }
 
+/** Bodies of implementations that know nothing about the problem. */
+const TRIVIAL_STUB_BODIES = [
+  'return undefined;', 'return null;', 'return 0;', 'return 1;', 'return -1;',
+  'return true;', 'return false;', "return '';", 'return [];', 'return {};',
+  'return a[0];', 'return a;',
+];
+
+/** First trivial stub that passes `suite`, or null when the suite rejects them all. */
+export function trivialStubPassing(
+  functionName: string,
+  suite: string,
+  verify: (source: string, suite: string) => MintVerifyResult,
+): string | null {
+  if (!/^[A-Za-z_$][\w$]*$/.test(functionName)) return null;
+  for (const body of TRIVIAL_STUB_BODIES) {
+    let passed = false;
+    try {
+      passed = verify(`function ${functionName}(...a) { ${body} }`, suite).passed;
+    } catch {
+      passed = false;
+    }
+    if (passed) return body;
+  }
+  return null;
+}
+
 /**
  * Mint problems from the model, admitting only those whose reference
  * implementation passes its own acceptance test in the real sandbox. Returns
@@ -240,6 +266,14 @@ export async function mintProblems(input: MintInput): Promise<MintResult> {
         title: d.title,
         detail: (check.testDetails ?? []).filter((x) => x.startsWith('[FAIL') || x.startsWith('[COMPILATION')).slice(0, 2).join('; '),
       });
+      continue;
+    }
+    // Discrimination gate: a suite that a constant/identity stub also passes
+    // does not test the problem (e.g. only degenerate inputs), and "solving"
+    // it proves nothing. Reject it instead of minting a free win.
+    const weakBy = trivialStubPassing(d.functionName, d.acceptanceTest, input.verify);
+    if (weakBy) {
+      rejected.push({ reason: 'acceptance_too_weak', title: d.title, detail: `a trivial stub (${weakBy}) passes the acceptance test` });
       continue;
     }
     seen.add(canon);

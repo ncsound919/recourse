@@ -362,37 +362,30 @@ describe.skipIf(!avail)('isolated-vm test suite execution', () => {
     expect(r.score).toBe(0);
   });
 
-  it('reports a non-string payload as no returned payload', () => {
-    const r = executeTestSuiteInIsolate(
-      "JSON.stringify = () => 123; export function f() { return 1; }",
-      'assert f() === 1;'
-    );
-    expect(r.available).toBe(true);
-    expect(r.passed).toBe(false);
-    expect(r.testDetails[0]).toContain('isolate returned no payload');
+  // The candidate runs in the verifier's scope. These used to document that a
+  // candidate's JSON.stringify override flowed straight into the verdict
+  // payload — which also meant a candidate could FORGE a passing verdict.
+  it('a candidate overriding JSON.stringify cannot change the verdict payload', () => {
+    for (const override of ['() => 123', "() => '{bad'", `() => '{"ok":true}'`]) {
+      const r = executeTestSuiteInIsolate(
+        `JSON.stringify = ${override}; export function f() { return 1; }`,
+        'assert f() === 1;'
+      );
+      expect(r.available).toBe(true);
+      expect(r.passed).toBe(true);
+      expect(r.score).toBe(1);
+    }
   });
 
-  it('reports an unparsable JSON payload as no returned payload', () => {
-    const r = executeTestSuiteInIsolate(
-      "JSON.stringify = () => '{bad'; export function f() { return 1; }",
-      'assert f() === 1;'
-    );
-    expect(r.available).toBe(true);
-    expect(r.passed).toBe(false);
-    expect(r.testDetails[0]).toContain('isolate returned no payload');
-  });
-
-  it('tolerates a minimal valid payload from the isolate boundary', () => {
-    const r = executeTestSuiteInIsolate(
-      `JSON.stringify = () => '{"ok":true}'; export function f() { return 1; }`,
-      'assert f() === 1;'
-    );
+  it('a wrong implementation cannot forge a passing verdict', () => {
+    const forged = `JSON.stringify = () => '{"ok":true,"pass":9,"fail":0,"details":[],"out":[],"err":[]}';
+      try { __pass = 9; __fail = 0; } catch (e) {}
+      export function f() { return 2; }`;
+    const r = executeTestSuiteInIsolate(forged, 'assert f() === 1;');
     expect(r.available).toBe(true);
     expect(r.passed).toBe(false);
     expect(r.score).toBe(0);
-    expect(r.stdout).toEqual([]);
-    expect(r.stderr).toEqual([]);
-    expect(r.testDetails).toEqual([]);
+    expect(r.testDetails.join('\n')).toContain('[FAIL]');
   });
 });
 

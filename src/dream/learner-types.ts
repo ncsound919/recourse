@@ -20,6 +20,8 @@ export interface MetaParams {
   temperature: number;        // exploration temperature (entropy-driven)
   promotionThreshold: number; // meanReward needed for 'amplify' directives
   decayFactor: number;        // forgetting rate for unevaluated genes
+  calibrationGate: number;    // max ECE for promotion (0 = disabled)
+  minForecasts: number;       // minimum forecasts before calibration is trusted
 }
 
 export type DirectiveKind = 'retire' | 'refine' | 'amplify' | 'synthesize_template';
@@ -47,7 +49,15 @@ export interface LedgerEntry {
    *  from genesis reproduces the chain bit-for-bit instead of guessing. */
   input?: {
     externalScore?: number; // verifier/pass-rate signal folded into selfScore
+    /** Gene identities this episode was evaluated against. Recorded so a
+     *  replay uses the episode's OWN gene set instead of whatever the
+     *  registry holds now — without it every replay after a registry change
+     *  hashes to a different inputHash and reports a bogus divergence. */
+    genes?: Array<{ id: string; versionHash?: string }>;
   };
+  /** Per-forecast (predicted, realized) pairs from this episode, used to
+   *  compute Brier score and reliability curves. */
+  forecasts?: Array<{ predicted: number; realized: number }>;
 }
 
 export interface LearnerState {
@@ -57,6 +67,9 @@ export interface LearnerState {
   geneBeliefs: Record<string, GeneBelief>;
   selfScore: number;         // EMA of the learner's own prediction accuracy
   calibrationError: number;  // mean |realized - predicted| last episode
+  brierScore: number;        // Brier score over recent forecasts
+  ece: number;               // expected calibration error over recent forecasts
+  forecastWindow: Array<{ predicted: number; realized: number }>; // rolling window for calibration
   directives: Directive[];
   ledgerHead: string;
   updatedAt: string;
@@ -68,6 +81,8 @@ export interface EpisodeReport {
   avgReward: number;
   calibrationError: number;
   selfScore: number;
+  brierScore: number;
+  ece: number;
   meta: MetaParams;
   directives: Directive[];
   stateHash: string;
@@ -76,7 +91,18 @@ export interface EpisodeReport {
 
 export interface ReplayReport {
   replayed: number;
+  /** Episodes in the stored chain (`state.episode`). */
+  totalEpisodes: number;
+  /** True when the replay could NOT be a full reproduction: the ledger
+     window was shorter than the chain, or the recorded gene set no longer
+     matches the registry. `matchesHead` is only meaningful when false. */
+  partial: boolean;
+  /** First episode whose recorded gene set no longer resolves against the
+     current registry (inputHash mismatch). */
+  driftAtEpisode: number | null;
+  /** First episode whose state hash did not reproduce with matching inputs. */
   divergedAtEpisode: number | null;
+  /** Only true for a complete, undrifted, bit-for-bit reproduction. */
   matchesHead: boolean;
   storedHead: string;
   replayedHead: string;

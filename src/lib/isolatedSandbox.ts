@@ -21,7 +21,7 @@
  */
 
 import { createRequire } from 'node:module';
-import { prepareExecutableCode } from './executionSandbox';
+import { prepareExecutableCode, buildSuiteStatements } from './executionSandbox';
 import { ASSERT_SHIM } from './assertShim';
 
 // createRequire needs a real URL/path. In the esbuild CJS bundle `import.meta`
@@ -222,108 +222,55 @@ export function executeTestSuiteInIsolate(
     return { ...empty(false, 0, 'isolated-vm not loadable'), available: false };
   }
   const ivm = _ivm;
-  const cleaned = prepareExecutableCode(sourceCode);
+  // Same suite interpretation as the in-process runner (one implementation —
+  // this used to be a hand-copied duplicate of buildSuiteStatements).
+  const { cleanedSource: cleaned, statements: body } = buildSuiteStatements(sourceCode, testSuiteCode || '');
 
-  // Split test body into statements (same rules as executionSandbox: `;` and
-  // top-level `,assert` boundaries; loops safe because their `;` sit in parens).
-  function splitTestStatements(raw: string): string[] {
-    const out: string[] = [];
-    let cur = '';
-    let depth = 0;
-    let quote: string | null = null;
-    let i = 0;
-    const push = () => { const t = cur.trim(); if (t && !t.startsWith('//')) out.push(t); cur = ''; };
-    while (i < raw.length) {
-      const ch = raw[i];
-      if (quote) { cur += ch; if (ch === quote) quote = null; i++; continue; }
-      if (ch === '"' || ch === "'" || ch === '`') { quote = ch; cur += ch; i++; continue; }
-      if (ch === '(' || ch === '[' || ch === '{') { depth++; cur += ch; i++; continue; }
-      if (ch === ')' || ch === ']' || ch === '}') { depth--; cur += ch; i++; continue; }
-      if (ch === ';' && depth === 0) { push(); i++; continue; }
-      if (ch === ',' && depth === 0 && /^,\s*assert\b/.test(raw.slice(i))) { push(); i++; continue; }
-      cur += ch;
-      i++;
-    }
-    push();
-    return out;
-  }
-
-  const lines = splitTestStatements(testSuiteCode || '');
-  const body: string[] = [];
-  const splitTopLevelArgs = (s: string): string[] => {
-    const out: string[] = [];
-    let depth = 0;
-    let cur = '';
-    let quote: string | null = null;
-    for (let i = 0; i < s.length; i++) {
-      const ch = s[i];
-      if (quote) { cur += ch; if (ch === quote) quote = null; continue; }
-      if (ch === '"' || ch === "'" || ch === '`') { quote = ch; cur += ch; continue; }
-      if (ch === '(' || ch === '[' || ch === '{') depth++;
-      if (ch === ')' || ch === ']' || ch === '}') depth--;
-      if (ch === ',' && depth === 0) { out.push(cur.trim()); cur = ''; continue; }
-      cur += ch;
-    }
-    if (cur.trim()) out.push(cur.trim());
-    return out;
-  };
-  const rewriteAssertLine = (line: string): string | null => {
-    const bare = line.match(/^assert\s+(.+)$/);
-    if (bare) return `__assert((${bare[1].replace(/;$/, '')}), ${JSON.stringify(line)});`;
-    const call = line.match(/^assert\s*\((.*)\);?$/);
-    if (call) {
-      const args = splitTopLevelArgs(call[1]);
-      if (!args.length) return null;
-      const label = args.length >= 2 ? `assert(${call[1]});` : line;
-      return `__assert((${args[0]}), ${JSON.stringify(label)});`;
-    }
-    const nodeStyle = line.match(/^assert\.(equal|strictEqual|notEqual|notStrictEqual|deepEqual|ok)\((.*)\);?$/);
-    if (nodeStyle) {
-      const kind = nodeStyle[1];
-      const args = splitTopLevelArgs(nodeStyle[2]);
-      let check: string;
-      if (kind === 'equal') check = `(${args[0]} == ${args[1]})`;
-      else if (kind === 'strictEqual') check = `(${args[0]} === ${args[1]})`;
-      else if (kind === 'notEqual') check = `(${args[0]} != ${args[1]})`;
-      else if (kind === 'notStrictEqual') check = `(${args[0]} !== ${args[1]})`;
-      else if (kind === 'deepEqual') check = `(JSON.stringify(${args[0]}) === JSON.stringify(${args[1]}))`;
-      else check = `Boolean(${args[0]})`; // ok
-      if (args.length >= 2) return `__assert(${check}, ${JSON.stringify(line)});`;
-      return null;
-    }
-    return null;
-  };
-  for (const line of lines) {
-    const rewritten = rewriteAssertLine(line);
-    if (rewritten !== null) body.push(rewritten);
-    else body.push(line);
-  }
-
+  // Tamper resistance: the candidate code runs in the SAME scope as the
+  // verifier bookkeeping. Previously it could simply write `__pass = 99`,
+  // `__fail = 0`, or replace `JSON.stringify` to forge the whole payload —
+  // i.e. a generated gene could pass its own verification without being correct.
+  // Counters now live in a closure (not reachable by name) and the intrinsics
+  // the verifier needs are captured before any candidate code runs.
   const src = `
+    const __stringify = JSON.stringify;
+    const __tally = (() => {
+      let pass = 0, fail = 0;
+      const details = [];
+      return Object.freeze({
+        rec(value, label) {
+          if (value === true) { pass++; details[details.length] = '[PASS] ' + label; }
+          else { fail++; details[details.length] = '[FAIL] ' + label + ' -> returned ' + (value === undefined ? 'undefined' : __stringify(value)); }
+        },
+        snap() {
+          const d = [];
+          for (let i = 0; i < details.length; i++) d[i] = details[i];
+          return { pass, fail, details: d };
+        },
+      });
+    })();
     const __out = [];
     const __err = [];
-    const __details = [];
-    let __pass = 0, __fail = 0;
     const console = {
       log: (...m) => __out.push(m.map((x) => (typeof x === 'object' ? JSON.stringify(x) : String(x))).join(' ')),
       warn: (...m) => __err.push('[WARN] ' + m.map(String).join(' ')),
       error: (...m) => __err.push('[ERROR] ' + m.map(String).join(' ')),
       info: (...m) => __out.push('[INFO] ' + m.map(String).join(' ')),
     };
-    const __assert = (value, label) => {
-      if (value === true) { __pass++; __details.push('[PASS] ' + label); }
-      else { __fail++; __details.push('[FAIL] ' + label + ' -> returned ' + (value === undefined ? 'undefined' : JSON.stringify(value))); }
-    };
+    const __assert = (value, label) => __tally.rec(value, label);
     let __payload__;
     try {
       ${ASSERT_SHIM}
       ${cleaned}
       ${body.join('\n')}
-      __payload__ = { ok: true, pass: __pass, fail: __fail, details: __details, out: __out, err: __err };
+      const __snap__ = __tally.snap();
+      __payload__ = { ok: true, pass: __snap__.pass, fail: __snap__.fail, details: __snap__.details, out: __out, err: __err };
     } catch (e) {
-      __payload__ = { ok: false, threw: true, message: (e && e.message) || String(e), pass: __pass, fail: __fail, details: __details, out: __out, err: __err };
+      const __snap__ = __tally.snap();
+      __payload__ = { ok: false, threw: true, message: (e && e.message) || String(e), pass: __snap__.pass, fail: __snap__.fail, details: __snap__.details, out: __out, err: __err };
     }
-    return JSON.stringify(__payload__);
+    try { return __stringify(__payload__); }
+    catch (e) { return __stringify({ ok: false, threw: true, message: 'verifier payload not serializable', pass: 0, fail: 0, details: [], out: [], err: [] }); }
   `;
 
   let isolate: any = null;

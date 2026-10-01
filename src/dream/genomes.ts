@@ -274,22 +274,59 @@ export function crossGenomes(a: GenomeSpec, b: GenomeSpec, rng: () => number): G
   return { kind: a.kind, domain: a.domain, params };
 }
 
+/** Expression form: a bare function declaration, evaluable as `(${source})`
+ *  by the sandbox callables below (node:vm / isolated-vm / Function). */
 export function compileGenome(spec: GenomeSpec): string {
   const kind = KINDS[spec.kind];
   if (!kind) throw new Error(`unknown gene kind ${spec.kind}`);
   return kind.compile(spec.params).trim();
 }
 
+/** Module form: the same gene with a real `export`, so the source clears the
+ *  registry substance gate (`assessSourceSubstance` requires an exported
+ *  binding) and can be imported by the forge / self-host pipeline. Without
+ *  this, a dream gene could verify inside the engine yet be refused at
+ *  promotion — the dream -> registry loop delivered ~0 genes. */
+export function compileGenomeModule(spec: GenomeSpec): string {
+  return geneModuleForm(compileGenome(spec));
+}
+
+/** Module form of an already-compiled gene body: the same `export` prefixing
+ *  `compileGenomeModule` applies, exposed separately so a gene that is already
+ *  stored in the registry can be brought into module form without re-deriving
+ *  its GenomeSpec (which is not persisted). */
+export function geneModuleForm(source: string): string {
+  return source.replace(
+    /^(\s*)function\s+([A-Za-z_$][A-Za-z0-9_$]*)/,
+    '$1export function $2',
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /* Sandbox verification                                                */
 /* ------------------------------------------------------------------ */
+
+/** Strip module syntax so a stored module-form gene can be exercised by the
+ *  same harness as a bare one.
+ *
+ *  A gene is verified as module form (`export function ...`) but the isolate
+ *  evaluates a function expression, where `export` is a syntax error. Without
+ *  this, a gene that had already been promoted to module form would fail
+ *  `SandboxSyntaxValid` on its next verification - i.e. re-running the
+ *  reconcile would downgrade exactly the genes it had just fixed. */
+function stripModuleSyntax(source: string): string {
+  return source
+    .replace(/\bexport\s+default\s+/g, '')
+    .replace(/\bexport\s+(?=(function|const|let|var|class|async)\b)/g, '');
+}
 
 /** Evaluate a gene in a real isolate (no host globals). The node:vm/Function
  *  path is reachable only under the explicit RECOURSE_ALLOW_INPROCESS_EVAL=1
  *  opt-in — it is not a security boundary, so it is refused by default. */
 function createGeneCallable(source: string): IsolatedCallable {
-  if (isIsolateAvailable()) return createIsolatedCallable(source);
-  const refusal = inProcessFallbackRefusal(source);
+  const runnable = stripModuleSyntax(source);
+  if (isIsolateAvailable()) return createIsolatedCallable(runnable);
+  const refusal = inProcessFallbackRefusal(runnable);
   if (refusal) throw new Error(refusal);
 
   const evalOnce = (code: string): ((input: unknown) => unknown) => {
@@ -301,7 +338,7 @@ function createGeneCallable(source: string): IsolatedCallable {
     }
     return new Function(`return (${code})`)();
   };
-  const fn = evalOnce(source);
+  const fn = evalOnce(runnable);
   return {
     call(input: unknown) {
       let a: unknown;
@@ -328,12 +365,69 @@ export function geneVectors(spec: GenomeSpec): unknown[] {
   return kind.vectors();
 }
 
+/** The invariant-check input vectors for a gene kind. Kinds generate these
+ *  deterministically from the kind alone, so a stored gene's vectors can be
+ *  recovered without its (unpersisted) GenomeSpec. */
+export function geneVectorsForKind(kindName: string): unknown[] {
+  return KINDS[kindName]?.vectors() ?? [];
+}
+
+/** Whether this kind is a rule-based gene the engine knows how to verify. */
+export function isKnownGeneKind(kindName: string): boolean {
+  return Boolean(KINDS[kindName]);
+}
+
+/**
+ * The entrypoint a gene kind's compiled body declares (e.g.
+ * `cyclomatic_pressure_scorer` -> `cyclomaticPressureScorer`).
+ *
+ * Derived from the kind's own compile template, so it is a property of the
+ * kind rather than of any particular GenomeSpec. Callers use it to check that
+ * a stored artifact really IS the gene a name suggests: the registry contains
+ * tools named `CODI_CYCLOMATIC_*` whose source is a TypeScript `LRUCache`
+ * class, and verifying those against the cyclomatic protocol would attribute
+ * a verdict to a gene that never produced them. Null for an unknown kind.
+ */
+export function geneEntrypointName(kindName: string): string | null {
+  const kind = KINDS[kindName];
+  if (!kind) return null;
+  let body: string;
+  try {
+    // Deterministic stand-in parameters (range midpoints): the declared function
+    // name is a property of the kind's template, not of the values. `compile`
+    // throws on missing keys, so the ranges have to be filled.
+    const params: Record<string, number> = {};
+    for (const [key, [lo, hi]] of Object.entries(kind.ranges)) params[key] = (lo + hi) / 2;
+    body = kind.compile(params);
+  } catch {
+    return null;
+  }
+  const m = body.match(/^\s*(?:export\s+)?function\s+([A-Za-z_$][A-Za-z0-9_$]*)/m);
+  return m ? m[1] : null;
+}
+
 export function verifyGenome(spec: GenomeSpec): VerifyResult {
   const kind = KINDS[spec.kind];
   if (!kind) {
     return { verified: false, checks: [{ name: 'UnknownGeneKind', passed: false }], summary: 'unknown gene kind' };
   }
-  const source = compileGenome(spec);
+  return verifyGeneSource(spec.kind, compileGenome(spec));
+}
+
+/**
+ * Verify an already-compiled gene body against today's invariant protocol.
+ *
+ * Same checks as `verifyGenome`, but taking the source instead of a spec: a
+ * gene already in the registry has no GenomeSpec persisted, while its kind
+ * determines the vectors and the semantic invariants, so the stored artifact
+ * can still be re-checked honestly instead of keeping a `verified: true` that
+ * nothing re-confirms.
+ */
+export function verifyGeneSource(kindName: string, source: string): VerifyResult {
+  const kind = KINDS[kindName];
+  if (!kind) {
+    return { verified: false, checks: [{ name: 'UnknownGeneKind', passed: false }], summary: 'unknown gene kind' };
+  }
   const checks: InvariantCheck[] = [];
   let callable: IsolatedCallable;
   try {

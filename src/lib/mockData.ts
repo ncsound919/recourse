@@ -19,6 +19,8 @@ export const INITIAL_STATUS: SystemStatus = {
     activeAnomaliesCount: 0,
     meanTimeToRepairMs: 0,
     repairSuccessRate: 0,
+    repairAttempts: 0,
+    unverifiedRepairAttempts: 0,
     lastHealedTool: undefined,
     lastHealTimestamp: undefined
   },

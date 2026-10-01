@@ -12,18 +12,22 @@ import type {
   DreamPhase,
   DreamState,
   DreamThought,
+  InvariantCheck,
   TickResult,
   ToolDomain,
 } from './types';
 import { isNovelHypothesis, normalizeHypothesis } from '../lib/honestyMetrics';
 import {
   compileGenome,
+  compileGenomeModule,
   crossGenomes,
   generateGenome,
+  geneVectors,
   mutateGenome,
   verifyGenome,
 } from './genomes';
 import { executeTestSuite } from '../lib/executionSandbox';
+import { reconcileDreamRegistry, type ReconcileReport } from './reconcileRegistry';
 import { AsyncMutex } from '../lib/asyncMutex';
 import type { DreamStore } from './store';
 
@@ -59,9 +63,10 @@ export interface SleepComputeStep {
 /** Real signals that the dream engine consumes on every tick. */
 export interface DreamSignalProvider {
   readinessScore(): number;     // from math engine
-  legoAssemblyCount(): number; // from lego engine registry
-  learnerEpisode(): number;    // from learner
-  learnerCalibration(): number; // from learner
+  // null = the source has no reading yet (reported as null, never invented).
+  legoAssemblyCount(): number | null; // from lego engine registry
+  learnerEpisode(): number | null;    // from learner
+  learnerCalibration(): number | null; // from learner
   /** P1: run one bounded sleep-time-compute unit during memory consolidation
    *  (offline precompute of verified artifacts). Absent => consolidation
    *  behaves exactly as before. */
@@ -88,6 +93,26 @@ export function hashString(str: string): number {
     h = Math.imul(h, 0x01000193);
   }
   return h >>> 0;
+}
+
+/** Map sandbox `testDetails` lines into invariant checks.
+ *  Assertion lines are `[PASS] …` / `[FAIL] …`, but the in-process runner also
+ *  emits informational notes (`✓ Static syntax analysis passed…`) that are NOT
+ *  assertions. The old rule (`passed: d.startsWith('[PASS]')`) therefore marked
+ *  every informational line as a FAILED invariant — a verified gene was stored
+ *  carrying `passed:false` checks, which also biased `recomputeCoherence`. */
+export function assertionChecks(details: string[] | undefined): InvariantCheck[] {
+  const out: InvariantCheck[] = [];
+  for (const d of details ?? []) {
+    if (d.startsWith('[PASS]')) {
+      out.push({ name: d.slice(0, 80), passed: true });
+    } else if (d.startsWith('[FAIL]') || d.startsWith('[COMPILATION ERROR]') || /timed out/i.test(d)) {
+      out.push({ name: d.slice(0, 80), passed: false, detail: d.slice(0, 200) });
+    }
+    // Any other line is an informational note, not an assertion: it is neither
+    // a pass nor a fail and must not be counted as an invariant.
+  }
+  return out;
 }
 
 /* --------------------------- engine config -------------------------- */
@@ -192,6 +217,59 @@ const LEXICON: Record<ToolDomain, { premises: string[]; hypotheses: string[] }> 
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
+
+/** Share of a thought's invariant checks that actually passed. 0 when there is
+ *  nothing to check: an unverified thought has no evidence, which is not the
+ *  same as half-good evidence. */
+function checkPassRate(checks: InvariantCheck[] | undefined): number {
+  if (!checks || !checks.length) return 0;
+  return checks.filter((c) => c.passed).length / checks.length;
+}
+
+/**
+ * Crystallization readiness, derived from the real verification verdict.
+ *
+ * This used to be `0.5 + rng() * 0.2` for a verified genome and
+ * `0.25 + rng() * 0.1` otherwise — a seeded random number presented as a
+ * measure of how ready a thought is to become a gene. Two thoughts with
+ * different evidence could land on the same number, and the same evidence could
+ * land on different numbers after a re-seed.
+ *
+ * The verdict dominates and the check ratio only breaks ties among failures: a
+ * thought can fail verification while most of its individual checks are green
+ * (one failed invariant is enough), and a failure must never out-score a pass.
+ * `phaseTheoremInduction` still raises or lowers readiness as further
+ * verification accumulates, and `AUTO_PROMOTE_THRESHOLD` is still the gate.
+ */
+function readinessFromChecks(checks: InvariantCheck[] | undefined, verified: boolean): number {
+  return verified ? round2(0.6) : round2(0.2 + 0.15 * checkPassRate(checks));
+}
+
+/**
+ * Thought intensity: how strongly the stream should hold on to the thought and
+ * how much attention it earns. Grounded in the same verdict, with a small
+ * credit for a thought fused from two proven lineages.
+ *
+ * Was `0.55 + rng() * 0.4` — a draw, not a signal. The floor (0.5) stays above
+ * the 0.45 theorem-induction threshold so an unverified thought is still
+ * re-tested instead of being starved of the verification it needs.
+ */
+function intensityFromChecks(
+  checks: InvariantCheck[] | undefined,
+  verified: boolean,
+  parentIds: string[],
+): number {
+  const hybridCredit = parentIds.length > 1 ? 0.05 : 0;
+  if (verified) return round2(Math.min(0.95, 0.85 + hybridCredit));
+  return round2(0.5 + 0.15 * checkPassRate(checks) + hybridCredit);
+}
+
+/** How much a thought fades in one pruning pass, from its evidence rather than
+ *  a die roll: a fully verified thought barely dims, an unverified one fades
+ *  fastest so it stops occupying attention it has not earned. */
+function decayFactor(checks: InvariantCheck[] | undefined): number {
+  return round2(0.7 + 0.27 * checkPassRate(checks));
+}
 const pick = <T,>(rng: () => number, arr: T[]): T => arr[Math.floor(rng() * arr.length)];
 
 function pickWeightedByIntensity(thoughts: DreamThought[], rng: () => number): DreamThought {
@@ -264,7 +342,7 @@ export class DreamingEngine {
         break;
       }
       case 'synaptic_pruning': {
-        const pruned = this.phasePruning(s, rng);
+        const pruned = this.phasePruning(s);
         phaseReport = `Pruning eliminated ${pruned} low-intensity thought path${pruned === 1 ? '' : 's'}`;
         break;
       }
@@ -350,6 +428,25 @@ export class DreamingEngine {
     return { success: true, crystallizedTool: tool, dreamState: s };
   }
 
+  /**
+   * Re-verify the whole dream registry against today's verifier and persist the
+   * corrected verdicts. Genes crystallized before `promote()` stopped writing a
+   * literal `verified: true` carry a claim nothing re-confirms; this replaces it
+   * with a real sandbox result (downgrading where the gene no longer verifies).
+   * Serialized with the phase lock so it cannot interleave with a dream tick.
+   */
+  async reconcileRegistry(): Promise<{ dreamState: DreamState; report: ReconcileReport }> {
+    return this.mutex.runExclusive(async () => {
+      const s = await this.loadOrDefault();
+      const { registry, report } = reconcileDreamRegistry(s.registry ?? []);
+      s.registry = registry;
+      s.totalCrystallizedGenes = registry.length;
+      this.recomputeCoherence(s);
+      await this.store.save(s);
+      return { dreamState: s, report };
+    });
+  }
+
   /* --------------------------- phase logic -------------------------- */
 
   private phaseRem(s: DreamState, rng: () => number): DreamThought[] {
@@ -370,9 +467,12 @@ export class DreamingEngine {
     return created;
   }
 
-  private phasePruning(s: DreamState, rng: () => number): number {
+  private phasePruning(s: DreamState): number {
+    // Decay is proportional to how much evidence the thought still has, not a
+    // seeded draw: the old `intensity * (0.82 + rng() * 0.06)` dimmed a fully
+    // verified gene and an unverified draft by the same random amount.
     for (const t of s.recentThoughts) {
-      t.intensity = round2(t.intensity * (0.82 + rng() * 0.06));
+      t.intensity = round2(t.intensity * decayFactor(t.invariantChecks));
     }
     const before = s.recentThoughts.length;
     s.recentThoughts = s.recentThoughts.filter(
@@ -419,11 +519,12 @@ export class DreamingEngine {
   private verifyThought(t: DreamThought): { verified: boolean; checks: DreamThought['invariantChecks']; summary: string } {
     if (t.code && t.codeTests) {
       const run = executeTestSuite(t.code, t.codeTests);
+      const checks = assertionChecks(run.testDetails);
       return {
         verified: run.passed,
-        checks: (run.testDetails || []).map((d) => ({ name: d.slice(0, 80), passed: d.startsWith('[PASS]') })),
+        checks,
         summary: run.passed
-          ? `model code passed real sandbox (${run.testDetails.filter((d) => d.startsWith('[PASS]')).length} asserts)`
+          ? `model code passed real sandbox (${checks.filter((c) => c.passed).length} asserts)`
           : `model code FAILED real sandbox: ${run.testDetails.find((d) => d.startsWith('[FAIL]')) || 'unknown'}`,
       };
     }
@@ -507,7 +608,12 @@ export class DreamingEngine {
     const v = this.verifyThought(t);
     t.invariantChecks = v.checks;
     t.simulatedOutcome = v.summary;
-    if (!v.verified) {
+    // A "verified" claim requires at least one real invariant AND all of them
+    // green. `verified` used to be written as a literal `true`, so a gene could
+    // reach the registry carrying failed checks.
+    const checks = v.checks ?? [];
+    const allChecksGreen = checks.length > 0 && checks.every((c) => c.passed);
+    if (!v.verified || !allChecksGreen) {
       t.crystallizationReadiness = round2(Math.max(0.05, t.crystallizationReadiness - 0.2));
       return null;
     }
@@ -527,9 +633,11 @@ export class DreamingEngine {
       domain: t.domain,
       kind: isModelCode ? 'model_hypothesis' : t.genome!.kind,
       description: t.hypothesis,
-      code: isModelCode ? t.code! : compileGenome(t.genome!),
-      verified: true,
-      invariantChecks: v.checks,
+      // Module form: real `export`, so the registry substance gate accepts it.
+      code: isModelCode ? t.code! : compileGenomeModule(t.genome!),
+      verified: allChecksGreen,
+      invariantChecks: v.checks ?? [],
+      testVectors: isModelCode ? undefined : geneVectors(t.genome!),
       crystallizedAt: new Date().toISOString(),
       fromThoughtId: t.id,
     };
@@ -551,8 +659,10 @@ export class DreamingEngine {
     const premise = pick(rng, lex.premises);
     const hypothesis = pick(rng, lex.hypotheses);
     const verify = genome ? verifyGenome(genome) : null;
-    const readiness = verify?.verified ? round2(0.5 + rng() * 0.2) : round2(0.25 + rng() * 0.1);
-    const intensity = round2(0.55 + rng() * 0.4);
+    // Both numbers below come from the sandbox verdict, not from the RNG — a
+    // draw here used to stand in for a measure of readiness.
+    const readiness = readinessFromChecks(verify?.checks, verify?.verified === true);
+    const intensity = intensityFromChecks(verify?.checks, verify?.verified === true, parentIds);
     const id = `dt_${hashString(`${s.seed}:${s.tick}:${domain}:${genome?.kind ?? 'none'}:${provenance.join('>')}`).toString(16).padStart(8, '0').slice(0, 10)}`;
     return {
       id,
@@ -601,10 +711,9 @@ export class DreamingEngine {
     if (!code || !tests) return null; // no code => nothing honest to verify
     const run = executeTestSuite(code, tests);
 
-    const verified = run.passed;
-    const checks = run.testDetails.map((d) => ({ name: d.slice(0, 90), passed: d.startsWith('[PASS]') }));
+    const checks = assertionChecks(run.testDetails);
     const summary = run.passed
-      ? `model hypothesis code passed real sandbox (${run.testDetails.filter((d) => d.startsWith('[PASS]')).length} asserts)`
+      ? `model hypothesis code passed real sandbox (${checks.filter((c) => c.passed).length} asserts)`
       : `model hypothesis code did not pass yet: ${run.testDetails.find((d) => d.startsWith('[FAIL]')) || 'no tests supplied'}`;
 
     return {
@@ -614,8 +723,8 @@ export class DreamingEngine {
       premise: (candidate.premise || 'Hypothesis under test.').slice(0, 300),
       hypothesis: (candidate.hypothesis || 'Untitled model hypothesis.').slice(0, 300),
       simulatedOutcome: summary,
-      intensity: round2(0.6),
-      crystallizationReadiness: verified ? round2(0.55) : round2(0.2),
+      intensity: intensityFromChecks(checks, run.passed, []),
+      crystallizationReadiness: readinessFromChecks(checks, run.passed),
       abstractGenomeDraft: code || undefined,
       code: code || undefined,
       codeTests: tests || undefined,
@@ -650,7 +759,7 @@ export class DreamingEngine {
       .slice()
       .sort((a, b) => (b.intensity * 0.6 + b.crystallizationReadiness * 0.4) - (a.intensity * 0.6 + a.crystallizationReadiness * 0.4))
       .slice(0, POOL_LIMIT)
-      .sort((a, b) => b.tick - a.tick);
+      .sort((a, b) => (b.tick ?? 0) - (a.tick ?? 0));
   }
 
   private async loadOrDefault(): Promise<DreamState> {

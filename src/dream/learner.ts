@@ -13,8 +13,10 @@
 // Determinism: every episode is a pure function of
 //   (seed, episode number, evaluated gene set).
 // All state transitions are recorded in a hash-chained append-only
-// ledger; `replayFromGenesis()` re-executes the full history and proves
-// the chain reproduces bit-for-bit (or reports the divergence point).
+// ledger; `replayFromGenesis()` re-executes the history it can read and
+// reports exactly what it proved: a bit-for-bit reproduction
+// (`matchesHead`), a state divergence (`divergedAtEpisode`), an input that
+// no longer resolves (`driftAtEpisode`), or an incomplete run (`partial`).
 //
 // Supabase tables (durable mode):
 //   create table if not exists learner_state (
@@ -33,6 +35,8 @@ import { AsyncMutex } from '../lib/asyncMutex';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { GeneRegistryStore } from './mutator';
+import type { RegistryGene } from './mutator-types';
+import { calibrationReport, isCalibrated } from '../lib/calibration';
 import type {
   Directive,
   EpisodeReport,
@@ -42,8 +46,27 @@ import type {
   ReplayReport,
 } from './learner-types';
 
+const FORECAST_WINDOW_SIZE = 200;
+
 const MAX_DIRECTIVES = 20;
-const MAX_REPLAY = 500;
+/** Ledger window a replay may re-execute. The window always starts at
+ *  genesis, and a window shorter than the chain is reported as
+ *  `partial: true` — never as a verified or diverged chain. The cap exists
+ *  because every replayed episode re-clones state and re-derives
+ *  directives, so cost grows with chain length. */
+const MAX_REPLAY = 2_000;
+/** How much an ecosystem-wide `externalScore` moves a single gene's reward.
+ *  The signal is system-level: copying it onto every gene makes all posteriors
+ *  identical (beliefs stop discriminating), so it only *modulates* the
+ *  per-gene property score. */
+const EXTERNAL_REWARD_WEIGHT = 0.5;
+/** Directive triage order when the list exceeds MAX_DIRECTIVES. */
+const DIRECTIVE_SEVERITY: Record<Directive['kind'], number> = {
+  retire: 0,
+  refine: 1,
+  synthesize_template: 2,
+  amplify: 3,
+};
 
 const round4 = (n: number) => Math.round(n * 10000) / 10000;
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
@@ -72,6 +95,9 @@ function canonicalState(s: LearnerState): unknown {
     meta: s.meta,
     selfScore: s.selfScore,
     calibrationError: s.calibrationError,
+    brierScore: s.brierScore,
+    ece: s.ece,
+    forecastWindow: s.forecastWindow,
     ledgerHead: s.ledgerHead,
     geneBeliefs: s.geneBeliefs,
     directives: s.directives,
@@ -249,7 +275,9 @@ export class RecursiveLearner {
 
   /** Run one episode. `externalScore` (0..1) is a real ecosystem signal —
    *  verifier pass rate, readiness score, etc. Omit it when there is none;
-   *  it is never silently defaulted. */
+   *  it is never silently defaulted. It modulates each gene's property score
+   *  (see EXTERNAL_REWARD_WEIGHT) instead of replacing it, and is also
+   *  forecast separately against `selfScore`. */
   async runEpisode(externalScore?: number): Promise<EpisodeReport> {
     return this.mutex.runExclusive(async () => {
       const state = await this.loadOrDefault();
@@ -325,6 +353,8 @@ export class RecursiveLearner {
       avgReward: Object.values(means).reduce((a, b) => a + b, 0) / Math.max(1, Object.keys(means).length),
       calibrationError: state.calibrationError,
       selfScore: state.selfScore,
+      brierScore: state.brierScore,
+      ece: state.ece,
       meta: { ...state.meta },
       directives: [...state.directives],
       stateHash: state.ledgerHead,
@@ -350,40 +380,53 @@ export class RecursiveLearner {
     return report;
   }
 
-  /** Re-execute the entire ledger from genesis without persisting, and
-   *  prove the hash chain reproduces (or find the divergence point).
-   *  Each episode re-runs against the exact external input recorded in its
-   *  own ledger entry, so the replay is a true reproduction — not a mock. */
+  /** Re-execute the ledger from genesis without persisting, and report
+   *  exactly what that replay proved. Each episode re-runs against the gene
+   *  set and external input recorded in its own ledger entry (falling back
+   *  to the current selection for pre-`input.genes` entries). The report is
+   *  `partial` whenever the window or the registry makes a full reproduction
+   *  impossible — `matchesHead` is only true for a complete, undrifted run. */
   async replayFromGenesis(): Promise<ReplayReport> {
     return this.mutex.runExclusive(() => this.replayFromGenesisUnlocked());
   }
 
   private async replayFromGenesisUnlocked(): Promise<ReplayReport> {
-    const entries = await this.store.listLedger(MAX_REPLAY);
     const stored = await this.loadOrDefault();
+    const totalEpisodes = stored.episode;
+    const entries = await this.store.listLedger(MAX_REPLAY);
     const storedHead = stored.ledgerHead;
 
     let state = this.makeGenesis();
     let replayedHead = state.ledgerHead;
     let divergedAtEpisode: number | null = null;
-    const genes = await this.activeGenes();
+    let driftAtEpisode: number | null = null;
+    const fallbackGenes = await this.activeGenes();
+    const registry = await this.geneRegistry.list();
+    const byId = new Map(registry.map((g) => [g.id, g]));
 
     for (let i = 0; i < entries.length; i++) {
-      const result = this.execute(state, genes, entries[i].input?.externalScore);
+      const entry = entries[i];
+      const genes = replayGenes(entry, fallbackGenes, byId);
+      const result = this.execute(state, genes, entry.input?.externalScore);
       state = result.state;
       replayedHead = result.entry.stateHash;
-      if (
-        divergedAtEpisode === null &&
-        (result.entry.inputHash !== entries[i].inputHash || result.entry.stateHash !== entries[i].stateHash)
-      ) {
-        divergedAtEpisode = entries[i].episode;
+      if (result.entry.inputHash !== entry.inputHash) {
+        // inputHash covers only the evaluated gene set, so a mismatch means
+        // the recorded input no longer resolves — drift, not corruption.
+        if (driftAtEpisode === null) driftAtEpisode = entry.episode;
+      } else if (result.entry.stateHash !== entry.stateHash && divergedAtEpisode === null) {
+        divergedAtEpisode = entry.episode;
       }
     }
 
+    const partial = entries.length < totalEpisodes || driftAtEpisode !== null;
     return {
       replayed: entries.length,
+      totalEpisodes,
+      partial,
+      driftAtEpisode,
       divergedAtEpisode,
-      matchesHead: divergedAtEpisode === null && replayedHead === storedHead,
+      matchesHead: !partial && divergedAtEpisode === null && replayedHead === storedHead,
       storedHead,
       replayedHead,
     };
@@ -441,17 +484,22 @@ export class RecursiveLearner {
     const evaluated = new Set(genes.map((g) => g.id));
     const predictionErrors: number[] = [];
     const rewards: number[] = [];
+    const episodeForecasts: Array<{ predicted: number; realized: number }> = [];
 
     for (const gene of genes) {
-      // Reward = the system's REAL measured outcome when the server supplies one
-      // (e.g. verifier/benchmark/capability health each tick). Only when no
-      // external signal is provided do we fall back to the deterministic
-      // property-based (fast-check) scoring over static genome genes — which
-      // otherwise pins every belief to ~0 and learns nothing.
       const useExternal = typeof externalScore === 'number' && Number.isFinite(externalScore);
-      const reward = useExternal
-        ? Math.min(1, Math.max(0, externalScore))
-        : scoreGeneWithProperties(gene.code, gene.vectors, seedEpisode).reward;
+      const external = useExternal ? Math.min(1, Math.max(0, externalScore!)) : null;
+      const intrinsic = Array.isArray(gene.vectors) && gene.vectors.length > 0
+        ? scoreGeneWithProperties(gene.code, gene.vectors, seedEpisode).reward
+        : null;
+      // Blend, never overwrite: a system-wide score applied verbatim to every
+      // gene gives all of them the same posterior, so beliefs can no longer
+      // rank genes against each other.
+      const reward = intrinsic === null
+        ? (external ?? 0.5)
+        : external === null
+          ? intrinsic
+          : round4((1 - EXTERNAL_REWARD_WEIGHT) * intrinsic + EXTERNAL_REWARD_WEIGHT * external);
       rewards.push(reward);
 
       const belief = state.geneBeliefs[gene.id] ?? {
@@ -468,8 +516,8 @@ export class RecursiveLearner {
 
       const priorMean = belief.alpha / (belief.alpha + belief.beta);
       predictionErrors.push(Math.abs(reward - priorMean));
+      episodeForecasts.push({ predicted: round4(priorMean), realized: round4(reward) });
 
-      // L0: belief update — fractional Beta posterior + EMA reward
       belief.alpha = round4(belief.alpha + reward);
       belief.beta = round4(belief.beta + (1 - reward));
       belief.attempts += 1;
@@ -480,13 +528,11 @@ export class RecursiveLearner {
       state.geneBeliefs[gene.id] = belief;
     }
 
-    // Fold the system's OWN outcome signal (real verifier pass rate, readiness
-    // score, etc.) into the learner's calibration and selfScore. No synthetic
-    // genes are created for it — it is a direct measurement of the ecosystem.
     if (typeof externalScore === 'number' && Number.isFinite(externalScore)) {
       const clamped = Math.min(1, Math.max(0, externalScore));
       predictionErrors.push(Math.abs(clamped - state.selfScore));
       rewards.push(clamped);
+      episodeForecasts.push({ predicted: round4(state.selfScore), realized: round4(clamped) });
     }
 
     // Decay genes that were not evaluated this episode
@@ -501,6 +547,16 @@ export class RecursiveLearner {
       ? round4(predictionErrors.reduce((a, b) => a + b, 0) / predictionErrors.length)
       : state.calibrationError;
     state.calibrationError = calibration;
+
+    // Rolling forecast window for Brier/ECE computation
+    state.forecastWindow.push(...episodeForecasts);
+    if (state.forecastWindow.length > FORECAST_WINDOW_SIZE) {
+      state.forecastWindow = state.forecastWindow.slice(-FORECAST_WINDOW_SIZE);
+    }
+
+    const calReport = calibrationReport(state.forecastWindow);
+    state.brierScore = calReport.brier;
+    state.ece = calReport.ece;
 
     if (predictionErrors.length) {
       if (calibration > 0.15) {
@@ -534,10 +590,14 @@ export class RecursiveLearner {
       prevHash: state.ledgerHead,
       inputHash,
       stateHash,
-      input: typeof externalScore === 'number' && Number.isFinite(externalScore)
-        ? { externalScore: round4(Math.min(1, Math.max(0, externalScore))) }
-        : undefined,
-      summary: `episode ${state.episode}: ${genes.length} genes, avg reward ${rewards.length ? round4(rewards.reduce((a, b) => a + b, 0) / rewards.length) : 'n/a'}, calibration ${calibration.toFixed(3)}${typeof externalScore === 'number' && Number.isFinite(externalScore) ? `, external verifier score ${externalScore.toFixed(3)}` : ''}`,
+      input: {
+        genes: genes.map((g) => ({ id: g.id, versionHash: g.versionHash })),
+        externalScore: typeof externalScore === 'number' && Number.isFinite(externalScore)
+          ? round4(Math.min(1, Math.max(0, externalScore)))
+          : undefined,
+      },
+      forecasts: episodeForecasts.length > 0 ? episodeForecasts : undefined,
+      summary: `episode ${state.episode}: ${genes.length} genes, avg reward ${rewards.length ? round4(rewards.reduce((a, b) => a + b, 0) / rewards.length) : 'n/a'}, calibration ${calibration.toFixed(3)}, ECE ${state.ece.toFixed(3)}, Brier ${state.brierScore.toFixed(3)}${typeof externalScore === 'number' && Number.isFinite(externalScore) ? `, external verifier score ${externalScore.toFixed(3)}` : ''}`,
       createdAt: new Date().toISOString(),
     };
     state.ledgerHead = stateHash;
@@ -558,6 +618,13 @@ export class RecursiveLearner {
       quantum_sim: 'tpl_bell_entangler'
     };
 
+    const calGateActive = state.meta.calibrationGate > 0;
+    const calTrusted = isCalibrated(
+      { brier: state.brierScore, ece: state.ece, mae: state.calibrationError, bins: [], n: state.forecastWindow.length },
+      state.meta.minForecasts,
+      state.meta.calibrationGate,
+    );
+
     for (const b of Object.values(state.geneBeliefs)) {
       if (b.attempts < 5) continue;
       let kind: Directive['kind'] | null = null;
@@ -569,8 +636,13 @@ export class RecursiveLearner {
         kind = 'refine';
         reason = `mean reward ${b.meanReward.toFixed(2)} under stress — request mutator refinement via template`;
       } else if (b.meanReward >= state.meta.promotionThreshold) {
-        kind = 'amplify';
-        reason = `stable reward ${b.meanReward.toFixed(2)} — propagate pattern into template component building`;
+        if (calGateActive && !calTrusted) {
+          kind = 'refine';
+          reason = `mean reward ${b.meanReward.toFixed(2)} meets threshold but learner not calibrated (ECE ${state.ece.toFixed(3)} > ${state.meta.calibrationGate}) — defer promotion`;
+        } else {
+          kind = 'amplify';
+          reason = `stable reward ${b.meanReward.toFixed(2)} — propagate pattern into template component building`;
+        }
       }
       if (kind) {
         out.push({
@@ -602,8 +674,10 @@ export class RecursiveLearner {
       }
     }
 
+    // Severity first: when the cap bites, act on the worst genes before
+    // spending budget on propagating already-good ones.
     return out
-      .sort((a, b) => a.kind.localeCompare(b.kind) || a.geneName.localeCompare(b.geneName))
+      .sort((a, b) => (DIRECTIVE_SEVERITY[a.kind] - DIRECTIVE_SEVERITY[b.kind]) || a.geneName.localeCompare(b.geneName))
       .slice(0, MAX_DIRECTIVES);
   }
 
@@ -618,6 +692,8 @@ export class RecursiveLearner {
       avgReward,
       calibrationError: state.calibrationError,
       selfScore: state.selfScore,
+      brierScore: state.brierScore,
+      ece: state.ece,
       meta: { ...state.meta },
       directives: [...state.directives],
       stateHash: entry.stateHash,
@@ -631,6 +707,8 @@ export class RecursiveLearner {
       temperature: 0.5,
       promotionThreshold: 0.85,
       decayFactor: 0.5,
+      calibrationGate: 0.20,
+      minForecasts: 10,
     };
     return {
       schema: 1,
@@ -639,6 +717,9 @@ export class RecursiveLearner {
       geneBeliefs: {},
       selfScore: 0.5,
       calibrationError: 0.5,
+      brierScore: 0,
+      ece: 0.5,
+      forecastWindow: [],
       directives: [],
       ledgerHead: '0'.repeat(8),
       updatedAt: new Date().toISOString(),
@@ -647,11 +728,73 @@ export class RecursiveLearner {
 
   private async loadOrDefault(): Promise<LearnerState> {
     const existing = await this.store.loadState();
-    if (existing) return existing;
-    const genesis = this.makeGenesis();
-    await this.store.saveState(genesis);
-    return genesis;
+    if (!existing) {
+      const genesis = this.makeGenesis();
+      await this.store.saveState(genesis);
+      return genesis;
+    }
+    const { state, changed } = this.migrateState(existing);
+    if (changed) await this.store.saveState(state);
+    return state;
   }
+
+  /** Backfill fields a stored state may predate. `execute()` pushes onto
+   *  `state.forecastWindow` unconditionally, so a save written before that
+   *  field existed (or a truncated/partial write) threw on the very first
+   *  episode and the learner never advanced past the episode it loaded with.
+   *  Repair on load instead of crashing; the repair is persisted once. */
+  private migrateState(raw: LearnerState): { state: LearnerState; changed: boolean } {
+    const genesis = this.makeGenesis();
+    let changed = false;
+    const state = { ...genesis, ...raw } as LearnerState;
+
+    const meta = { ...genesis.meta, ...((raw.meta ?? {}) as Partial<MetaParams>) } as MetaParams;
+    for (const key of Object.keys(genesis.meta) as Array<keyof MetaParams>) {
+      if (!Number.isFinite(raw.meta?.[key])) { meta[key] = genesis.meta[key]; changed = true; }
+    }
+    state.meta = meta;
+
+    if (!Array.isArray(raw.forecastWindow)) { state.forecastWindow = []; changed = true; }
+    if (!raw.geneBeliefs || typeof raw.geneBeliefs !== 'object') { state.geneBeliefs = {}; changed = true; }
+    if (!Array.isArray(raw.directives)) { state.directives = []; changed = true; }
+
+    if (!Number.isFinite(raw.selfScore)) { state.selfScore = genesis.selfScore; changed = true; }
+    if (!Number.isFinite(raw.calibrationError)) { state.calibrationError = genesis.calibrationError; changed = true; }
+    if (!Number.isFinite(raw.brierScore)) { state.brierScore = genesis.brierScore; changed = true; }
+    if (!Number.isFinite(raw.ece)) { state.ece = genesis.ece; changed = true; }
+    if (!Number.isFinite(raw.episode) || raw.episode < 0) { state.episode = genesis.episode; changed = true; }
+    if (typeof raw.ledgerHead !== 'string') { state.ledgerHead = genesis.ledgerHead; changed = true; }
+
+    return { state, changed };
+  }
+}
+
+/** Rebuild the gene set an episode was recorded against. Entries written
+ *  before `input.genes` existed fall back to the current selection, in which
+ *  case the inputHash comparison reports the resulting drift. Genes that have
+ *  since been removed are skipped, so their absence shows up as drift rather
+ *  than silently substituting a different gene. */
+function replayGenes(
+  entry: LedgerEntry,
+  fallback: EvalGene[],
+  byId: Map<string, RegistryGene>,
+): EvalGene[] {
+  const recorded = entry.input?.genes;
+  if (!Array.isArray(recorded) || recorded.length === 0) return fallback;
+  const genes: EvalGene[] = [];
+  for (const rec of recorded) {
+    const g = byId.get(rec.id);
+    if (!g) continue;
+    genes.push({
+      id: g.id,
+      name: g.name,
+      domain: g.domain,
+      code: g.code,
+      vectors: g.testVectors,
+      versionHash: g.versionHash,
+    });
+  }
+  return genes;
 }
 
 /** Normalized Shannon entropy (bits, max 1) of a Beta(a,b) mean. */

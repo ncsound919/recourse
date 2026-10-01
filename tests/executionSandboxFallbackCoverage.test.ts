@@ -155,10 +155,10 @@ describe('executionSandbox — in-process executeTestSuite assert rewriting', ()
     expect(r.passed).toBe(false);
   });
 
-  it('passes the no-assertions fallback when code returns a defined value', () => {
+  it('refuses the no-assertions fallback even when code returns a defined value', () => {
+    // A suite with zero assertions demonstrates nothing — "it ran" is not a pass.
     const r = executeTestSuite('function execute(){ return 42; }', '');
-    expect(r.passed).toBe(true);
-    expect(r.score).toBe(1);
+    expect(r.passed).toBe(false);
   });
 
   it('fails the no-assertions fallback when nothing is callable', () => {

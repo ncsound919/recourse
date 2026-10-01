@@ -67,6 +67,9 @@ export interface CrystallizedTool {
   code: string;
   verified: boolean;
   invariantChecks: InvariantCheck[];
+  /** Sandbox vectors the gene was exercised against. Carried forward so the
+   *  forge reference suite can emit real assertions instead of a typeof check. */
+  testVectors?: unknown[];
   crystallizedAt: string;
   fromThoughtId: string;
 }

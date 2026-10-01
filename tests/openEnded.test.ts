@@ -273,6 +273,9 @@ describe('openEnded cycle engine', () => {
   // A real verifier is injected; for the unit test it rejects only source
   // marked BAD, which lets us exercise every gate without a sandbox.
   const okIfNotBad = (src: string, _suite: string) => ({ passed: !src.includes('BAD'), testDetails: [] });
+  // The mint discrimination gate probes trivial stubs `function f(...a) {...}`;
+  // a real suite rejects them, so the fake verifier must too.
+  const mintVerifyOk = (src: string, suite: string) => (src.includes('(...a)') ? { passed: false, testDetails: [] } : okIfNotBad(src, suite));
 
   function seededArchive(): OpenEndedArchive {
     const archive = new OpenEndedArchive(null, 4);
@@ -303,7 +306,7 @@ describe('openEnded cycle engine', () => {
               },
             ],
           }),
-        verify: okIfNotBad,
+        verify: mintVerifyOk,
       },
       solver: async () => ({ ok: true, source: 'function identityFn(x) { return x; }', detail: 'generated' }),
       verify: okIfNotBad,
@@ -369,7 +372,7 @@ describe('openEnded cycle engine', () => {
             ],
           });
         },
-        verify: okIfNotBad,
+        verify: mintVerifyOk,
       },
       solver: async () => ({ ok: true, source: 'function retryFn(x) { return x; }', detail: 'generated' }),
       verify: okIfNotBad,

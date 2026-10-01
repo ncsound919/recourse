@@ -39,8 +39,9 @@ class MockRegistry implements GeneRegistryStore {
 function genesisState(): LearnerState {
   return {
     schema: 1, episode: 0,
-    meta: { learningRate: 0.2, temperature: 0.5, promotionThreshold: 0.85, decayFactor: 0.5 },
-    geneBeliefs: {}, selfScore: 0.5, calibrationError: 0.5, directives: [], ledgerHead: '00000000',
+    meta: { learningRate: 0.2, temperature: 0.5, promotionThreshold: 0.85, decayFactor: 0.5, calibrationGate: 0.20, minForecasts: 10 },
+    geneBeliefs: {}, selfScore: 0.5, calibrationError: 0.5, brierScore: 0, ece: 0.5,
+    forecastWindow: [], directives: [], ledgerHead: '00000000',
     updatedAt: new Date().toISOString(),
   };
 }
@@ -300,7 +301,17 @@ describe('learner.ts coverage', () => {
         b_amplify: belief('b_amplify', { domain: 'systemic', attempts: 10, weight: 0.9, meanReward: 0.9, lastEpisode: 0 }),
         b_young: belief('b_young', { domain: 'biotech', attempts: 3, weight: 0.5, meanReward: 0.5, lastEpisode: 0 }),
       };
-      seedState({ geneBeliefs: beliefs });
+      // Seed a calibrated state so the amplify gate fires (ECE < 0.20, enough forecasts)
+      const calibratedForecasts = Array.from({ length: 20 }, (_, i) => ({
+        predicted: 0.5,
+        realized: i < 10 ? 0.4 : 0.6,
+      }));
+      seedState({
+        geneBeliefs: beliefs,
+        ece: 0.05,
+        brierScore: 0.01,
+        forecastWindow: calibratedForecasts,
+      });
       const learner = learnerOnSeededState(new MockRegistry([makeGene('g1', 'g1', 'coding')]));
       const report = await learner.runEpisode();
       const kinds = report.directives.map((d) => d.kind);
@@ -312,6 +323,23 @@ describe('learner.ts coverage', () => {
       expect(kinds).toContain('synthesize_template');
       // b_young has attempts<5 -> no directive for it.
       expect(report.directives.some((d) => d.geneName === 'b_young')).toBe(false);
+    });
+
+    it('defers amplify when learner is not calibrated', async () => {
+      const beliefs: Record<string, GeneBelief> = {
+        b_amplify: belief('b_amplify', { domain: 'systemic', attempts: 10, weight: 0.9, meanReward: 0.9, lastEpisode: 0 }),
+      };
+      seedState({
+        geneBeliefs: beliefs,
+        ece: 0.5,
+        brierScore: 0.25,
+        forecastWindow: [],
+      });
+      const learner = learnerOnSeededState(new MockRegistry([makeGene('g1', 'g1', 'coding')]));
+      const report = await learner.runEpisode();
+      const amplifyDirective = report.directives.find((d) => d.geneName === 'b_amplify');
+      expect(amplifyDirective?.kind).toBe('refine');
+      expect(amplifyDirective?.reason).toContain('not calibrated');
     });
 
     it('avoids synthesize_template when a domain is healthy', async () => {
