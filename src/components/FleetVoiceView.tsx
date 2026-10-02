@@ -2,12 +2,13 @@ import { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, Network, Play, RefreshCw, Volume2 } from 'lucide-react';
 import { speakBrief } from '../lib/narration';
 import { stopClonedSpeech } from '../lib/voiceClone';
-import type { FleetOpenHubState, FleetVoiceBriefs, FleetAxiomState } from '../lib/fleetVoice';
+import type { FleetOpenHubState, FleetVoiceBriefs, FleetAxiomState, FleetSlopBenchState } from '../lib/fleetVoice';
 
 interface FleetVoiceResponse {
   success: boolean;
   axiom: FleetAxiomState;
   openhub: FleetOpenHubState;
+  slopbench?: FleetSlopBenchState;
   briefs: FleetVoiceBriefs;
 }
 
@@ -165,6 +166,30 @@ export function FleetVoiceView() {
             <Play className="w-3.5 h-3.5" /> Speak brief
           </button>
           <p className="text-xs text-ink-300 leading-relaxed">{data?.briefs.openhub ?? '-'}</p>
+        </div>
+      </div>
+
+      {/* SlopCodeBench */}
+      <div className="rounded-lg border border-ink-800 bg-ink-950/40 p-4 space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-ink-200 font-semibold text-sm">SlopCodeBench</span>
+          {data?.slopbench && reach(data.slopbench.available, data.slopbench.available ? 'READY' : 'UNAVAILABLE')}
+          {data?.slopbench && (
+            <span className="px-2 py-1 rounded border border-ink-700 text-ink-400 text-[11px]">
+              RUNS {data.slopbench.runCount}
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-start gap-2">
+          <button
+            onClick={() => play(data?.briefs.slopbench ?? '')}
+            disabled={!data?.briefs.slopbench}
+            className="px-3 py-1.5 rounded bg-accent-800 hover:bg-accent-700 disabled:opacity-40 text-white font-semibold flex items-center gap-2 shrink-0"
+          >
+            <Play className="w-3.5 h-3.5" /> Speak brief
+          </button>
+          <p className="text-xs text-ink-300 leading-relaxed">{data?.briefs.slopbench ?? '-'}</p>
         </div>
       </div>
 

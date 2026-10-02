@@ -4,9 +4,9 @@
  * publishes each domain to Overlay Global Lens through the bridge.
  *
  * The enhancement path:
- *   corpus scan (bb_tech_core / HempForge / ECOS / sports_science /
- *   golf_surgery_core / oncology) → artifacts → brief body + paper attachment
- *   → POST /api/publish (Global Lens).
+ *   corpus scan (fleet tools: recourse / openhub / axiom / skilltech /
+ *   research tooling / docs+skills) → artifacts → brief body + paper
+ *   attachment → POST /api/publish (Global Lens).
  *
  * Honesty contract (mirrors the rest of Recourse):
  *   - Every figure comes from real disk reads (corpus artifacts), real
@@ -45,55 +45,61 @@ export interface PublishDomainSpec {
 
 export const PUBLISH_DOMAINS: PublishDomainSpec[] = [
   {
-    projects: ['bb-tech', 'bb_tech_core'],
-    label: 'BB-Tech (Basketball → Biotech)',
-    category: 'basketball-biotech',
+    // Merge fleet: the no-LLM kernel + its sibling tools.
+    projects: ['recourse', 'openhub', 'axiom', 'overlay-cheetah', 'deepseek-harness', 'dev-brain', 'promote-gate', 'localjev', 'v5-tools', 'workers'],
+    label: 'Fleet Engineering (Recourse / OpenHub / Axiom / Cheetah / DSH)',
+    category: 'fleet-engineering',
+    pillar: 'engineering',
+    topics: [],
+  },
+  {
+    // Skilltech MCP suite: gateway, generators, deciders, gates.
+    projects: ['skilltech'],
+    label: 'Skilltech MCP Suite',
+    category: 'skilltech-mcp',
+    pillar: 'engineering',
+    topics: [],
+  },
+  {
+    // Research + evaluation tooling.
+    projects: ['omniresearch', 'the-deep', 'slop-code-bench'],
+    label: 'Research & Benchmark Tooling (OmniResearch / The Deep / Slop-Code-Bench)',
+    category: 'research-tooling',
     pillar: 'science',
-    topics: ['basketball', 'biotech_translation'],
+    topics: [],
   },
   {
-    projects: ['hempforge', 'hemp-os'],
-    label: 'HempForge',
-    category: 'hemp-research',
-    pillar: 'science',
-    topics: ['hemp', 'pharma'],
+    // Fleet docs, plans, and the skills library.
+    projects: ['uplift-docs', 'uplift-plans', 'business-skills', 'business-plans'],
+    label: 'Fleet Knowledge (Docs / Plans / Skills)',
+    category: 'fleet-knowledge',
+    pillar: 'engineering',
+    topics: [],
   },
   {
-    projects: ['environmental', 'ecos'],
-    label: 'Environmental Solutions (ECOS)',
-    category: 'environmental-science',
-    pillar: 'environment',
-    topics: ['environment'],
-  },
-  {
-    projects: ['sports-science', 'sports_science'],
-    label: 'Sports Science',
-    category: 'sports-science',
-    pillar: 'science',
-    topics: ['sports'],
-  },
-  {
-    projects: ['golf-surgery', 'golf_surgery_core'],
-    label: 'Golf Surgery',
-    category: 'golf-surgery',
-    pillar: 'science',
-    topics: ['golf'],
-  },
-  {
-    projects: ['overlay-oncology', 'cancer-pdfs', 'cancer-datasets'],
-    label: 'Overlay Oncology',
-    category: 'cancer-research',
-    pillar: 'science',
-    topics: ['oncology', 'clinical'],
-  },
-  {
-    // Music Therapy: no corpus root owns it — the findings bridge
+    // Music Therapy: no corpus root owns it - the findings bridge
     // (musicTherapyFindings) is the data source, matched by topic terms.
     projects: [],
     label: 'Music Therapy',
     category: 'music-therapy',
     pillar: 'science',
     topics: ['music', 'tuning', 'stimulus', 'biomarker', 'cortisol', 'hrv'],
+  },
+  {
+    // HempForge: real corpus artifacts (hempforge / hemp-os research docs).
+    projects: ['hempforge', 'hemp-os'],
+    label: 'HempForge Research',
+    category: 'hemp-research',
+    pillar: 'research',
+    topics: ['hemp', 'pharma'],
+  },
+  {
+    // Overlay Oncology: biosim/ODE dose-response findings with real artifacts.
+    projects: ['overlay-oncology'],
+    label: 'Overlay Oncology',
+    category: 'cancer-research',
+    pillar: 'science',
+    topics: ['oncology'],
   },
 ];
 

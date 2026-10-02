@@ -28,6 +28,14 @@ import {
   invoiceRendererPlugin,
   saasEconomicsPlugin
 } from './templatePlugins/webRevenue';
+import { v5ManifestPlugin } from './templatePlugins/v5Manifest';
+import {
+  v5DelayAdapterPlugin,
+  v5HoldAdapterPlugin,
+  v5DecimateAdapterPlugin,
+  v5InterpolateAdapterPlugin,
+  v5BufferAdapterPlugin
+} from './templatePlugins/v5Adapters';
 
 export type FullComponentTemplate = TemplatePlugin;
 
@@ -1064,6 +1072,14 @@ registerComponentTemplatePlugin(deterministicResearcherPlugin);
 registerComponentTemplatePlugin(webLandingPagePlugin);
 registerComponentTemplatePlugin(invoiceRendererPlugin);
 registerComponentTemplatePlugin(saasEconomicsPlugin);
+// NextGenCoder v5 manifest-governed component template.
+registerComponentTemplatePlugin(v5ManifestPlugin);
+// NextGenCoder v5 adapter basis: Delay, Hold, Decimate, Interpolate, Buffer.
+registerComponentTemplatePlugin(v5DelayAdapterPlugin);
+registerComponentTemplatePlugin(v5HoldAdapterPlugin);
+registerComponentTemplatePlugin(v5DecimateAdapterPlugin);
+registerComponentTemplatePlugin(v5InterpolateAdapterPlugin);
+registerComponentTemplatePlugin(v5BufferAdapterPlugin);
 
 // =========================================================================
 // HELPER FUNCTIONS FOR COMPONENT BUILDING & LEARNING INTEGRATION

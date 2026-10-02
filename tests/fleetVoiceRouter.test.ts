@@ -29,6 +29,7 @@ function makeDeps(overrides: Partial<FleetVoiceRouterDeps> = {}): FleetVoiceRout
       state: { id: 'loop-3', status: 'running', iteration: 2, goal: 'repair the parser' },
     })),
     audit: vi.fn(() => audit),
+    slopbench: vi.fn(async () => ({ available: true, detail: 'ready', agent: 'claude_code', model: 'anthropic/opus-4.5', runCount: 3, lastRunAt: '2026-01-01T00:00:00Z' })),
     ...overrides,
   };
 }

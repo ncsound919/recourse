@@ -12,6 +12,7 @@ import { opencodePipeline } from './opencodePipeline.js';
 import { deepseekPipeline } from './deepseekPipeline.js';
 import { axiomPipeline } from './axiomPipeline.js';
 import { settlementPipeline } from './settlementPipeline.js';
+import { slopCodeBenchPipeline } from './slopCodeBenchPipeline.js';
 
 const _registry = new Map<PipelineId, CodingPipeline>();
 
@@ -56,6 +57,7 @@ const DEFAULT_PIPELINES: CodingPipeline[] = [
   deepseekPipeline,
   axiomPipeline,
   settlementPipeline,
+  slopCodeBenchPipeline,
 ];
 
 export function installDefaultPipelines(): void {

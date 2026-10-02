@@ -34,6 +34,8 @@ export { GhidraView } from './GhidraView';
 export { SettingsView } from './SettingsView';
 export { VoiceCloneView } from './VoiceCloneView';
 export { FleetVoiceView } from './FleetVoiceView';
+export { SlopBenchView } from './SlopBenchView';
+export { LlamaView } from './LlamaView';
 
 export { GamepadIndicator } from './GamepadIndicator';
 export { GamepadVisualizer } from './GamepadVisualizer';

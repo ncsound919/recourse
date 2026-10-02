@@ -62,6 +62,8 @@ export interface ReadoutRouterDeps {
   failureLedger: FailureEntry[];
   outcomeLedger: { reward(n: number): number | null | undefined };
   selfUseStatus(): Record<string, unknown>;
+  /** Value ledger snapshot: real invocations, consumptions, usefulness, dead weight. */
+  valueSnapshot?(): Record<string, unknown>;
   systemSnapshotsRef(): SystemSnapshot[];
   systemBaselineRef(): SystemSnapshot | null;
   legacyDigestRef(): Record<string, unknown> | null;
@@ -279,6 +281,25 @@ export function createReadoutRouter(deps: ReadoutRouterDeps): Router {
 
   router.get('/selfuse', (req, res) => {
     res.json({ success: true, selfuse: deps.selfUseStatus() });
+  });
+
+  /**
+   * VALUE LEDGER — which tools are actually doing anything.
+   *
+   * Reports real invocations (a caller asked), consumptions (something used
+   * the result), and the resulting usefulness. Loop liveness and the
+   * self-use differential watchdog are deliberately EXCLUDED: they are
+   * verification, not use. A tool that runs constantly but is never consumed
+   * scores 0 and shows up under `deadWeight` — this is the metric that was
+   * missing while the registry accumulated 1,128 near-duplicate tools.
+   */
+  router.get('/value', (req, res) => {
+    // Optional dep: report honestly instead of throwing when a host omits it.
+    const snapshot = deps.valueSnapshot?.();
+    if (!snapshot) {
+      return res.status(503).json({ success: false, error: 'value snapshot unavailable on this host' });
+    }
+    res.json({ success: true, ...snapshot });
   });
 
   // System snapshot history (every materially distinct system state).

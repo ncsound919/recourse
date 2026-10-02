@@ -11,6 +11,7 @@ import { Router } from 'express';
 import { listComponentTemplates, getComponentTemplate, buildComponentFromTemplate } from '../lib/componentTemplates.js';
 import { executeTestSuite } from '../lib/executionSandbox.js';
 import { assessSourceSubstance } from '../lib/honestyMetrics.js';
+import { validateV5Manifest, validateIndexLockEntry, validateAdapterManifest, canonicalize, hashManifest } from '../lib/v5manifest.js';
 import {
   writeSelfHostedTool,
   verifySelfHostedEntry,
@@ -277,6 +278,61 @@ export function createTemplatesRouter(deps: TemplatesRouterDeps): Router {
       });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // Validate a v5 manifest against the G0 schema (canonicalize, hash, reject unknown fields)
+  router.post('/v5/validate', (req, res) => {
+    try {
+      const result = validateV5Manifest(req.body);
+      res.json({
+        success: result.valid,
+        errors: result.errors,
+        warnings: result.warnings,
+        hash: result.hash,
+        canonical: result.canonical
+      });
+    } catch (err: any) {
+      res.status(400).json({ success: false, error: err.message });
+    }
+  });
+
+  // Canonicalize and hash a v5 manifest (G0 helper)
+  router.post('/v5/canonicalize', (req, res) => {
+    try {
+      const canonical = canonicalize(req.body);
+      const hash = hashManifest(req.body);
+      res.json({ success: true, canonical, hash });
+    } catch (err: any) {
+      res.status(400).json({ success: false, error: err.message });
+    }
+  });
+
+  // Validate an index.lock entry
+  router.post('/v5/lock/validate', (req, res) => {
+    try {
+      const result = validateIndexLockEntry(req.body);
+      res.json({
+        success: result.valid,
+        errors: result.errors,
+        entry: result.entry
+      });
+    } catch (err: any) {
+      res.status(400).json({ success: false, error: err.message });
+    }
+  });
+
+  // Validate an adapter manifest
+  router.post('/v5/adapter/validate', (req, res) => {
+    try {
+      const result = validateAdapterManifest(req.body);
+      res.json({
+        success: result.valid,
+        errors: result.errors,
+        entry: result.entry
+      });
+    } catch (err: any) {
+      res.status(400).json({ success: false, error: err.message });
     }
   });
 

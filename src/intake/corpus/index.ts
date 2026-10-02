@@ -42,7 +42,7 @@ export function corpusDigest(snapshot: CorpusSnapshot): string {
   L.push('');
   if (!snapshot.roots.length) { L.push('- No corpus roots configured.'); return L.join('\n'); }
   if (snapshot.lastScanAt == null) {
-    L.push('- Not scanned yet. Trigger a scan to ingest the sibling projects.');
+    L.push('- Not scanned yet. Trigger a scan to ingest the configured fleet roots.');
     L.push('- Roots: ' + snapshot.roots.map((r) => r.project).join(', '));
     return L.join('\n');
   }
@@ -99,67 +99,94 @@ export function artifactsToSignals(
 }
 
 export const DEFAULT_CORPUS_ROOTS: CorpusRoot[] = [
+  // --- The merge fleet (the tools this kernel runs with) ---------------------
+  // Recourse itself: no-LLM kernel docs, plans, specs.
   {
-    project: 'hempforge',
-    root: 'C:\\Users\\User\\Downloads\\Uplift\\02_Pillars\\Overlay Science\\Biotech\\HempForge-main',
+    project: 'recourse',
+    root: 'C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse',
   },
   {
-    project: 'hemp-os',
-    root: 'C:\\Users\\User\\Downloads\\Uplift\\02_Pillars\\Overlay Science\\Biotech\\Hemp-OS-main',
-  },
-  // BlackMind: biotech AI Studio demo — its deterministic bioinformatics cores
-  // (sequence analyzer, CRISPR designer) and scientific docs feed grounding.
-  {
-    project: 'blackmind',
-    root: 'C:\\Users\\User\\Downloads\\Uplift\\02_Pillars\\Overlay Science\\Biotech\\BlackMind-main',
-  },
-  // BB-Tech: basketball → biotech translation core (real domain knowledge:
-  // knowledge bank CSVs, translation engine, scoring/mapping JSON).
-  {
-    project: 'bb-tech',
-    root: 'C:\\Users\\User\\Downloads\\Uplift\\02_Pillars\\Overlay Science\\Shared\\bb_tech_core',
+    project: 'openhub',
+    root: 'C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\openhub',
   },
   {
-    project: 'sports-science',
-    root: 'C:\\Users\\User\\Downloads\\Uplift\\02_Pillars\\Overlay Science\\Sports\\sports_science',
+    project: 'axiom',
+    root: 'C:\\Users\\User\\Downloads\\Uplift\\06_Resources\\Axiom Agent',
+  },
+  // Overlay Cheetah bridge.
+  {
+    project: 'overlay-cheetah',
+    root: 'C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\cheetah-bridge',
+  },
+  // DeepSeek Harness (DSH) integration.
+  {
+    project: 'deepseek-harness',
+    root: 'C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\dsh-recourse',
+  },
+  // Skilltech MCP suite: BigBack, Middle-Man, OG-Glass, Business-Logic-MCP,
+  // supabase-mcp, math-x, Bobby-Breakdown, The-Beta-Team, Truth Chain.
+  {
+    project: 'skilltech',
+    root: 'C:\\Users\\User\\Downloads\\Uplift\\06_Resources\\Skilltech',
+  },
+  // --- Supporting fleet tools ------------------------------------------------
+  {
+    project: 'dev-brain',
+    root: 'C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\Dev-Brain',
   },
   {
-    project: 'golf-surgery',
-    root: 'C:\\Users\\User\\Downloads\\Uplift\\02_Pillars\\Overlay Science\\Shared\\golf_surgery_core',
+    project: 'promote-gate',
+    root: 'C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\promote-gate',
   },
-  // Environmental solutions (ECOS): climate/sustainability research + docs.
+  // LocalJEV: deterministic decision engine the v5 deciders call.
   {
-    project: 'environmental',
-    root: 'C:\\Users\\User\\Downloads\\Uplift\\01_Platforms\\ECOS-Environmental-Initiatives',
+    project: 'localjev',
+    root: 'C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\localjev',
   },
+  // cvc5/egglog solver bundle for the v5 kernel.
   {
-    project: 'overlay-oncology',
-    root: 'C:\\Users\\User\\Downloads\\Uplift\\02_Pillars\\Overlay Science\\Overlay Oncology',
-  },
-  {
-    project: 'cancer-pdfs',
-    root: 'C:\\Users\\User\\Desktop\\cancer research pdfs',
+    project: 'v5-tools',
+    root: 'C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\v5-tools',
   },
   {
-    project: 'cancer-datasets',
-    root: 'C:\\Users\\User\\Desktop\\Datasets',
-  },
-  // The Overlay Science research + docs libraries: real papers, schemas, and
-  // engineering docs the science loops should never run out of grounding for.
-  {
-    project: 'overlay-science-research',
-    root: 'C:\\Users\\User\\Downloads\\Uplift\\02_Pillars\\Overlay Science\\research',
+    project: 'slop-code-bench',
+    root: 'C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\slop-code-bench',
   },
   {
-    project: 'overlay-science-docs',
-    root: 'C:\\Users\\User\\Downloads\\Uplift\\02_Pillars\\Overlay Science\\docs',
+    project: 'omniresearch',
+    root: 'C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\omniresearch 2',
   },
-  // Truck Buddy: real logistics methods + tests (load boards, compliance,
-  // dispatch prediction, mechanic budget/search). Source for the logistics
-  // synergy sector; only pure/tested functions are indexed as methods.
   {
+    project: 'the-deep',
+    root: 'C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\The Deep',
+  },
+  {
+    project: 'workers',
+    root: 'C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\workers',
+  },
+  // --- Fleet docs / plans / skills ------------------------------------------
+  {
+    project: 'uplift-docs',
+    root: 'C:\\Users\\User\\Downloads\\Uplift\\docs',
+  },
+  {
+    project: 'uplift-plans',
+    root: 'C:\\Users\\User\\Downloads\\Uplift\\plans',
+  },
+  {
+    project: 'business-skills',
+    root: 'C:\\Users\\User\\Downloads\\BUSINESS\\SKILLS',
+  },
+  {
+    project: 'business-plans',
+    root: 'C:\\Users\\User\\Downloads\\BUSINESS\\plans',
+  },
+  {
+    // Truck Buddy: real project at BUSINESS\TRUCKING\Truck Buddy (the older
+    // root pointed at a path that no longer exists, so it was dropped as
+    // dead — but the project itself is alive under TRUCKING\).
     project: 'truck-buddy',
-    root: 'C:\\Users\\User\\Downloads\\Truck Buddy\\web',
+    root: 'C:\\Users\\User\\Downloads\\BUSINESS\\TRUCKING\\Truck Buddy',
   },
 ];
 

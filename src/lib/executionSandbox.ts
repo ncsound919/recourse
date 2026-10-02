@@ -283,6 +283,15 @@ export function buildSuiteStatements(
         continue;
       }
       if (ch === '"' || ch === "'" || ch === '`') { quote = ch; cur += ch; i++; continue; }
+      // Line comment: skip to end of line WITHOUT accumulating. If the
+      // comment text stayed in `cur`, the next statement would merge into a
+      // chunk starting with '//' and push() would drop the CODE along with
+      // the comment (e.g. `// setup\nconst inst = new X();` never defined
+      // `inst`, aborting the whole suite with "inst is not defined").
+      if (ch === '/' && raw[i + 1] === '/') {
+        while (i < raw.length && raw[i] !== '\n') i++;
+        continue;
+      }
       if (ch === '(' || ch === '[' || ch === '{') { depth++; cur += ch; i++; continue; }
       if (ch === ')' || ch === ']' || ch === '}') { depth--; cur += ch; i++; continue; }
       if (ch === ';' && depth === 0) { push(); i++; continue; }
@@ -355,7 +364,12 @@ export function buildSuiteStatements(
     return null;
   }
 
-  const rawLines = splitTestStatements(testSuiteCode || '');
+  // Suites are authored in TS too (`let lastOut: any = null`) — the sandbox
+  // body is plain JS, so transpile the suite with the same pipeline as the
+  // source before splitting. Unparseable suites pass through unchanged, so
+  // the sandbox still surfaces the real syntax error instead of hiding it.
+  const cleanedSuite = prepareExecutableCode(testSuiteCode || '');
+  const rawLines = splitTestStatements(cleanedSuite);
   const statements: string[] = [];
   for (const line of rawLines) {
     const rewritten = rewriteAssertLine(line);

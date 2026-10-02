@@ -241,13 +241,15 @@ describe.skipIf(!avail)('isolated-vm test suite execution', () => {
   it('passes an assert call with a single argument', () => {
     const r = executeTestSuiteInIsolate(src, 'assert(add(1,1) === 2)');
     expect(r.passed).toBe(true);
-    expect(r.testDetails).toEqual(['[PASS] assert(add(1,1) === 2)']);
+    // The suite is transpiled before splitting (suites may contain TS), so
+    // esbuild normalizes spacing in the statement used as the label.
+    expect(r.testDetails).toEqual(['[PASS] assert(add(1, 1) === 2)']);
   });
 
   it('passes an assert call with a message label', () => {
     const r = executeTestSuiteInIsolate(src, `assert(add(2,3) === 5, 'two plus three')`);
     expect(r.passed).toBe(true);
-    expect(r.testDetails).toEqual(["[PASS] assert(add(2,3) === 5, 'two plus three');"]);
+    expect(r.testDetails).toEqual(['[PASS] assert(add(2, 3) === 5, "two plus three");']);
   });
 
   it('passes node-style equal', () => {
@@ -284,8 +286,10 @@ describe.skipIf(!avail)('isolated-vm test suite execution', () => {
     const r = executeTestSuiteInIsolate(src, 'assert.ok(add(1,2) === 3)');
     expect(r.available).toBe(true);
     // The shim binds assert.ok, so the body executes instead of aborting with
-    // "assert is not defined"; with no __assert records it is still not a pass.
-    expect(r.passed).toBe(false);
+    // "assert is not defined"; it also records through the runner's __assert,
+    // so a genuinely passing single-arg assertion counts as a real pass (it
+    // used to run but stay uncounted, forcing passed=false).
+    expect(r.passed).toBe(true);
     expect(r.testDetails.some((d) => d.includes('aborted'))).toBe(false);
   });
 
@@ -315,10 +319,14 @@ describe.skipIf(!avail)('isolated-vm test suite execution', () => {
     expect(r.testDetails).toHaveLength(1);
   });
 
-  it('swallows a leading comment line with its following statement', () => {
+  it('keeps the statement that follows a leading comment', () => {
+    // Comments used to accumulate into the next statement's chunk, which the
+    // splitter dropped wholesale (chunk starts with '//') — the assert after
+    // `// foo` vanished and the suite scored 0 with zero records. Comments are
+    // now skipped by the scanner, so the code survives and runs.
     const r = executeTestSuiteInIsolate(src, '// foo\nassert add(1,1) === 2;');
-    expect(r.passed).toBe(false);
-    expect(r.score).toBe(0);
+    expect(r.passed).toBe(true);
+    expect(r.score).toBe(1);
   });
 
   it('splits comma-joined assert calls at the top level', () => {

@@ -20,13 +20,13 @@ export interface DomainSpec {
 }
 
 export const DEFAULT_DOMAINS: DomainSpec[] = [
-  { id: 'health_oncology', label: 'Health & oncology / biotech', toolDomains: ['biotech'], corpusProjects: ['overlay-oncology', 'blackmind', 'hempforge', 'cancer-pdfs'], translationEngines: [], verified: true },
+  { id: 'health_oncology', label: 'Health & oncology / biotech', toolDomains: ['biotech'], corpusProjects: ['recourse', 'omniresearch', 'the-deep'], translationEngines: [], verified: true },
   { id: 'mathematics', label: 'Mathematics', toolDomains: ['math'], corpusProjects: [], translationEngines: [], verified: true },
   { id: 'cybersecurity', label: 'Cybersecurity', toolDomains: ['cyber_defense'], corpusProjects: [], translationEngines: [], verified: true },
   { id: 'neuro_music', label: 'Neuroscience / music therapy / auditory', toolDomains: ['neuro_symbolic'], corpusProjects: [], translationEngines: [], verified: true },
   { id: 'music', label: 'Music / composition (SoundLab)', toolDomains: ['coding'], corpusProjects: [], translationEngines: [], verified: true },
   { id: 'aging', label: 'Aging / geroscience / longevity', toolDomains: ['biotech'], corpusProjects: [], translationEngines: [], seriesTerms: ['senescence', 'rapamycin', 'metformin', 'longevity', 'telomere'], verified: true },
-  { id: 'sports', label: 'Sports (basketball, golf)', toolDomains: ['biotech'], corpusProjects: ['bb-tech', 'sports-science', 'golf-surgery'], translationEngines: ['bbtech', 'golf-surgery'], verified: true },
+  { id: 'sports', label: 'Sports (basketball, golf)', toolDomains: ['biotech'], corpusProjects: ['business-skills'], translationEngines: ['bbtech', 'golf-surgery'], verified: true },
   { id: 'logistics', label: 'Logistics & freight', toolDomains: ['systemic', 'coding'], corpusProjects: ['truck-buddy'], translationEngines: [], verified: true },
 ];
 

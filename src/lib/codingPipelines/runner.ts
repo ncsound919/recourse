@@ -14,7 +14,7 @@ import { spawnSync } from 'node:child_process';
 import type { PipelineId, PipelineSpec, PipelineStatus, PipelineRunResult } from './types.js';
 import { getPipeline, installDefaultPipelines, listPipelines } from './registry.js';
 import { snapshotDir, diffSnapshots } from './snapshot.js';
-import { scorePipelineRun, type PipelineScore } from './scorer.js';
+import { SCORING_VERSION, scorePipelineRun, type PipelineScore } from './scorer.js';
 import { appendPipelineBenchmark, type PipelineBenchmarkRecord } from './ledger.js';
 
 export interface BenchmarkTarget {
@@ -129,6 +129,44 @@ export async function runPipelineBenchmark(
   if (!pipeline) throw new Error(`unknown pipeline: ${id}`);
 
   const startedAt = Date.now();
+
+  // Standalone pipelines own their inputs (Docker problems, their own repo) and
+  // never touch the worktree, so scoring a worktree diff would be meaningless
+  // (always empty, score 0). Report that honestly instead of fabricating a run.
+  if (pipeline.spec.mode === 'standalone') {
+    const status = await pipeline.status();
+    return {
+      pipeline: pipeline.spec,
+      status,
+      run: {
+        ok: false,
+        id: pipeline.spec.id,
+        stdout: '',
+        stderr: '',
+        durationMs: Date.now() - startedAt,
+        error: `${pipeline.spec.name} is a standalone pipeline and cannot run against a worktree; use /api/recourse/slopbench/run instead.`,
+      },
+      // Built directly rather than via scorePipelineRun: that would resolve and
+      // execute the target repo's test command as a side effect, and there is no
+      // worktree to score anyway.
+      score: {
+        scoringVersion: SCORING_VERSION,
+        measured: false,
+        testsPassed: null,
+        testExitCode: null,
+        testDurationMs: 0,
+        testsTimedOut: false,
+        diff: { added: [], removed: [], modified: [], changedFiles: [], linesAdded: 0, linesRemoved: 0 },
+        regressionRisk: 'MINIMAL',
+        score: 0,
+        rubric: { correctness: 0, minimality: 0, focus: 0, speed: 0, total: 0 },
+        reasons: ['standalone pipeline: not run against a worktree'],
+      },
+      workdir: '',
+      startedAt,
+    };
+  }
+
   const workdir = prepareWorktree(target.repoDir, target.worktreeRoot);
   // Make `npm test` equal the task's verifier so internal-gated harnesses
   // (axiom, settlement) and the scorer agree on the success criterion.
@@ -188,7 +226,12 @@ export async function runPipelineBenchmarks(
 
 export async function runAllPipelineBenchmarks(target: BenchmarkTarget): Promise<PipelineBenchmarkResult[]> {
   installDefaultPipelines();
-  return runPipelineBenchmarks(listPipelines().map((p) => p.spec.id), target);
+  // Standalone pipelines are not driven by the worktree harness; running them
+  // here would log a meaningless 0-score record for every benchmark.
+  const ids = listPipelines()
+    .filter((p) => p.spec.mode !== 'standalone')
+    .map((p) => p.spec.id);
+  return runPipelineBenchmarks(ids, target);
 }
 
 /** Persist results to the hash-chained pipeline ledger. Returns the records. */

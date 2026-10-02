@@ -18,6 +18,7 @@ import {
   type FleetAxiomLoop,
   type FleetAxiomState,
   type FleetOpenHubState,
+  type FleetSlopBenchState,
 } from '../lib/fleetVoice.js';
 
 export interface FleetVoiceRouterDeps {
@@ -27,6 +28,8 @@ export interface FleetVoiceRouterDeps {
   axiomLatest: () => Promise<{ ok: boolean; state?: Record<string, unknown>; error?: string }>;
   /** Latest audit snapshot written by OpenHub; null when none is recorded. */
   audit: () => ReporterAuditFact | null;
+  /** SlopCodeBench availability and recent run info. */
+  slopbench: () => Promise<FleetSlopBenchState>;
 }
 
 /** Shape Axiom's untyped loop state into the fields we are willing to speak. */
@@ -85,11 +88,19 @@ export function createFleetVoiceRouter(deps: FleetVoiceRouterDeps): Router {
       openhub = { recorded: false, audit: null };
     }
 
+    let slopbench: FleetSlopBenchState = { available: false, detail: 'not probed', agent: '', model: '', runCount: 0, lastRunAt: null };
+    try {
+      slopbench = await deps.slopbench();
+    } catch {
+      slopbench = { available: false, detail: 'probe failed', agent: '', model: '', runCount: 0, lastRunAt: null };
+    }
+
     res.json({
       success: true,
       axiom,
       openhub,
-      briefs: buildFleetBriefs({ axiom, openhub }),
+      slopbench,
+      briefs: buildFleetBriefs({ axiom, openhub, slopbench }),
     });
   });
 

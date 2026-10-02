@@ -36,6 +36,8 @@ import {
   splitSuiteForHoldout,
 } from './forgeQuality.js';
 import type { ForgeQualityReport, ToolDoc } from './forgeQuality.js';
+import type { GroundingBundle } from './researchGrounding/types.js';
+import { groundingSection } from './researchGrounding/prompt.js';
 
 export interface ForgeSpec {
   id: string;
@@ -55,6 +57,16 @@ export interface ForgeSpec {
   reference?: string;
   /** Optional representative argument vectors for differential/robustness probes. */
   vectors?: unknown[];
+  /**
+   * External research gathered for this spec, injected into the generation
+   * prompt as fenced, trust-labelled excerpts.
+   *
+   * Deliberately alongside `refSuite`, not inside it. The suite is the judge of
+   * whether the code is correct; evidence is evidence about whether the problem
+   * was worth solving. They answer different questions and only the suite can
+   * gate a promotion.
+   */
+  grounding?: GroundingBundle;
 }
 
 export interface ForgeFailure {
@@ -112,6 +124,8 @@ export interface ForgeAttemptOutcome {
   doc?: ToolDoc;
   /** How many candidates passed the reference suite (best-of-N selection). */
   candidatesPassed?: number;
+  /** The research this candidate was generated against, for the ledger. */
+  grounding?: GroundingBundle;
 }
 
 // ---------------------------------------------------------------------------
@@ -680,8 +694,15 @@ export async function generateForgeSource(spec: ForgeSpec, builder?: ForgeBuilde
   const temperature = typeof builder?.temperature === 'number' ? builder.temperature : 0.1;
   const hint = builder?.inspirationHint?.trim();
   const feedback = builder?.feedback?.trim();
+  // Placed after the contract and before the inspiration hint: the model reads
+  // what to build, then what the literature says is a known way to build it, then
+  // what this system already tried. Research in front of the recalled solutions
+  // keeps a prior internal attempt from anchoring the model when the two
+  // disagree.
+  const grounding = spec.grounding ? `\n\n${groundingSection(spec.grounding)}` : '';
   const user =
     `Write ${isClass ? 'a class' : ''} ${spec.name}.\n\nContract:\n${spec.prompt}` +
+    grounding +
     `${hint ? `\n\n${hint}` : ''}` +
     `${feedback ? `\n\nYour previous attempt was rejected. Fix it using this real verification output:\n${feedback}` : ''}` +
     `\n\nBefore writing, silently list the edge cases the contract implies and make sure each is handled. Return only the source.`;
@@ -772,6 +793,7 @@ function successOutcome(
     quality: best.quality,
     doc: extractToolDoc(best.source, spec.name),
     candidatesPassed,
+    ...(spec.grounding ? { grounding: spec.grounding } : {}),
   };
 }
 

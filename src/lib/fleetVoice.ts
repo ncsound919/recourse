@@ -42,14 +42,25 @@ export interface FleetOpenHubState {
   audit: ReporterAuditFact | null;
 }
 
+export interface FleetSlopBenchState {
+  available: boolean;
+  detail: string;
+  agent: string;
+  model: string;
+  runCount: number;
+  lastRunAt: string | null;
+}
+
 export interface FleetVoiceState {
   axiom: FleetAxiomState;
   openhub: FleetOpenHubState;
+  slopbench: FleetSlopBenchState;
 }
 
 export interface FleetVoiceBriefs {
   axiom: string;
   openhub: string;
+  slopbench: string;
 }
 
 export type FleetEventKind = 'critical' | 'major' | 'minor' | 'milestone';
@@ -100,8 +111,19 @@ export function summarizeOpenHub(state: FleetOpenHubState): string {
   return parts.join(' ');
 }
 
+/** One spoken sentence describing SlopCodeBench availability and recent runs. */
+export function summarizeSlopBench(state: FleetSlopBenchState): string {
+  if (!state.available) {
+    return `SlopCodeBench is unavailable: ${state.detail}.`;
+  }
+  const runs = state.runCount > 0
+    ? `${state.runCount} run${state.runCount === 1 ? '' : 's'} completed${state.lastRunAt ? `, last at ${state.lastRunAt}` : ''}.`
+    : 'No runs completed yet.';
+  return `SlopCodeBench is ready with agent ${state.agent} on model ${state.model}. ${runs}`;
+}
+
 export function buildFleetBriefs(state: FleetVoiceState): FleetVoiceBriefs {
-  return { axiom: summarizeAxiom(state.axiom), openhub: summarizeOpenHub(state.openhub) };
+  return { axiom: summarizeAxiom(state.axiom), openhub: summarizeOpenHub(state.openhub), slopbench: summarizeSlopBench(state.slopbench) };
 }
 
 // --- transition detection -------------------------------------------------
@@ -117,6 +139,8 @@ export interface FleetVoiceSnapshot {
   auditScore: number | null;
   auditFindingsTotal: number | null;
   auditFixedFindings: number | null;
+  slopbenchAvailable: boolean;
+  slopbenchRunCount: number;
 }
 
 export function takeFleetSnapshot(state: FleetVoiceState): FleetVoiceSnapshot {
@@ -132,6 +156,8 @@ export function takeFleetSnapshot(state: FleetVoiceState): FleetVoiceSnapshot {
     auditScore: audit?.score ?? null,
     auditFindingsTotal: audit?.findings.total ?? null,
     auditFixedFindings: audit?.findings.fixed ?? null,
+    slopbenchAvailable: state.slopbench.available,
+    slopbenchRunCount: state.slopbench.runCount,
   };
 }
 
@@ -198,6 +224,19 @@ export function diffFleetVoice(prev: FleetVoiceSnapshot, next: FleetVoiceSnapsho
   ) {
     const fixed = next.auditFixedFindings - prev.auditFixedFindings;
     events.push({ kind: 'major', text: `OpenHub fixed ${fixed} finding${fixed === 1 ? '' : 's'}.` });
+  }
+
+  if (next.slopbenchAvailable && !prev.slopbenchAvailable) {
+    events.push({ kind: 'major', text: 'SlopCodeBench is now available.' });
+  } else if (!next.slopbenchAvailable && prev.slopbenchAvailable) {
+    events.push({ kind: 'critical', text: 'SlopCodeBench became unavailable.' });
+  }
+
+  if (
+    next.slopbenchRunCount > prev.slopbenchRunCount
+  ) {
+    const newRuns = next.slopbenchRunCount - prev.slopbenchRunCount;
+    events.push({ kind: 'minor', text: `SlopCodeBench completed ${newRuns} new run${newRuns === 1 ? '' : 's'}.` });
   }
 
   return events;

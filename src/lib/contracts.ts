@@ -358,10 +358,10 @@ export const biotechClaimExtra = z
 export type BiotechClaimExtra = z.infer<typeof biotechClaimExtra>;
 
 // --- Coding pipeline benchmark (head-to-head harness comparison) -----------
-export const pipelineIds = z.enum(['opencode', 'deepseek', 'axiom', 'settlement']);
+export const pipelineIds = z.enum(['opencode', 'deepseek', 'axiom', 'settlement', 'slopcodebench']);
 
 export const pipelineBenchmarkReq = z.object({
-  pipelines: z.array(pipelineIds).min(1).max(4).optional(),
+  pipelines: z.array(pipelineIds).min(1).max(5).optional(),
   task: z.string().trim().min(1).max(4000),
   repoDir: z.string().trim().min(1).max(2000),
   contractPath: z.string().trim().min(1).max(2000).optional(),

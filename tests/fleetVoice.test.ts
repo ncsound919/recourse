@@ -42,7 +42,7 @@ function audit(over: Partial<ReporterAuditFact> = {}): ReporterAuditFact {
 }
 
 function state(a: Partial<FleetAxiomState> = {}, o: Partial<FleetOpenHubState> = {}): FleetVoiceState {
-  return { axiom: axiom(a), openhub: { recorded: false, audit: null, ...o } };
+  return { axiom: axiom(a), openhub: { recorded: false, audit: null, ...o }, slopbench: { available: false, detail: 'not probed', agent: '', model: '', runCount: 0, lastRunAt: null } };
 }
 
 describe('summarizeAxiom', () => {

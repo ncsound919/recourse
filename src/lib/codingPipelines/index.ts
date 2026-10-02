@@ -28,6 +28,7 @@ export { opencodePipeline } from './opencodePipeline.js';
 export { deepseekPipeline } from './deepseekPipeline.js';
 export { axiomPipeline } from './axiomPipeline.js';
 export { settlementPipeline, settlementHarnessDir, settlementHarnessAvailable, settlementAdapterPath, settlementAgentExecutable, settlementOpencodeEnv, settlementTsxCli } from './settlementPipeline.js';
+export { slopCodeBenchPipeline, SLOP_CODE_ENV_KEYS, slopCodeBin, slopCodeDir, slopCodeAvailable, dockerAvailable, uvAvailable, slopCodeAgent, slopCodeModel, slopCodeEnvironment, slopCodePrompt, slopCodeProblems, slopCodeTimeoutMs } from './slopCodeBenchPipeline.js';
 
 export { opencodeBareDir, opencodeBareEntry, opencodeModel, opencodeProvider, opencodeRunEnv } from './opencodePipeline.js';
 export { deepseekBareDir, dshBin, deepseekProfile, deepseekLlmConfig, writeWorkspaceOverlay } from './deepseekPipeline.js';
@@ -62,3 +63,21 @@ export {
 export type { PipelineBenchmarkRecord, PipelineStanding } from './ledger.js';
 
 export { runProcess, runShellCommand, commandExists } from './subprocess.js';
+
+export {
+  collectProvenance,
+  commitResults,
+  pushResults,
+  createHarnessPR,
+  runAutopilot,
+  gitConfig,
+} from './harnessGit.js';
+export type {
+  HarnessProvenance,
+  GitConfig,
+  CommitResult,
+  PushResult,
+  PRResult,
+  AutopilotStep,
+  AutopilotResult,
+} from './harnessGit.js';

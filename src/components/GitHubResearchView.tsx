@@ -32,7 +32,7 @@ interface ImportView {
   toolName: string;
 }
 
-export const GitHubResearchView: React.FC<{ onIngestBlueprint?: (id: string) => Promise<any> }> = () => {
+export const GitHubResearchView: React.FC = () => {
   const [query, setQuery] = useState('');
   const [repos, setRepos] = useState<Repo[]>([]);
   const [loading, setLoading] = useState(false);

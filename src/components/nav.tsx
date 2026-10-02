@@ -65,6 +65,8 @@ export type TabKey =
   | 'gamepad'
   | 'voice-clone'
   | 'fleet-voice'
+  | 'slopbench'
+  | 'llama'
   | 'settings';
 
 export interface NavBadge {
@@ -156,6 +158,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { key: 'reports', label: 'Hourly reports', icon: FileText, hint: 'Generated digests' },
       { key: 'reporter', label: 'Self reporter', icon: Newspaper, hint: 'Articles written about the system' },
       { key: 'fleet-voice', label: 'Fleet voice', icon: Network, hint: 'Axiom and OpenHub summaries' },
+      { key: 'slopbench', label: 'SlopCodeBench', icon: Activity, hint: 'Iterative refinement benchmark' },
       { key: 'voice-clone', label: 'Voice clone', icon: Mic, hint: 'Voice profiles and synthesis' },
     ],
   },
@@ -171,6 +174,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: 'System',
     items: [
       { key: 'provider', label: 'AI provider', icon: Server, hint: 'Model provider and routing' },
+      { key: 'llama', label: 'Local model', icon: Cpu, hint: 'llama.cpp server status, models and chat' },
       { key: 'visualizer', label: '3D visualizer', icon: Box, hint: 'Live system graph' },
       { key: 'gamepad', label: 'Gamepad', icon: Gamepad2, hint: 'Controller input' },
       { key: 'settings', label: 'Settings', icon: Settings, hint: 'Configuration' },

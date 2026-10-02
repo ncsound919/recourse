@@ -40,7 +40,9 @@ import {
   GhidraView,
   GamepadVisualizer,
   VoiceCloneView,
-  FleetVoiceView
+  FleetVoiceView,
+  SlopBenchView,
+  LlamaView
 } from './components';
 import {
   SystemStatus,
@@ -544,8 +546,20 @@ export default function App() {
       }).then((r) => r.json());
 
       if (res.success) {
-                fetchAllState(true);
-        showToast(` Autonomous Scan Complete: Healed ${res.healedCount} compromised genes!`);
+        fetchAllState(true);
+        const parts: string[] = [];
+        if (typeof res.attempted === 'number') parts.push(`${res.attempted} attempted`);
+        if (typeof res.unverifiedAttempts === 'number' && res.unverifiedAttempts > 0) {
+          parts.push(`${res.unverifiedAttempts} unverified (no suite)`);
+        }
+        if (typeof res.failedAttempts === 'number' && res.failedAttempts > 0) {
+          parts.push(`${res.failedAttempts} still failing`);
+        }
+        if (typeof res.openAnomalies === 'number') parts.push(`${res.openAnomalies} open`);
+        const suffix = parts.length ? ` · ${parts.join(' · ')}` : '';
+        showToast(`Scan & Heal: ${res.healedCount} verified heal(s)${suffix}`);
+      } else {
+        showToast(`Scan & Heal failed: ${res.error ?? 'unknown error'}`);
       }
     } catch (err: any) {
       showToast(`Scan & Heal failed: ${err.message}`);
@@ -629,28 +643,6 @@ export default function App() {
         return res;
       } catch (err: any) {
         showToast(`Crystallize error: ${err.message}`);
-        return { success: false, error: err.message };
-      }
-    },
-    [fetchAllState, showToast]
-  );
-
-  const handleIngestGitHub = useCallback(
-    async (blueprintId: string) => {
-      try {
-        const res = await fetch('/api/recourse/github/ingest', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ blueprintId }),
-        }).then((r) => r.json());
-
-        if (res.success) {
-          fetchAllState(true);
-          showToast(` Ingested ${res.ingestionResult?.toolName} from GitHub!`);
-        }
-        return res;
-      } catch (err: any) {
-        showToast(`Ingest error: ${err.message}`);
         return { success: false, error: err.message };
       }
     },
@@ -847,9 +839,9 @@ export default function App() {
               />
             )}
 
-            {activeTab === 'github' && (
-              <GitHubResearchView onIngestBlueprint={handleIngestGitHub} />
-            )}
+      {activeTab === 'github' && (
+        <GitHubResearchView />
+      )}
 
             {activeTab === 'subagents' && (
               <SubagentSwarmView onDispatchTask={handleDispatchSwarm} />
@@ -916,6 +908,14 @@ export default function App() {
 
             {activeTab === 'fleet-voice' && (
               <FleetVoiceView />
+            )}
+
+            {activeTab === 'slopbench' && (
+              <SlopBenchView />
+            )}
+
+            {activeTab === 'llama' && (
+              <LlamaView />
             )}
 
             {activeTab === 'intake-growth' && (

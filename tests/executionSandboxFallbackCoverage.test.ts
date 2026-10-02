@@ -139,9 +139,13 @@ describe('executionSandbox — in-process executeTestSuite assert rewriting', ()
     expect(ok.passed).toBe(true);
   });
 
-  it('flags a node-style assert with a single argument as aborted (no injected assert)', () => {
+  it('records a single-argument node-style assert.ok through the DSL shim', () => {
+    // Single-arg forms have no label for the statement rewriter to inject, so
+    // they run through the shim — which now records them, making a genuinely
+    // passing assertion count as a pass instead of an uncounted non-result.
     const r = executeTestSuite('function h(){return true;}', 'assert.ok(true)');
-    expect(r.passed).toBe(false);
+    expect(r.passed).toBe(true);
+    expect(r.testDetails.some((d) => d.startsWith('[PASS]'))).toBe(true);
   });
 
   it('reports compilation errors for genuinely broken source', () => {

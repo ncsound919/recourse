@@ -25,6 +25,7 @@ import {
   regressionRiskFor,
   resetPipelineRegistry,
   resolveTestCommand,
+  runAllPipelineBenchmarks,
   runPipelineBenchmark,
   scorePipelineRun,
   snapshotDir,
@@ -84,7 +85,7 @@ const STUB: CodingPipeline = {
 };
 
 describe('pipeline registry', () => {
-  it('registers the four built-in pipelines', () => {
+  it('registers the five built-in pipelines', () => {
     resetPipelineRegistry();
     installDefaultPipelines();
     expect(listPipelines().map((p) => p.spec.id).sort()).toEqual([
@@ -92,6 +93,7 @@ describe('pipeline registry', () => {
       'deepseek',
       'opencode',
       'settlement',
+      'slopcodebench',
     ]);
   });
 
@@ -99,7 +101,7 @@ describe('pipeline registry', () => {
     resetPipelineRegistry();
     installDefaultPipelines();
     installDefaultPipelines();
-    expect(listPipelines()).toHaveLength(4);
+    expect(listPipelines()).toHaveLength(5);
     expect(getPipeline('axiom')?.spec.name).toBe('Axiom Original');
     expect(getPipeline('nope')).toBeUndefined();
   });
@@ -107,7 +109,7 @@ describe('pipeline registry', () => {
   it('statuses report availability without throwing', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')));
     const statuses = await pipelineStatuses();
-    expect(statuses).toHaveLength(4);
+    expect(statuses).toHaveLength(5);
     for (const s of statuses) expect(typeof s.available).toBe('boolean');
     expect(statuses.find((s) => s.id === 'axiom')?.available).toBe(false);
   });
@@ -115,6 +117,10 @@ describe('pipeline registry', () => {
   it('specs carry lane-relevant capability tags', () => {
     const ids = pipelineSpecs().map((s) => s.id);
     expect(ids).toContain('settlement');
+  });
+
+  it('marks slopcodebench standalone so the worktree runner excludes it', () => {
+    expect(getPipeline('slopcodebench')?.spec.mode).toBe('standalone');
   });
 });
 
@@ -382,6 +388,62 @@ describe('unified runner', () => {
   it('reports an unknown pipeline id honestly', async () => {
     await expect(runPipelineBenchmark('ghost', { repoDir: miniRepo(), task: 'x' })).rejects.toThrow('unknown pipeline');
   });
+
+  const STANDALONE: CodingPipeline = {
+    spec: {
+      id: 'slopcodebench',
+      name: 'Standalone',
+      transport: 'subprocess',
+      description: 'standalone stub',
+      capabilities: ['test'],
+      mode: 'standalone',
+    },
+    async status() {
+      return { id: 'slopcodebench', name: 'Standalone', transport: 'subprocess', available: true, detail: 'stub' };
+    },
+    async run() {
+      throw new Error('standalone pipeline must never be run against a worktree');
+    },
+  };
+
+  it('refuses to run a standalone pipeline against a worktree', async () => {
+    resetPipelineRegistry();
+    registerPipeline(STANDALONE);
+    const res = await runPipelineBenchmark('slopcodebench', { repoDir: miniRepo(), task: 'x' });
+    expect(res.run.ok).toBe(false);
+    expect(res.run.error).toContain('standalone');
+    expect(res.score.score).toBe(0);
+    expect(res.workdir).toBe('');
+  });
+
+  it('runAllPipelineBenchmarks excludes standalone pipelines', async () => {
+    // Register stubs for every worktree id so installDefaultPipelines() does not
+    // add the real ones (which would spawn axiom/settlement/deepseek).
+    const worktreeStub = (id: 'opencode' | 'deepseek' | 'axiom' | 'settlement'): CodingPipeline => ({
+      spec: { id, name: id, transport: 'subprocess', description: 'stub', capabilities: ['test'] },
+      async status() {
+        return { id, name: id, transport: 'subprocess', available: true, detail: 'stub' };
+      },
+      async run(req) {
+        fs.writeFileSync(path.join(req.workdir, 'src', `${id}.ts`), `export const ${id} = true;\n`);
+        return { ok: true, id, stdout: 'done', stderr: '', durationMs: 1 };
+      },
+    });
+    resetPipelineRegistry();
+    registerPipeline(worktreeStub('opencode'));
+    registerPipeline(worktreeStub('deepseek'));
+    registerPipeline(worktreeStub('axiom'));
+    registerPipeline(worktreeStub('settlement'));
+    registerPipeline(STANDALONE);
+    const results = await runAllPipelineBenchmarks({
+      repoDir: miniRepo(),
+      task: 'add a file',
+      testCommand: 'node --version',
+    });
+    const ids = results.map((r) => r.pipeline.id);
+    expect(ids).not.toContain('slopcodebench');
+    expect(ids.sort()).toEqual(['axiom', 'deepseek', 'opencode', 'settlement']);
+  });
 });
 
 describe('pipeline ledger', () => {
@@ -432,7 +494,7 @@ describe('pipelines router', () => {
     await layer.route.stack[0].handle({ method: 'GET' } as any, res);
     const payload = res.json.mock.calls[0][0];
     expect(payload.success).toBe(true);
-    expect(payload.count).toBe(4);
+    expect(payload.count).toBe(5);
     expect(payload.pipelines[0].status).toBeTruthy();
   });
 

@@ -1,9 +1,10 @@
 /**
  * Ecosystem Corpus — local research-ingestion types.
  *
- * Recourse ingests *research insights and papers* produced by sibling projects
- * in the Overlay365/Uplift fleet (HempForge, Hemp-OS, Overlay Oncology, bbtech,
- * Draymond). Each project root is scanned on disk for insight-bearing text
+ * Recourse ingests *insight-bearing documents* produced by the live tool fleet
+ * (Recourse, OpenHub, Axiom, Overlay Cheetah, DeepSeek Harness, the Skilltech
+ * MCP suite, and supporting infrastructure/docs). Each project root is scanned
+ * on disk for insight-bearing text
  * artifacts (whitepapers, research/synthesis docs, specs, knowledge JSON,
  * datasets, config). This subsystem is 100% real: every record is produced by
  * reading an actual file. No synthesized "insights" are ever fabricated here.
