@@ -19,6 +19,24 @@ import type { OpenAITool } from './modelProvider.js';
 import { listSelfHostedEntries, executeSelfHostedTool } from './selfHosting.js';
 import type { McpToolProvider } from './mcpToolProvider.js';
 import type { SkillToolProvider } from './skillTools.js';
+import { toolValueLedger } from './toolValueLedger.js';
+
+/** Record an agent-chosen invocation into the shared value ledger. */
+function noteToolInvocation(
+  tool: string,
+  opts: { realArguments?: boolean; consumerKind?: 'agent' },
+): void {
+  toolValueLedger().noteInvocation(tool, opts);
+}
+
+/** Record that an agent consumed a tool's output. */
+function noteToolConsumption(
+  tool: string,
+  consumer: string,
+  opts: { consumerKind?: 'agent' } = {},
+): void {
+  toolValueLedger().noteConsumption(tool, consumer, opts);
+}
 
 export type AgentToolSource = 'selfhosted' | 'system' | 'mcp' | 'skills' | 'route' | 'federation';
 
@@ -255,9 +273,17 @@ export function createAgentToolRegistry(deps: AgentToolRegistryDeps = {}): Agent
 
       if (spec.source === 'selfhosted') {
         const { method, args: positional } = decodeSelfHostedArgs(callArgs);
+        // An agent CHOSE this tool from the registry, which is the closest thing
+        // the system has to "called upon request". Record it as an invocation by
+        // a named consumer so the value ledger can distinguish agent-selected
+        // use from liveness heartbeats. See ToolValueLedger.
+        const realArgs = Array.isArray(positional) && positional.length > 0;
+        noteToolInvocation(spec.target, { realArguments: realArgs, consumerKind: 'agent' });
         try {
           const res = await executeSelfHostedTool(spec.target, { method: method as string, args: positional });
           if (res.success === false) return { ok: false, error: res.error, source: 'selfhosted' };
+          // The agent received and will use this result: that is consumption.
+          noteToolConsumption(spec.target, 'agent:tool_calling', { consumerKind: 'agent' });
           return { ok: true, result: res.result, source: 'selfhosted' };
         } catch (err: any) {
           return { ok: false, error: `self-hosted tool threw: ${err?.message || String(err)}`, source: 'selfhosted' };

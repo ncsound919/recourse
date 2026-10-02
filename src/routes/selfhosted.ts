@@ -27,6 +27,18 @@ export interface SelfhostedDeps {
   generation(): number;
   /** Registry cleanup on removal; returns whether a registry gene was removed. */
   onRemoved(name: string, removedFile?: string): { registryToolRemoved: boolean };
+  /**
+   * A caller asked for this tool with real arguments. This is the ONLY path
+   * that counts toward value: loop liveness and the self-use differential
+   * watchdog are verification, not use, and are routed to `loop_tick` /
+   * `selfuse_verified` instead. Optional so existing hosts still compile.
+   */
+  noteInvocation?(tool: string, opts?: { realArguments?: boolean; consumerKind?: 'http' | 'internal' | 'agent' | 'federation' }): void;
+  /**
+   * Something downstream consumed this tool's output. A tool that runs but is
+   * never consumed has usefulness 0 and is not worth generating more of.
+   */
+  noteConsumption?(tool: string, consumer?: string): void;
 }
 
 export interface SelfhostedRouter {
@@ -86,6 +98,15 @@ export function createSelfhostedRouter(deps: SelfhostedDeps): SelfhostedRouter {
       state.lastOk = true;
       state.lastResult = res.result;
     }
+    // A supervised loop tick is LIVENESS, not work. It calls the tool with
+    // no arguments and no consumer reads the result, so it must not be
+    // recorded as a value-producing call — otherwise the learner treats a
+    // fixed heartbeat as evidence of usefulness. Emit it as `loop_tick`
+    // (liveness) and leave `selfhosted_tool_called` for real invocations
+    // that a caller actually asked for.
+    deps.appendProvenanceEvent('loop_tick', {
+      tool: name, cycle: state.cycles, ok: state.lastOk === true, generation: deps.generation(),
+    });
     loopHeartbeats.push({ at: state.lastAt, tool: name, cycle: state.cycles, ok: state.lastOk === true });
     if (loopHeartbeats.length > 200) loopHeartbeats.shift();
   };
@@ -236,6 +257,11 @@ export function createSelfhostedRouter(deps: SelfhostedDeps): SelfhostedRouter {
       const inv = unpackCall(entry, req.body ?? {});
       const result = await executeSelfHostedTool(entry.name, inv);
       if (result.success === false) return res.status(400).json({ success: false, error: result.error });
+      // A real caller asked for this: count it toward value. The response body
+      // carries the result, so a successful response IS the consumption — the
+      // caller asked for it and is being handed it.
+      deps.noteInvocation?.(entry.name);
+      deps.noteConsumption?.(entry.name, 'http:/selfhosted/:name/call');
       deps.appendProvenanceEvent('selfhosted_tool_called', {
         tool: entry.name, method: inv.method, kind: resolveKind(entry), hash: entry.hash,
         executionTimeMs: result.executionTimeMs,
@@ -264,6 +290,9 @@ export function createSelfhostedRouter(deps: SelfhostedDeps): SelfhostedRouter {
         if (!inv.method) throw new Error(`Artifact "${entry.name}" has no callable method`);
         const result = await executeSelfHostedTool(entry.name, inv);
         if (result.success === false) return res.json({ id, error: { code: -32000, message: result.error } });
+        // JSON-RPC tools/call is also a real caller.
+        deps.noteInvocation?.(entry.name);
+        deps.noteConsumption?.(entry.name, 'http:/selfhosted/:name/jsonrpc');
         deps.appendProvenanceEvent('selfhosted_tool_called', {
           tool: entry.name, method: inv.method, kind: resolveKind(entry), hash: entry.hash, transport: 'jsonrpc',
           executionTimeMs: result.executionTimeMs,

@@ -76,6 +76,8 @@ import { buildArtifact, tierForEvidence, statsForDoseResponse, type ResearchArti
 import { fetchExport } from './prometheusBridge.js';
 import { buildBounty } from './pathosphereBridge.js';
 import type { ToolDomain } from '../types.js';
+import { crossValidateWithLiterature } from './biotechKnowledgeGraph.js';
+import { CANONICAL_ONCOLOGY_KG, type OncologyEntity } from './biotechKnowledgeGraph.js';
 
 // --- Persistence -------------------------------------------------------------
 
@@ -271,7 +273,7 @@ export interface ServiceMap {
 }
 
 export interface ScienceFinding {
-  kind: 'dose_response' | 'lod_comparison' | 'niche_classification' | 'mechanistic_run' | 'gap_reported' | 'dedup' | 'kg_bridge' | 'evidence_binding' | 'gene_lookup' | 'bounty_draft' | 'translation_mapping' | 'translation_metric' | 'music_therapy_trial' | 'tuning_contrast' | 'music_therapy_benchmark';
+  kind: 'dose_response' | 'lod_comparison' | 'niche_classification' | 'mechanistic_run' | 'gap_reported' | 'dedup' | 'kg_bridge' | 'evidence_binding' | 'gene_lookup' | 'bounty_draft' | 'translation_mapping' | 'translation_metric' | 'music_therapy_trial' | 'tuning_contrast' | 'music_therapy_benchmark' | 'literature_check';
   hypothesisId: string;
   problemId: string;
   claim: string;
@@ -1080,7 +1082,111 @@ async function runCapabilityPhase(
     skipped.push('kg (offline) — no graph bridges this cycle');
   }
 
+  // Literature cross-validation: check a curated oncology claim against the
+  // ACTUAL full text of its cited paper, rather than against Recourse's own
+  // internal consistency. This is the step that replaces self-agreement with an
+  // outside source — the same reason a repo's own test suite beats a
+  // model-written one.
+  //
+  // Honest by construction, in three distinct ways that must not be collapsed:
+  //   - citation unresolved / paper not open-access  => `skipped`, not a finding
+  //   - paper retrieved, claim terms ABSENT          => a real negative finding
+  //   - paper retrieved, claim terms present         => a real positive finding
+  //
+  // Rate-limited: each citation is checked once and remembered, so a cycle cannot
+  // re-fetch the same paywalled paper every pass and fill the ledger with
+  // "unavailable".
+  if (LITERATURE_ENABLED) {
+    const due = literatureChecklistFor(cycleNum);
+    if (due.length === 0) {
+      skipped.push('literature: no unchecked citations due this cycle');
+    }
+    for (const entity of due) {
+      try {
+        const result = await crossValidateWithLiterature({
+          asset_name: entity.id,
+          mechanism: entity.mechanism,
+          evidence_tier: entity.evidenceTier,
+          source: entity.literatureCitation,
+        });
+        if (!result.available) {
+          // Not a finding. An unavailable check says nothing about the claim.
+          markLiteratureChecked(entity.literatureCitation, 'unavailable');
+          skipped.push(`literature ${entity.id}: ${result.summary}`);
+          continue;
+        }
+        const confirmed = result.targetFound && result.mechanismFound;
+        markLiteratureChecked(entity.literatureCitation, confirmed ? 'confirmed' : 'absent');
+        out.push({
+          kind: 'literature_check',
+          hypothesisId: target.hypothesisId,
+          problemId: target.problemId,
+          claim:
+            `literature check for ${entity.id}: ${confirmed ? 'claim terms PRESENT' : 'claim terms ABSENT'} ` +
+            `in the full text of its cited paper — ${result.summary}`,
+          numbers: {
+            target_found: result.targetFound ? 1 : 0,
+            mechanism_found: result.mechanismFound ? 1 : 0,
+            confirmed: confirmed ? 1 : 0,
+          },
+          provenance: `Europe PMC full text of the cited paper (${result.details[0] ?? 'resolved'})`,
+          mode: 'remote_engine',
+          cycle: cycleNum,
+        });
+      } catch (err) {
+        skipped.push(`literature ${entity.id} threw: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+  } else {
+    skipped.push('literature (disabled) — no claim-vs-source checks');
+  }
+
   return { findings: out, skipped };
+}
+
+// --- LITERATURE CROSS-VALIDATION ----------------------------------------------
+// The capability phase checks one curated oncology claim per cycle against the
+// real full text of its cited paper. A citation is checked ONCE and then
+// remembered, including when the check was UNAVAILABLE (paywalled): retrying a
+// paper that has no open-access full text every cycle would fill the skipped
+// log with the same refusal forever and tell the operator nothing new.
+const LITERATURE_ENABLED = process.env.RECOURSE_LITERATURE_CHECK !== '0';
+
+/** Citation -> outcome, so each is attempted at most once per process. */
+const literatureChecked = new Map<string, 'confirmed' | 'absent' | 'unavailable'>();
+
+/**
+ * Which citation(s) are due this cycle.
+ *
+ * Deterministic rotation over the canonical KG so every claim eventually gets
+ * checked, at most one per cycle to keep the network cost bounded. `cycleNum`
+ * modulo the list size gives a stable order with no randomness.
+ *
+ * `CANONICAL_ONCOLOGY_KG` is keyed by drug name, so `Object.values` yields the
+ * entities; `entity.id` is the drug name itself.
+ */
+export function literatureChecklistFor(cycleNum: number): OncologyEntity[] {
+  const all = Object.values(CANONICAL_ONCOLOGY_KG);
+  if (all.length === 0) return [];
+  const unchecked = all.filter((e) => !literatureChecked.has(e.literatureCitation));
+  if (unchecked.length === 0) return [];
+  // Take the next unchecked one; if every citation has been attempted, re-check
+  // the oldest (so a paper that became open-access later can now be verified).
+  const idx = cycleNum % unchecked.length;
+  return [unchecked[idx]];
+}
+
+/** Mark a citation as attempted. Exposed for tests and for operator resets. */
+export function markLiteratureChecked(
+  citation: string,
+  outcome: 'confirmed' | 'absent' | 'unavailable',
+): void {
+  literatureChecked.set(citation, outcome);
+}
+
+/** Snapshot of what has been checked, for the readout. */
+export function literatureCheckStatus(): Array<{ citation: string; outcome: string }> {
+  return [...literatureChecked.entries()].map(([citation, outcome]) => ({ citation, outcome }));
 }
 
 // --- EVIDENCE PHASE ---------------------------------------------------------------

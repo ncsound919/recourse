@@ -47,6 +47,10 @@ export type ProvenanceEventType =
   | 'tool_human_approved'
   | 'tool_repaired'
   | 'self_repair_triggered'
+  /** External static analysis (Semgrep) of Recourse's own source. */
+  | 'static_audit_run'
+  /** A generative call routed by MODEL ROLE (plan/critique/execute/summarize). */
+  | 'model_role_route'
   | 'anomaly_injected'
   | 'gene_crossover'
   | 'report_generated'
@@ -72,6 +76,8 @@ export type ProvenanceEventType =
   | 'loop_started'
   | 'loop_stopped'
   | 'loop_error'
+  | 'loop_tick'
+  | 'selfuse_verified'
   | 'signal_grounded'
   | 'intake_poll'
   | 'intake_brain'
@@ -89,7 +95,15 @@ export type ProvenanceEventType =
   | 'open_ended_patch'
   | 'global_lens_publish'
   | 'dream_registry_reconciled'
-  | 'tool_registry_reverified';
+  | 'tool_registry_reverified'
+  | 'v5_synthesis_succeeded'
+  | 'v5_synthesis_failed'
+  | 'v5_synthesis_unverified'
+  | 'v5_benchmark_run'
+  | 'v5_goal_run'
+  | 'v5_generation'
+  | 'v5_gate_run'
+  | 'skilltech_call';
 
 export interface ProvenanceEvent {
   /** Hash scheme. Absent = legacy v1 (hash does not bind content); 2 = canonical content hash. */
@@ -739,5 +753,164 @@ export interface SelfRepairKnowledge {
   templateAssistedHeals: number;
   meanConfidenceScore: number;
   strategies: SelfRepairStrategy[];
+}
+
+// ==========================================
+// 9. NEXTGENCODER v5 MANIFEST SCHEMA
+// ==========================================
+
+export type AssuranceTier = 'A0' | 'A1' | 'A2' | 'A3' | 'A4';
+
+export type CrossTargetMode = 'bit_exact' | 'bounded_ulp';
+
+export type DischargeMethod = 'hw_conformance_test' | 'measured_sanity' | 'proof' | 'differential';
+
+export type EmitValidation = 'alive2' | 'object_diff' | 'double_build' | 'reproducible';
+
+export interface V5Assurance {
+  requested_tier: AssuranceTier;
+  per_obligation_min?: Record<string, AssuranceTier>;
+}
+
+export interface V5GoldenExamples {
+  path: string;
+  confirmed_by: string;
+}
+
+export interface V5MutationSpec {
+  min_kill: number;
+  per_requirement_unique_kill: boolean;
+}
+
+export interface V5DualSpec {
+  required_for: string[];
+  second_spec: { path: string; origin: string };
+  equivalence: 'smt' | 'exhaustive-bounded';
+}
+
+export interface V5SpecQualification {
+  atomic_requirements: string;
+  functional_check: 'required' | 'optional';
+  golden_examples: V5GoldenExamples;
+  mutation: V5MutationSpec;
+  dual_spec?: V5DualSpec;
+}
+
+export interface V5ContractChecks {
+  assume_satisfiable: boolean;
+  guarantee_satisfiable_under_assume: boolean;
+  realizable: boolean;
+  non_trivial: boolean;
+  witnesses: string;
+}
+
+export interface V5Freeze {
+  statement_sha: string;
+  forbidden: string[];
+  assumption_budget: number;
+}
+
+export interface V5NumericProfile {
+  fma: 'forbidden' | 'allowed';
+  rounding: string;
+  denormals: string;
+  libm: string;
+}
+
+export interface V5ErrorBound {
+  analyzers: string[];
+  per_target: Record<string, { metric: string; max: number }>;
+  empirical_guard: { samples: number; adversarial: boolean; must_not_exceed_proven: boolean };
+}
+
+export interface V5Numeric {
+  spec_format: 'fpcore';
+  profile: V5NumericProfile;
+  cross_target: CrossTargetMode;
+  error_bound: V5ErrorBound;
+}
+
+export interface V5ModelGap {
+  id: string;
+  what: string;
+  discharge: DischargeMethod;
+  evidence: string;
+}
+
+export interface V5Emit {
+  mode: 'credible';
+  validation: EmitValidation[];
+  reproducible: boolean;
+  wcet_sanity: { measured_must_not_exceed_analyzed: boolean; on_violation: 'revoke' | 'warn' };
+}
+
+export interface V5Attestation {
+  signer_identity_pin: string;
+  log: string;
+  on_log_unreachable: 'fail-closed' | 'fail-open';
+  dependencies: 'pinned-hashes' | 'unpinned';
+}
+
+export interface V5Port {
+  name: string;
+  direction: 'in' | 'out';
+  type: string;
+  assume?: string;
+  guarantee?: string;
+}
+
+export interface V5Claim {
+  id: string;
+  kind: string;
+  statement: string;
+  atomic_requirements: string[];
+  tier_min: AssuranceTier;
+}
+
+export interface V5Manifest {
+  manifest_schema: '5.0';
+  id: string;
+  version: string;
+  provides: string;
+  assurance: V5Assurance;
+  spec_qualification: V5SpecQualification;
+  contract_checks: V5ContractChecks;
+  freeze: V5Freeze;
+  numeric: V5Numeric;
+  model_gaps: V5ModelGap[];
+  emit: V5Emit;
+  attestation: V5Attestation;
+  ports: V5Port[];
+  claims: V5Claim[];
+}
+
+export interface V5IndexLockEntry {
+  id: string;
+  version: string;
+  manifest_root: string;
+  behavior_sha: string;
+  statement_sha: string;
+  achieved_tier: Record<string, AssuranceTier>;
+  obligations: { total: number; discharged: number; waived: number };
+  qualification: { mutation_kill: number; functional_check: string; dual_spec: string };
+  checkers: Array<{ id: string; lineage: string }>;
+  tcb: string[];
+  model_gaps: { total: number; discharged: number };
+  verified_for_targets: string[];
+  build_attestation: string;
+  signature: string;
+  log_index: number;
+}
+
+export interface V5AdapterManifest {
+  manifest_schema: '5.0';
+  kind: 'adapter';
+  id: string;
+  params: Record<string, { type: string; range?: [number, number]; allowed?: string[] }>;
+  contract: {
+    in_clock: string;
+    out_clock: string;
+  };
+  proof: { path: string; tier: AssuranceTier };
 }
 

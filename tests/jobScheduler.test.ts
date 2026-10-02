@@ -16,6 +16,7 @@ import {
   schedulerStorePath,
   type ScheduledJobDef,
 } from '../src/lib/jobScheduler.js';
+import { buildArtifact } from '../src/lib/researchArtifact.js';
 
 let tmpDir = '';
 let storeFile = '';
@@ -127,7 +128,13 @@ describe('run bookkeeping', () => {
     if (r1.ok === false) throw new Error('unreachable');
     expect(r1.ran).toBe(true);
     expect(r1.result).toEqual({ value: 42 });
-    expect(r1.state.lastOk).toBe(true);
+    // `{ value: 42 }` does not throw, but it is not a verifiable artifact
+    // either. Recording it as healthy would let a job spin forever looking fine
+    // while producing nothing, so it is tracked as unproductive: lastOk stays
+    // null and unproductiveCount increments.
+    expect(r1.state.lastOk).toBeNull();
+    expect(r1.state.unproductiveCount).toBe(1);
+    expect(r1.state.lastOutcome).toBe('unproductive');
     expect(r1.state.runCount).toBe(1);
 
     fail = true;
@@ -140,6 +147,50 @@ describe('run bookkeeping', () => {
     expect(st.failCount).toBe(1);
     expect(st.lastRunAt).not.toBeNull();
     expect(st.running).toBe(false);
+  });
+
+  it('records lastOk=true only for a run that produced a verifiable artifact', async () => {
+    // The distinction that matters: "ran" is not "worked". A run ending in a
+    // hash-verified artifact is healthy; one that merely returns data is not.
+    const realArtifact = buildArtifact({
+      kind: 'decision',
+      claim: 'a verified decision',
+      engine: 'test-engine',
+      provenance: 'test',
+    });
+    registerScheduledJob(def({ id: 'withart', run: async () => ({ artifact: realArtifact }) }));
+    const r = await triggerJob('withart');
+    if (r.ok === false) throw new Error('unreachable');
+    expect(r.state.lastOk).toBe(true);
+    expect(r.state.lastOutcome).toBe('artifact');
+    expect(r.state.unproductiveCount).toBe(0);
+  });
+
+  it('does not let a run self-certify a tampered artifact', async () => {
+    const realArtifact = buildArtifact({
+      kind: 'decision',
+      claim: 'original claim',
+      engine: 'test-engine',
+      provenance: 'test',
+    });
+    const tampered = { ...realArtifact, claim: 'claim swapped after hashing' };
+    registerScheduledJob(def({ id: 'tampered', run: async () => ({ artifact: tampered }) }));
+    const r = await triggerJob('tampered');
+    if (r.ok === false) throw new Error('unreachable');
+    expect(r.state.lastOk).toBe(false);
+    expect(r.state.lastOutcome).toBe('unproductive');
+    expect(r.state.failCount).toBe(1);
+  });
+
+  it('records an explicit skip as skipped, not as success or failure', async () => {
+    registerScheduledJob(def({ id: 'skipper', run: async () => ({ skipped: 'autopilot disabled' }) }));
+    const r = await triggerJob('skipper');
+    if (r.ok === false) throw new Error('unreachable');
+    expect(r.state.lastOk).toBeNull();
+    expect(r.state.lastOutcome).toBe('skipped');
+    expect(r.state.skipCount).toBe(1);
+    expect(r.state.failCount).toBe(0);
+    expect(r.state.lastSkipped).toBe('autopilot disabled');
   });
 
   it('handles a thrown non-Error value', async () => {

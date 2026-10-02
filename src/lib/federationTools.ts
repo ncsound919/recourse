@@ -10,6 +10,7 @@
  */
 import type { SkillRegistry, SkillRegistryEntry } from './skillRegistry.js';
 import { executeSelfHostedTool, getSelfHostedEntry } from './selfHosting.js';
+import { toolValueLedger } from './toolValueLedger.js';
 import type { AgentToolProvider } from './agentTools.js';
 
 export interface FederationToolProviderOptions {
@@ -63,8 +64,18 @@ export function createFederationToolProvider(opts: FederationToolProviderOptions
       if (entry.toolName && getSelfHostedEntry(entry.toolName)) {
         const method = typeof args.method === 'string' ? args.method : undefined;
         const positional = Array.isArray(args.args) ? args.args : [];
+        // A federated peer invoking a live self-hosted tool is genuine external
+        // use — the strongest consumption signal the system can record. Named as
+        // `federation:<author>` so the readout attributes it correctly.
+        toolValueLedger().noteInvocation(entry.toolName, {
+          realArguments: positional.length > 0,
+          consumerKind: 'federation',
+        });
         const res = await executeSelfHostedTool(entry.toolName, { method: method as string, args: positional });
         if (res.success === false) return { ok: false, error: res.error };
+        toolValueLedger().noteConsumption(entry.toolName, `federation:${entry.author ?? 'peer'}`, {
+          consumerKind: 'federation',
+        });
         return { ok: true, result: { skill: info, executed: true, result: res.result } };
       }
 

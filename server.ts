@@ -96,10 +96,18 @@ import {
   updateOpenHubHealth,
 } from './src/lib/fleetSignal.js';
 import { globalLegoEngine } from './src/lego/engine.js';
-import {   checkOnline as modelCheckOnline, providerStatus, providerStatuses, chatComplete, extractJsonBlock, setActiveProviderProfile, activeProviderProfile, providerProfiles, setModelUsageSink } from './src/lib/modelProvider.js';
-import type { ProviderProfileId } from './src/lib/modelProvider.js';
+import {   checkOnline as modelCheckOnline, providerStatus, providerStatuses, chatComplete, chatCompleteProfile, extractJsonBlock, setActiveProviderProfile, activeProviderProfile, providerProfiles, setModelUsageSink } from './src/lib/modelProvider.js';
+import type { ProviderProfileId, ChatMessage } from './src/lib/modelProvider.js';
 import { lintSource } from './src/lib/lintGate.js';
 import type { LintReport } from './src/lib/lintGate.js';
+import {
+  runStaticAudit,
+  staticAuditSignals,
+  staticAuditSummary,
+  type StaticAuditResult,
+} from './src/lib/staticAuditSignal.js';
+import { RoleRouter, DEFAULT_ROLE_POLICY, type ModelProfile } from './src/lib/roleRouter.js';
+import { toolValueLedger } from './src/lib/toolValueLedger.js';
 import { generationTargets, generationPlanDigest, summarizeBeliefsByDomain } from './src/lib/learnerGenerationPlan.js';
 import { runSleepComputeUnit, takeReadySleepArtifact } from './src/lib/sleepCompute.js';
 import { drainRemoteTasks, lastFinishedRemoteTask, readRemoteQueue, remoteComputeEnabled } from './src/lib/remoteCompute.js';
@@ -128,7 +136,7 @@ import type { SelfHostedManifestEntry } from './src/lib/selfHosting.js';
 // attempt in a durable capability-delta ledger.
 import { FORGE_AGENDA, attemptForgeSpec, benchmarkGapSpecs, generateForgeSource, forgeSampleBudget } from './src/lib/capabilityForge.js';
 import type { ForgeSpec, ForgeAttemptOutcome } from './src/lib/capabilityForge.js';
-import { assessForgeCandidate, extractToolDoc, findNearDuplicate } from './src/lib/forgeQuality.js';
+import { assessForgeCandidate, extractToolDoc, findNearDuplicate, sourceSkeleton } from './src/lib/forgeQuality.js';
 import { BUILDER_SEED_PROFILES, chooseBuilderProfile, computeBuilderBeliefs, builderMutateDue, proposeBuilderProfile } from './src/lib/builderBrain.js';
 import type { BuilderProfile, BuilderOutcome } from './src/lib/builderBrain.js';
 // Close the loop: recursive learning orders tool generation, and real forge
@@ -236,6 +244,8 @@ import { pollAllSources } from './src/intake/poll.js';
 import { groundSignal } from './src/intake/grounding.js';
 import { runBenchmark, allBenchmarkProblems, appendedBenchmarkProblems, restoreBenchmarkProblems, registryAttestation } from './src/benchmark/benchmark.js';
 import { appendBenchmarkRun } from './src/lib/benchmarkLedger.js';
+import { gatherGrounding } from './src/lib/researchGrounding/gather.js';
+import { appendGroundingRecord } from './src/lib/researchGrounding/ledger.js';
 
 // Ecosystem research corpus (local sibling-project ingestion)
 import { scanCorpus } from './src/intake/corpus/scanner.js';
@@ -285,6 +295,8 @@ import { createDreamRouter } from './src/routes/dream.js';
 import { createMutateRouter } from './src/routes/mutate.js';
 import { createDecisionRouter } from './src/routes/decision.js';
 import { createTemplatesRouter } from './src/routes/templates.js';
+import { createV5Router } from './src/routes/v5.js';
+import { createSkilltechBridge } from './src/lib/v5/skilltechBridge.js';
 import { createLearnRouter } from './src/routes/learn.js';
 import { createReadoutRouter } from './src/routes/readout.js';
 import { createInteropRouter } from './src/routes/interop.js';
@@ -332,6 +344,8 @@ import { createGrowthRouter } from './src/routes/growth.js';
 import { openSkillRegistry } from './src/lib/skillRegistry.js';
 import { federationSkillProviders } from './src/lib/ecosystem/skillFederation.js';
 import { createEcosystemRouter } from './src/routes/ecosystem.js';
+import { createDshPluginsRouter } from './src/routes/dshPlugins.js';
+import { createGroundingRouter } from './src/routes/researchGrounding.js';
 import { createSecurityRouter } from './src/routes/security.js';
 import { createSchedulerRouter } from './src/routes/scheduler.js';
 import { createSubagentsRouter } from './src/routes/subagents.js';
@@ -389,6 +403,35 @@ const fleetVoiceRouter = createFleetVoiceRouter({
   axiomStatus: axiomBridgeStatus,
   axiomLatest: () => axiomProjectLatest(),
   audit: () => loadAuditSnapshot() ?? null,
+  slopbench: async () => {
+    const { slopCodeBenchPipeline, slopCodeAgent, slopCodeModel, slopCodeDir } = await import('./src/lib/codingPipelines/index.js');
+    const status = await slopCodeBenchPipeline.status();
+    const outputsDir = path.join(slopCodeDir(), 'outputs');
+    let runCount = 0;
+    let lastRunAt: string | null = null;
+    try {
+      if (fs.existsSync(outputsDir)) {
+        const runs = fs.readdirSync(outputsDir, { withFileTypes: true })
+          .filter((e) => e.isDirectory())
+          .map((e) => e.name)
+          .sort()
+          .reverse();
+        runCount = runs.length;
+        if (runs.length > 0) {
+          const stat = fs.statSync(path.join(outputsDir, runs[0]));
+          lastRunAt = stat.mtime.toISOString();
+        }
+      }
+    } catch { /* ignore */ }
+    return {
+      available: status.available,
+      detail: status.detail,
+      agent: slopCodeAgent(),
+      model: slopCodeModel(),
+      runCount,
+      lastRunAt,
+    };
+  },
 });
 
 // Wave 2 safety layers: the shared policy engine (the approval store is created
@@ -1028,6 +1071,12 @@ export interface ForgeLedgerEntry {
   wallMs: number;
   /** R6: literature-grounding for this build (null = corpus unavailable). */
   literature?: { score: number; docs: number } | null;
+  /**
+   * External research grounding (src/lib/researchGrounding). Counts only — the
+   * evidence itself lives in the hash-chained grounding ledger, because this
+   * array is retention-capped and re-serialized on every state save.
+   */
+  grounding?: { quotable: number; leads: number; degraded: boolean; bundleHash: string } | null;
   /** Forge quality gate (forgeQuality.ts): score + verdict of the candidate. */
   quality?: { score: number; gateOk: boolean; reasons: string[] };
 }
@@ -2028,6 +2077,33 @@ function resolveRepairSuite(tool: ToolEntry | undefined, testSuite?: string): st
   return undefined;
 }
 
+/** Re-verify a tool's CURRENT promoted source against its suite/claim — the
+ *  same honesty rules as the boot reconcile. Returns null when there is
+ *  nothing to verify with (no tool / no suite and not a claim). */
+function verifyCurrentSource(tool: ToolEntry | undefined): {
+  vr: VerifierResult;
+  depth: 'suite' | 'claim';
+  suite?: string;
+  src: string;
+} | null {
+  if (!tool) return null;
+  const cur = tool.versions.find(v => v.version === tool.currentVersion)
+    ?? [...tool.versions].reverse().find(v => v.promoted);
+  const src = cur?.source_code || '';
+  if (!src) return null;
+  const looksLikeClaim = tool.domain === 'biotech' && /^\s*\{/.test(src);
+  if (looksLikeClaim) {
+    try {
+      return { vr: verifyBiotechClaim(JSON.parse(src) as BiotechClaim), depth: 'claim', src };
+    } catch {
+      return { vr: { passed: false, summary: 'FAILED (invalid JSON payload)', details: [], score: 0 }, depth: 'claim', src };
+    }
+  }
+  const suite = cur?.test_suite_code || resolveRepairSuite(tool);
+  if (suite) return { vr: verifyCodeWithSuite(src, suite), depth: 'suite', suite, src };
+  return null;
+}
+
 function executeSelfRepair(
   toolName: string,
   brokenCode: string,
@@ -2038,12 +2114,30 @@ function executeSelfRepair(
   healedTool: ToolEntry;
   anomaly: AnomalyReport;
   version: string;
+  outcome: 'healed' | 'smoke-only' | 'failed';
 } {
   const startTime = Date.now();
   let tool = registry.find(t => t.name === toolName);
   const domain: ToolDomain = tool?.domain || 'coding';
 
-  const { repairedCode, rootCause, errorType, patchSummary, templateApplied, confidence, preventativeMeasures } = diagnoseAndRepairCode(domain, brokenCode, faultHint);
+  // Step 0 — re-verify the CURRENT promoted source before synthesizing
+  // anything. An anomaly can be stale (the tool works now), and a template
+  // must never overwrite verified code. If the live source passes its
+  // suite/claim, that IS the honest heal: record it and skip synthesis.
+  const recheck = verifyCurrentSource(tool);
+  const alreadyPassing = recheck?.vr.passed === true;
+
+  const { repairedCode, rootCause, errorType, patchSummary, templateApplied, confidence, preventativeMeasures } = alreadyPassing
+    ? {
+        repairedCode: recheck!.src,
+        rootCause: 'Anomaly not reproducible on the current promoted source (re-verified against its suite/claim)',
+        errorType: 'stale_anomaly',
+        patchSummary: 'Current source already passes verification; no synthesis applied',
+        templateApplied: undefined,
+        confidence: 1,
+        preventativeMeasures: ['Re-verified current promoted source', 'Reconciled open anomaly without template injection'],
+      }
+    : diagnoseAndRepairCode(domain, brokenCode, faultHint);
 
   // 1. Verify the repaired code honestly.
   //
@@ -2054,7 +2148,11 @@ function executeSelfRepair(
   let verifierResult: VerifierResult | null = null;
   let repairSuite: string | undefined;
   let verificationDepth: 'suite' | 'claim' | 'smoke' = 'smoke';
-  if (domain === 'biotech') {
+  if (alreadyPassing && recheck) {
+    verifierResult = recheck.vr;
+    verificationDepth = recheck.depth;
+    repairSuite = recheck.suite;
+  } else if (domain === 'biotech') {
     try {
       const claim = JSON.parse(repairedCode) as BiotechClaim;
       verifierResult = verifyBiotechClaim(claim);
@@ -2113,10 +2211,18 @@ function executeSelfRepair(
   };
 
   // Health: only a suite/claim-verified repair may make a tool healthy again.
-  // A smoke-only pass keeps the pre-existing non-healed state (`degraded`),
-  // which is also what the fleet repair targeting keys off — introducing a
-  // fresh `unverified` value here would drop these tools out of the sick list.
-  const repairedHealth: ToolEntry['healthStatus'] = healed ? 'healthy' : 'degraded';
+  // A suite/claim failure is honestly `degraded`. A smoke-only attempt proves
+  // nothing — it must NOT downgrade a tool that was merely `unverified` (no
+  // suite on file): that flip fed the scan-heal loop's sick-tool targeting
+  // forever. Keep the pre-existing state for smoke outcomes; only brand-new
+  // tools fall back to `unverified`. `degraded`/`corrupted` stay as they were,
+  // which is what the fleet repair targeting keys off.
+  const priorHealth = tool?.healthStatus;
+  const repairedHealth: ToolEntry['healthStatus'] = healed
+    ? 'healthy'
+    : verificationDepth === 'smoke'
+      ? (priorHealth ?? 'unverified')
+      : 'degraded';
 
   if (!tool) {
     tool = {
@@ -2142,7 +2248,15 @@ function executeSelfRepair(
     }
   }
 
-  const anomalyRecord: AnomalyReport = {
+  // Ledger hygiene: ONE open anomaly per tool.
+  //  - On failure, UPDATE the existing open record (and collapse duplicates)
+  //    instead of appending. The old code unshifted a fresh `detected` record
+  //    on every failed attempt, so each Heal All click refilled the 100-cap
+  //    ledger and it could never drain.
+  //  - On success, reconcile every open anomaly for that tool to `repaired`
+  //    (the heal proves them stale). Only append a record when the tool had
+  //    none open (e.g. a sick tool targeted from the registry loop).
+  const attemptRecord: AnomalyReport = {
     id: `anom_${Date.now()}_${crypto.randomBytes(2).toString('hex')}`,
     timestamp: Date.now(),
     toolName,
@@ -2157,10 +2271,42 @@ function executeSelfRepair(
     repairLatencyMs: repairLatency,
     repairGen: status.generation
   };
-
-  anomalies.unshift(anomalyRecord);
-  if (anomalies.length > 100) {
-    anomalies.pop();
+  const openForTool = anomalies.filter(a => a.toolName === toolName && a.status === 'detected');
+  let anomalyRecord: AnomalyReport;
+  if (healed) {
+    for (const open of openForTool) {
+      open.status = 'repaired';
+      open.fixedCode = attemptRecord.fixedCode;
+      open.description = attemptRecord.description;
+      open.rootCause = attemptRecord.rootCause;
+      open.repairLatencyMs = repairLatency;
+      open.repairGen = status.generation;
+    }
+    if (openForTool.length === 0) {
+      anomalies.unshift(attemptRecord);
+      if (anomalies.length > 100) anomalies.pop();
+      anomalyRecord = attemptRecord;
+    } else {
+      anomalyRecord = openForTool[0];
+    }
+  } else if (openForTool.length > 0) {
+    const keep = openForTool[0];
+    keep.brokenCode = brokenCode;
+    keep.fixedCode = attemptRecord.fixedCode;
+    keep.description = attemptRecord.description;
+    keep.rootCause = attemptRecord.rootCause;
+    keep.errorType = attemptRecord.errorType;
+    keep.repairLatencyMs = repairLatency;
+    keep.repairGen = status.generation;
+    for (const dup of openForTool.slice(1)) {
+      const idx = anomalies.indexOf(dup);
+      if (idx >= 0) anomalies.splice(idx, 1);
+    }
+    anomalyRecord = keep;
+  } else {
+    anomalies.unshift(attemptRecord);
+    if (anomalies.length > 100) anomalies.pop();
+    anomalyRecord = attemptRecord;
   }
 
   // Update Status Metrics. A heal claim opens a VERIFICATION WINDOW: it is not
@@ -2215,7 +2361,8 @@ function executeSelfRepair(
     success: healed,
     healedTool: tool,
     anomaly: anomalyRecord,
-    version: newVersionStr
+    version: newVersionStr,
+    outcome: healed ? 'healed' : smokeOnlyPass ? 'smoke-only' : 'failed'
   };
 }
 
@@ -2227,6 +2374,17 @@ app.use('/api/recourse', createAxiomRouter({
   healthDossier: () => computeHealthDossier(devDossierInput()),
   recordDev: (action, ok, detail, extra) => recordDev(action, ok, detail, extra as any),
 }));
+
+import { createSlopBenchRouter } from './src/routes/slopbench.js';
+// Own subpath: this router defines /status, /run, /eval, /metrics and /runs.
+// Mounted bare under /api/recourse it shadowed the core GET /api/recourse/status
+// (readout router, mounted below) and 404'd the dashboard's /slopbench/* calls.
+app.use('/api/recourse/slopbench', createSlopBenchRouter());
+
+// Local llama.cpp (llama-server) hub for the dashboard's local-model view.
+// Replaces the never-implemented /api/ollama/* surface the old view called.
+import { createLlamaRouter } from './src/routes/llama.js';
+app.use('/api/llama', createLlamaRouter());
 
 // =========================================================================
 // hackingtool security bridge (Z4nzu/hackingtool, MIT) — authorized testing.
@@ -2262,7 +2420,8 @@ app.use('/api/recourse', createReadoutRouter({
   serveCapability: (capId, ctx) => serveCapability(capId as any, ctx as any),
   failureLedger,
   outcomeLedger,
-  selfUseStatus,
+    selfUseStatus,
+    valueSnapshot,
   systemSnapshotsRef: () => systemSnapshots,
   systemBaselineRef: () => systemBaseline,
   legacyDigestRef: () => legacyDigest,
@@ -2709,6 +2868,12 @@ app.use('/api/recourse/growth', growthRouter);
 app.use('/api/recourse/self-improvement', selfImprovementRouter);
 // Wave 3 ecosystem primitives (skills / plugins / connectors).
 app.use('/api/recourse/ecosystem', ecosystemRouter);
+// DSH cordis bundle generation: render a spec, scaffold it, mount it in a profile.
+// Writes are guarded — every one of them creates or rewrites files on disk.
+app.use('/api/recourse/dsh-plugins', createDshPluginsRouter({ requireMutationAuth }));
+// External research grounding for the forge: what evidence exists for a spec,
+// which providers answered, and what actually reaches the generation prompt.
+app.use('/api/recourse/grounding', createGroundingRouter({ requireMutationAuth }));
 // Authorized-testing security surface (extracted from the monolith).
 app.use('/api/recourse/security', createSecurityRouter({ requireMutationAuth }));
 
@@ -3099,6 +3264,8 @@ app.use(createProviderChatRouter({
   saveState: saveStateToDisk,
   appendProvenance: (eventType, data) => appendProvenanceEvent(eventType as ProvenanceEvent['type'], data),
   currentGeneration: () => status.generation,
+  roleRouterSnapshot: () => ROLE_ROUTER.snapshot(),
+  roleJudgementFloor: () => Number(process.env.RECOURSE_ROLE_JUDGEMENT_FLOOR) || DEFAULT_ROLE_POLICY.judgementFloor,
 }));
 
 // TEMPLATE-DRIVEN INTERNAL COMPONENT BUILDING ROUTES
@@ -3317,6 +3484,13 @@ async function serveCapability<TCtx>(capId: CapabilityId, ctx: TCtx): Promise<un
       });
       return cap.builtin(ctx);
     }
+    // Real internal use with real arguments: this is the single busiest path by
+    // which Recourse's own work consumes a generated tool. It was recording
+    // nothing into the value ledger, which left usefulness structurally 0 and
+    // the VALUE GATE inert. `capability:<id>` names the consumer so the readout
+    // shows which capability relies on which tool.
+    noteRealInvocation(rec.backing.toolName, { consumerKind: 'internal' });
+    noteRealConsumption(rec.backing.toolName, `capability:${capId}`);
     appendProvenanceEvent('capability_served', {
       capability: capId,
       source: 'selfhosted',
@@ -3418,7 +3592,12 @@ async function runSelfUseWatchdog(): Promise<{ ran: boolean; records: SelfUseRec
     if (ok && matched) selfUseOk++;
     else if (!ok) { selfUseError++; appendProvenanceEvent('selfuse_error', { tool: rec.backing.toolName, capability: cap.id, generation: record.generation, error }); }
     else { selfUseMismatch++; appendProvenanceEvent('selfuse_mismatch', { tool: rec.backing.toolName, capability: cap.id, generation: record.generation, expected: JSON.stringify(reference), actual: JSON.stringify(result) }); }
-    appendProvenanceEvent('selfhosted_tool_called', { origin: 'selfuse_watchdog', tool: rec.backing.toolName, method: cap.method, ok, matched, generation: record.generation });
+    // This is a DIFFERENTIAL SELF-TEST — the tool's output is compared against
+    // a builtin reference and then discarded. It is verification, not use.
+    // Emitting `selfhosted_tool_called` here made the learner count a periodic
+    // self-check as a real invocation, which is why 95 calls per tool appeared
+    // with nothing downstream consuming them.
+    appendProvenanceEvent('selfuse_verified', { origin: 'selfuse_watchdog', tool: rec.backing.toolName, capability: cap.id, method: cap.method, ok, matched, generation: record.generation });
   }
   if (records.length) saveStateToDisk();
   return { ran: records.length > 0, records };
@@ -3703,9 +3882,11 @@ void (async () => {
 // src/routes/selfhosted.ts. The host supplies provenance, the generation
 // counter, and the registry cleanup that must run on removal.
 const selfhostedRouter = createSelfhostedRouter({
-  appendProvenanceEvent: (type, data) => appendProvenanceEvent(type as any, data),
-  generation: () => status.generation,
-  onRemoved: (name, removedFile) => {
+    appendProvenanceEvent: (type, data) => appendProvenanceEvent(type as any, data),
+    generation: () => status.generation,
+    noteInvocation: (tool: string) => noteRealInvocation(tool),
+    noteConsumption: (tool: string, consumer?: string) => noteRealConsumption(tool, consumer ?? 'unknown'),
+    onRemoved: (name, removedFile) => {
     let registryToolRemoved = false;
     const tool = registry.find((t) => t.name === name);
     if (tool && tool.entrypoint && tool.entrypoint.includes('.selfhosted/')) {
@@ -4578,17 +4759,127 @@ function realSystemReward(): number {
 // dispatched to the real self-repair path (only counts healed if its suite
 // passes). Cooldown prevents hammering one tool.
 const toolRepairCooldowns = new Map<string, number>();
+
+// VALUE SIGNAL (live). Maps tool name -> usefulness in [0,1], where usefulness
+// is CONSUMED / INVOKED. Populated only by real caller-initiated invocations
+// (selfhosted/:name/call, jsonrpc, mcp) — never by loop liveness or by the
+// self-use differential watchdog. This is what `realToolRewardFor` consults so
+// the learner optimizes usefulness instead of verifier-pass rate.
+const toolUsefulness = new Map<string, number>();
+const toolInvocations = new Map<string, number>();
+const toolConsumptions = new Map<string, number>();
+
+/**
+ * Record a real invocation of a tool by a caller.
+ *
+ * Backed by ToolValueLedger, which is the single authority on what counts as
+ * use. `realArguments: false` marks a liveness probe (a heartbeat or a
+ * differential self-test): it is recorded for diagnostics but excluded from the
+ * usefulness denominator, so verification can never masquerade as value.
+ */
+function noteRealInvocation(tool: string, opts: { realArguments?: boolean; consumerKind?: 'http' | 'internal' | 'agent' | 'federation' } = {}): void {
+  toolValueLedger().noteInvocation(tool, opts);
+  const inv = toolInvocations.get(tool) ?? 0;
+  toolInvocations.set(tool, inv + 1);
+  refreshUsefulness(tool);
+}
+
+/**
+ * Record that a tool's output was consumed downstream. Without this a tool can
+ * run forever and still be worth nothing — which is exactly the state this
+ * system was in: `noteRealConsumption` existed but had no call sites, so every
+ * tool's usefulness was structurally 0 and the VALUE GATE flattened all of them
+ * to the same floor.
+ *
+ * The consumer name is REQUIRED. See ToolValueLedger for why.
+ */
+function noteRealConsumption(
+  tool: string,
+  consumer: string,
+  opts: { consumerKind?: 'http' | 'internal' | 'agent' | 'federation' } = {},
+): void {
+  if (!toolValueLedger().noteConsumption(tool, consumer, opts)) return;
+  const con = toolConsumptions.get(tool) ?? 0;
+  toolConsumptions.set(tool, con + 1);
+  refreshUsefulness(tool);
+}
+
+function refreshUsefulness(tool: string): void {
+  const inv = toolInvocations.get(tool) ?? 0;
+  const con = toolConsumptions.get(tool) ?? 0;
+  toolUsefulness.set(tool, inv > 0 ? Math.min(1, con / inv) : 0);
+}
+
+/** Snapshot the value ledger for the /value readout. */
+function valueSnapshot(): Record<string, unknown> {
+  const ledger = toolValueLedger();
+  // The ledger is the authority (it tracks real-argument invocations and named
+  // consumers); the two Maps mirror it for the reward gate.
+  const rows = ledger.all();
+  const withUse = rows.filter((r) => r.usefulness > 0).sort((a, b) => b.usefulness - a.usefulness);
+  const deadWeight = ledger.deadWeight();
+  const neverInvoked = rows.filter((r) => r.invoked === 0);
+  const totals = ledger.totals();
+  return {
+    toolsTracked: rows.length,
+    useful: withUse.map((r) => ({
+      tool: r.tool,
+      invoked: r.invoked,
+      invokedReal: r.invokedReal,
+      consumed: r.consumed,
+      usefulness: Number(r.usefulness.toFixed(3)),
+      consumers: r.consumers,
+      verified: toolHealthVerified(r.tool),
+    })),
+    deadWeight: deadWeight.map((r) => ({
+      tool: r.tool,
+      invoked: r.invoked,
+      invokedReal: r.invokedReal,
+      consumed: r.consumed,
+      usefulness: 0,
+      consumers: r.consumers,
+      verified: toolHealthVerified(r.tool),
+    })),
+    neverInvoked: neverInvoked.map((r) => r.tool),
+    totals,
+    // The figure that was previously unmeasurable: how much of the observed
+    // tool activity actually resulted in someone consuming the output.
+    consumptionRate: totals.invokedReal > 0 ? Number((totals.consumed / totals.invokedReal).toFixed(3)) : 0,
+    recent: ledger.recentEvents(20),
+    note: 'deadWeight = ran with real arguments, output never consumed by any named consumer. Self-use differential tests and loop heartbeats are verification, not use, and are excluded.',
+  };
+}
+
+function toolHealthVerified(name: string): boolean {
+  const t = registry.find((x) => x.name === name);
+  if (!t) return false;
+  const cur = [...t.versions].reverse().find((v) => v.promoted && v.version === t.currentVersion);
+  return cur?.passed_verifier === true;
+}
 const TOOL_REPAIR_COOLDOWN_MS = 10 * 60 * 1000;
 
-function realToolRewardFor(t: { healthStatus?: string; versions: Array<{ promoted?: boolean; version?: string; passed_verifier?: boolean; test_suite_code?: string }>; currentVersion?: string }): number {
+function realToolRewardFor(t: { healthStatus?: string; versions: Array<{ promoted?: boolean; version?: string; passed_verifier?: boolean; test_suite_code?: string }>; currentVersion?: string; name?: string }): number {
   const cur = [...t.versions].reverse().find((v) => v.promoted && v.version === t.currentVersion);
   const def = t.healthStatus === 'degraded' || t.healthStatus === 'corrupted' || t.healthStatus === 'healing';
   if (def) return 0;
+
+  // VALUE GATE (fixes the calibration regression). A verifier-passing tool
+  // that nobody ever USES is not valuable — it is dead weight. Previously
+  // every dream-crystallized tool with a passing suite scored 1.0, so 1,128
+  // near-duplicate tools all looked equally good and the learner had no
+  // gradient toward usefulness. Now a tool that is never consumed by a real
+  // caller is capped well below a tool that is. Liveness (loop_tick) and
+  // self-tests (selfuse_verified) are verification, not use, and are excluded.
+  const usefulness = toolUsefulness.get(t.name ?? '') ?? 0;
+
   const passed = cur?.passed_verifier === true;
   const hasSuite = Boolean(cur?.test_suite_code);
-  if (passed && hasSuite) return 1;
-  if (passed) return 0.7;
-  return 0.5; // not re-verifiable (no suite) => uncertain middle, not a false 1
+  const base = passed && hasSuite ? 1 : passed ? 0.7 : 0.5;
+
+  // Blend: a verified-but-never-used tool lands near 0.1; a verified AND used
+  // tool keeps its full reward. This is the signal the learner was missing.
+  if (usefulness <= 0) return base * 0.1;
+  return base * (0.5 + 0.5 * Math.min(1, usefulness));
 }
 
 async function applyRealToolLearning(): Promise<void> {
@@ -5221,15 +5512,76 @@ async function runIntakeCycle(queries: string[] = DEFAULT_TOPIC_QUERIES): Promis
   return { added, dupes, results, total: signalStore.all().length };
 }
 
+/**
+ * Role-aware model routing for Recourse's own generative calls.
+ *
+ * The grounding planner below is a `plan` role: it decides what tool to write
+ * from a real external signal. That is judgement work, and it should not be
+ * handed to a 2B executor model just because the executor is online.
+ *
+ * Policy is env-tunable but defaults to the conservative thing: judgement roles
+ * need a profile that has DEMONSTRATED an observed mean reward at or above
+ * `RECOURSE_ROLE_JUDGEMENT_FLOOR`. Until outcomes are recorded for that role, the
+ * router refuses rather than guessing — see roleRouter.ts for why a refusal is
+ * the honest answer here.
+ */
+const ROLE_ROUTER = new RoleRouter({
+  policy: {
+    judgementFloor: Number(process.env.RECOURSE_ROLE_JUDGEMENT_FLOOR) || DEFAULT_ROLE_POLICY.judgementFloor,
+    // Allow the operator to put `local` first, but it still has to clear the
+    // floor to plan. Preference order is not permission.
+    preferred: (process.env.RECOURSE_ROLE_PREFERRED_PROFILES?.split(',').map((s) => s.trim()).filter(Boolean) as any) ??
+      DEFAULT_ROLE_POLICY.preferred,
+  },
+});
+
 /** Ground the oldest unconsumed signal into a verified tool gene. Returns the
  *  candidate outcome; nothing is promoted unless the code passed its suite. */
 async function runGroundingCycle(signalId?: string): Promise<{ grounded: boolean; toolName?: string; domain?: string; reason?: string; signal?: ExternalSignal }> {
   const signal = signalId ? signalStore.get(signalId) : signalStore.nextUnconsumed();
   if (!signal) return { grounded: false, reason: 'no unconsumed signal to ground' };
 
+  // Grounding is a PLAN role: it decides what to build from the signal. Ask the
+  // router which profile may take it. Availability is CONFIG-level (is an
+  // endpoint configured at all) — reachability is still re-checked by
+  // `groundSignal`'s own online probe, so an offline profile cannot sneak in.
+  const available: ModelProfile[] = providerProfiles()
+    .map((p) => p.id as ModelProfile)
+    .filter((p) => {
+      if (p === 'local') return process.env.LOCAL_MODEL_BASE_URL?.trim() ? true : false;
+      return Boolean(process.env.API_MODEL_BASE_URL?.trim() || process.env.API_MODEL_API_KEY?.trim());
+    });
+  const routed = ROLE_ROUTER.route('plan', available);
+  if (!routed.decision) {
+    // Honest refusal. This path used to proceed with whatever model happened to
+    // be up, which is how a 2B executor ended up choosing what to build.
+    return { grounded: false, reason: routed.refusal ?? 'no profile may serve the plan role' };
+  }
+  const chosenProfile = routed.decision.profile;
+  const planStartedAt = Date.now();
+
   const result = await groundSignal(signal, {
-    chatComplete: chatComplete,
+    chatComplete: (messages, opts) =>
+      chatCompleteProfile(chosenProfile, messages as ChatMessage[], opts ?? {}),
     checkOnline: modelCheckOnline,
+  });
+
+  // Real measured reward for the plan role: did the proposed code actually pass
+  // its own suite? Grounded = the sandbox accepted it; anything else did not earn
+  // the planner seat. This is what lets the floor unlock from measured evidence
+  // instead of being hand-set forever.
+  const planReward = result.grounded ? 1 : 0;
+  ROLE_ROUTER.record('plan', chosenProfile, planReward);
+  appendProvenanceEvent('model_role_route', {
+    role: 'plan',
+    profile: chosenProfile,
+    byBandit: routed.decision.byBandit,
+    reason: routed.decision.reason,
+    grounded: result.grounded,
+    reward: planReward,
+    latencyMs: Date.now() - planStartedAt,
+    signal: `${signal.source}:${String(signal.title ?? '').slice(0, 60)}`,
+    generation: status.generation,
   });
 
   if (result.grounded && result.sourceCode && result.toolName) {
@@ -5990,10 +6342,61 @@ function promoteTool(entry: ToolEntry, opts: { origin: string; gate?: boolean; p
       // name (e.g. dream weight-mutation variants) is not a new capability.
       const dup = noveltyGate(source, entry.name, opts.origin, { lines: verdict.meaningfulLines });
       if (dup) return false;
+
+      // SATURATION GATE. The novelty gate above only catches an EXACT skeleton
+      // match, so a family of near-variants (1,128 dream tools from 6 stems)
+      // still landed. This refuses further generated tools from a family that is
+      // already over-represented AND has no measured value — i.e. we have
+      // enough of a capability nobody is using. Repairs (gate:false) are
+      // exempt: a repair is judged by its suite, not by novelty.
+      if (isGeneratedOrigin(opts.origin) && isFamilySaturated(source)) {
+        try {
+          appendProvenanceEvent('promotion_refused', {
+            tool: entry.name, origin: opts.origin,
+            reason: 'family already over-represented with no measured consumption',
+          });
+          recordDev('promotion-refused', false, `${entry.name} (${opts.origin}): saturated family (no value)`, { driver: 'saturation-gate' });
+        } catch { /* best-effort */ }
+        return false;
+      }
     }
   }
   if (opts.push) registry.push(entry); else registry.unshift(entry);
   return true;
+}
+
+/** Origins that produce NEW generated capability (subject to novelty + saturation). */
+function isGeneratedOrigin(origin: string): boolean {
+  return /dream|forge|swarm|mutat|gene|import|evolve|ground/i.test(origin);
+}
+
+/** Max dream/forge tools allowed to share one skeleton family before we stop. */
+const SATURATION_FAMILY_CAP = Number(process.env.SATURATION_FAMILY_CAP ?? 6);
+
+/** Max generated tools sharing a skeleton that have zero measured consumption. */
+const SATURATION_ZERO_VALUE_CAP = Number(process.env.SATURATION_ZERO_VALUE_CAP ?? 2);
+
+/**
+ * True when this source's skeleton family is already over-represented.
+ * Uses sourceSkeleton so the family key is the same notion the novelty gate
+ * uses (comments, strings, and numbers normalized away).
+ */
+function isFamilySaturated(source: string): boolean {
+  if (process.env.SATURATION_GATE === '0') return false;
+  const sk = sourceSkeleton(source);
+  if (!sk) return false;
+  let sameFamily = 0;
+  let zeroValue = 0;
+  for (const t of registry) {
+    const s = currentSourceOf(t);
+    if (!s) continue;
+    if (sourceSkeleton(s) !== sk) continue;
+    sameFamily++;
+    // usefulness 0 means invoked-but-never-consumed OR never invoked at all
+    if ((toolUsefulness.get(t.name) ?? 0) <= 0) zeroValue++;
+  }
+  if (sameFamily >= SATURATION_FAMILY_CAP) return true;
+  return zeroValue >= SATURATION_ZERO_VALUE_CAP && sameFamily >= 2;
 }
 
 /**
@@ -6038,6 +6441,18 @@ async function materializeForgeOutcome(outcome: ForgeAttemptOutcome, spec: Forge
 
   if (outcome.quality) {
     base.quality = { score: outcome.quality.score, gateOk: outcome.quality.gate.ok, reasons: outcome.quality.gate.reasons };
+  }
+  if (outcome.grounding) {
+    const g = outcome.grounding;
+    const quotable = g.quotable.length;
+    base.grounding = {
+      quotable,
+      leads: g.sources.length - quotable,
+      degraded: g.degraded,
+      bundleHash: g.hash,
+    };
+    if (quotable > 0) base.summary = `grounded in ${quotable} retrieved source(s)`;
+    else if (g.degraded) base.summary = `built without literature (${g.degradedReasons[0] ?? 'no evidence retrievable'})`;
   }
   if (outcome.ok !== true || !outcome.source) {
     base.status = outcome.reason === 'offline' ? 'offline' : 'failed';
@@ -6498,6 +6913,19 @@ async function runForgeCycle(): Promise<ForgeLedgerEntry | { skipped: boolean; r
   // visible next to every build — and future agenda ordering can rank by it.
   const literature = await literatureScoreForSpec(spec);
 
+  // External research grounding. Runs before generation so the model is given
+  // real literature rather than being left to invent a method and cite it.
+  //
+  // Advisory by design: an empty or degraded bundle still reaches the prompt,
+  // where it says plainly that nothing was retrievable. Grounding never blocks
+  // promotion — the hidden reference suite is the judge of correctness, and a
+  // research outage must not stall the forge.
+  const grounding = await gatherGrounding({ id: spec.id, title: spec.title, prompt: spec.prompt, domain: spec.domain });
+  const groundedSpec: ForgeSpec = { ...spec, grounding };
+  try {
+    appendGroundingRecord(grounding, { tool: spec.name });
+  } catch { /* the ledger is a record, not a gate */ }
+
   // Dream gene specs (id starts with 'backfill_' or 'dream_') already have verified
   // source code in the registry — the dream engine synthesized and sandbox-verified
   // them. Skip the model-regeneration step and materialize from the existing code
@@ -6532,6 +6960,10 @@ async function runForgeCycle(): Promise<ForgeLedgerEntry | { skipped: boolean; r
         maxTries: 3,
         failures: [],
         reason: undefined,
+        // Deliberately NOT carrying `grounding`: this source came from the dream
+        // engine, not from a generation pass, so attaching the bundle we just
+        // gathered would claim a literature basis it never had. The record is
+        // still in the ledger — what was searched, and what was found.
       };
     } else {
       outcome = { ok: false, id: spec.id, name: spec.name, domain: spec.domain, source: undefined, attemptsUsed: 0, maxTries: 3, failures: [], reason: 'failed' };
@@ -6547,7 +6979,7 @@ async function runForgeCycle(): Promise<ForgeLedgerEntry | { skipped: boolean; r
     // P1: consume a verified sleep-time-compute artifact with zero model calls
     // when the dream precomputed one (the forge still re-verifies it).
     const sleepArtifact = takeReadySleepArtifact(spec.name, spec.domain);
-    outcome = await attemptForgeSpec(spec, samples, {
+    outcome = await attemptForgeSpec(groundedSpec, samples, {
       systemPrompt: b.systemPrompt,
       temperature: b.temperature,
       samples,
@@ -7172,7 +7604,21 @@ function stopDevAutopilot(): void {
 // patch. Nothing touches disk unless it passes that gate. All escalations are
 // rate-limited (backoff) and recorded in a durable ledger.
 
-async function collectStuckSignals(): Promise<StuckSignal[]> {
+/**
+ * External static analysis of Recourse's own source, as a stuck-signal source.
+ *
+ * Opt-out: `RECOURSE_STATIC_AUDIT=0` turns it off. Default ON, because the whole
+ * point is that the repair loop should be able to see its own defects. It costs
+ * one cached scan per TTL, not one per pass.
+ *
+ * The scan is deliberately NOT persisted to the ledger: it is derived from the
+ * working tree, so it is recomputed rather than replayed from stale state.
+ */
+const STATIC_AUDIT_ENABLED = process.env.RECOURSE_STATIC_AUDIT !== '0';
+const STATIC_AUDIT_TTL_MS = Number(process.env.RECOURSE_STATIC_AUDIT_TTL_MS) || 30 * 60 * 1000;
+let staticAuditCache: { at: number; result: StaticAuditResult } | null = null;
+
+async function collectStuckSignals(force = false): Promise<StuckSignal[]> {
   const signals: StuckSignal[] = [];
   const now = Date.now();
   const within = (ts: number | null | undefined, ms: number) => !!ts && now - ts <= ms;
@@ -7322,6 +7768,34 @@ async function collectStuckSignals(): Promise<StuckSignal[]> {
       failing: true, threshold: 2,
       detail: `${spike.length} failures in 30m (top: ${top?.[0]} x${top?.[1]})`,
     });
+  }
+
+  // 8. External static analysis of Recourse's OWN source. Semgrep is a
+  // third-party analyzer whose rules we do not author, so a match is an
+  // outside opinion about our code rather than another self-report. This is the
+  // one signal in the loop that looks at Recourse's source with a real tool.
+  //   - The scan is CACHED: a full src/lib scan costs ~40s, and this function
+  //     runs on every self-repair pass. Re-scanning per pass would make the
+  //     repair job itself a CPU hog.
+  //   - An UNAVAILABLE analyzer contributes ZERO signals (see staticAuditSignal).
+  //     Absence of an opinion must never read as "found something".
+  //   - Cache is bypassed with `force` on a manual trigger so an operator can
+  //     always get a fresh scan.
+  if (STATIC_AUDIT_ENABLED) {
+    const cached = staticAuditCache;
+    const isFresh = !!cached && Date.now() - cached.at < STATIC_AUDIT_TTL_MS;
+    if (force || !isFresh) {
+      const r = await runStaticAudit({ root: devRepoRoot() }).catch((err): StaticAuditResult => {
+        // A thrown scan must not take the repair pass down with it.
+        return {
+          available: false, scanned: false, findings: [], errors: [], durationMs: 0,
+          reason: `audit threw: ${err instanceof Error ? err.message : String(err)}`,
+        };
+      });
+      staticAuditCache = { at: Date.now(), result: r };
+    }
+    // Non-null: either the cache was fresh, or we just populated it above.
+    if (staticAuditCache) signals.push(...staticAuditSignals(staticAuditCache.result));
   }
 
   return signals;
@@ -7519,7 +7993,7 @@ async function runStuckRepairPass(force = false): Promise<Record<string, unknown
   try {
     const now = Date.now();
     const reverify = reverifyPendingRepairs();
-    const signals = await collectStuckSignals();
+    const signals = await collectStuckSignals(force);
     stuckIssues = updateStuckIssues(stuckIssues, signals, now);
     const repoUrl = process.env.RECOURSE_REPO_URL || null;
     const repo = devRepoRoot();
@@ -7563,10 +8037,30 @@ async function runStuckRepairPass(force = false): Promise<Record<string, unknown
           }
         }
       }
-      stuckRepairLedger.push(action);
-      if (stuckRepairLedger.length > 200) stuckRepairLedger.splice(0, stuckRepairLedger.length - 200);
+    stuckRepairLedger.push(action);
+    if (stuckRepairLedger.length > 200) stuckRepairLedger.splice(0, stuckRepairLedger.length - 200);
     }
     saveStateToDisk();
+    // Provenance: the external static analysis is an outside opinion about our
+    // own code, so record it the same way as any other external verdict. Logged
+    // even when it found nothing — "scanned, clean" is a real result.
+    if (STATIC_AUDIT_ENABLED && staticAuditCache) {
+      const a = staticAuditCache.result;
+      appendProvenanceEvent('static_audit_run', {
+        available: a.available,
+        scanned: a.scanned,
+        analyzer: 'semgrep',
+        version: a.version ?? null,
+        rules: a.findings.length,
+        occurrences: a.findings.reduce((n, f) => n + f.count, 0),
+        errors: a.errors.length,
+        filesScanned: a.filesScanned ?? null,
+        durationMs: a.durationMs,
+        summary: staticAuditSummary(a),
+        reason: a.reason ?? null,
+        generation: status.generation,
+      });
+    }
     return {
       ok: true,
       now,
@@ -7578,6 +8072,12 @@ async function runStuckRepairPass(force = false): Promise<Record<string, unknown
       applyEnabled: SELF_REPAIR_APPLY,
       backoffMs: SELF_REPAIR_BACKOFF_MS,
       band: SELF_REPAIR_BAND,
+      // What the external static analyzer actually said, so an operator can see
+      // the opinion behind any `static-audit:*` signal — including the case
+      // where the analyzer was unavailable and contributed nothing.
+      staticAudit: staticAuditCache
+        ? { ...staticAuditCache.result, cachedAt: staticAuditCache.at, cacheAgeMs: Date.now() - staticAuditCache.at }
+        : null,
       // Remote diagnoses produced since the last pass (Kaggle/HF). Empty when
       // no remote platform is configured or nothing finished.
       remoteDiagnoses: consumeRemoteRepairDiagnoses(),
@@ -7663,6 +8163,27 @@ app.use(
     selfModGuard,
     appendProvenance: (eventType, data) => appendProvenanceEvent(eventType as ProvenanceEvent['type'], data),
     fleetRecursion,
+  }),
+);
+
+// NextGenCoder v5 no-LLM synthesizer — generate, verify, and benchmark tools
+// without an LLM. Every synthesis is provenance-logged; every benchmark attested.
+// The Skilltech fleet (Business-Logic-MCP, OG-Glass, Middle-Man, BigBack) is
+// wired in as untrusted proposers/verifiers/generators — kernel disposes.
+const skilltechBridge = createSkilltechBridge({
+  mcp: mcpToolProvider,
+  onEvent: (eventType, data) => appendProvenanceEvent(eventType as ProvenanceEvent['type'], data),
+});
+app.use(
+  '/api/recourse',
+  createV5Router({
+    registryRef: () => registry,
+    promoteTool,
+    appendProvenance: (eventType, data) => appendProvenanceEvent(eventType as ProvenanceEvent['type'], data),
+    saveState: saveStateToDisk,
+    cvc5Path: () => process.env.CVC5_PATH || 'cvc5',
+    egglogPath: () => process.env.EGGLOG_PATH || 'egglog',
+    skilltech: () => skilltechBridge,
   }),
 );
 

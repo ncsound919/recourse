@@ -15,6 +15,7 @@ import {
   setActiveProviderProfile,
 } from '../lib/modelProvider.js';
 import type { ProviderProfileId } from '../lib/modelProvider.js';
+import { parseArmId } from '../lib/roleRouter.js';
 
 export interface ProviderChatRouterDeps {
   currentProviderStatus(): {
@@ -29,6 +30,10 @@ export interface ProviderChatRouterDeps {
   saveState(): void;
   appendProvenance(eventType: string, data: Record<string, unknown>): void;
   currentGeneration(): number;
+  /** Role-aware routing state: one arm record per (role, profile) pair. */
+  roleRouterSnapshot(): Array<{ id: string; plays: number; mean: number }>;
+  /** The observed-mean bar a profile must clear to take a judgement role. */
+  roleJudgementFloor(): number;
 }
 
 export function createProviderChatRouter(deps: ProviderChatRouterDeps): Router {
@@ -43,6 +48,34 @@ export function createProviderChatRouter(deps: ProviderChatRouterDeps): Router {
       current: { baseUrl: ps.baseUrl, model: ps.model, online: ps.online, lastError: ps.lastError },
     };
   }
+
+  // Role-aware routing state. Shows which model is eligible for which ROLE and
+  // the measured evidence behind it, so "the 2B model planned that" is visible
+  // rather than inferred. Arms with no plays are reported as no-data, never as
+  // a mean of 0.
+  router.get('/api/recourse/provider/roles', async (_req, res) => {
+    const arms = deps.roleRouterSnapshot();
+    const byRole: Record<string, Array<{ profile: string; plays: number; mean: number | null; eligibleForJudgement: boolean }>> = {};
+    for (const a of arms) {
+      const parsed = parseArmId(a.id);
+      if (!parsed) continue;
+      const row = byRole[parsed.role] ?? (byRole[parsed.role] = []);
+      row.push({
+        profile: parsed.profile,
+        plays: a.plays,
+        // A never-played arm has NO measured quality. Reporting 0 would be a
+        // fabricated verdict in the opposite direction.
+        mean: a.plays > 0 ? a.mean : null,
+        eligibleForJudgement: a.plays > 0 && a.mean >= deps.roleJudgementFloor(),
+      });
+    }
+    res.json({
+      success: true,
+      judgementFloor: deps.roleJudgementFloor(),
+      roles: byRole,
+      note: 'A role with no played arm has no measured evidence; judgement roles refuse rather than guess.',
+    });
+  });
 
   // Non-agentic chat against the configured provider: the local Spark model
   // (llama-server) first, with an automatic API fallback. Online only if the

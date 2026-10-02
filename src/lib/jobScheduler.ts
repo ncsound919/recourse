@@ -39,6 +39,7 @@
 import fs from 'fs';
 import path from 'path';
 import cron, { type ScheduledTask } from 'node-cron';
+import { classifyRun, skipReason, type RunOutcome } from './runOutcome.js';
 
 // ----------------------------------------------------------------------------
 // Types
@@ -69,10 +70,25 @@ export interface ScheduledJobDef {
 export interface ScheduledJobState extends ScheduledJobDef {
   enabled: boolean;
   lastRunAt: number | null;
+  /** true = ran and did not throw; false = threw; null = skipped (did not run). */
   lastOk: boolean | null;
   lastError: string | null;
+  /** Why the last run skipped. Cleared on a real run. */
+  lastSkipped?: string | null;
   runCount: number;
   failCount: number;
+  /** How many runs ended in an explicit skip. */
+  skipCount: number;
+  /**
+   * How many runs completed without throwing but produced nothing verifiable.
+   * This is the number that was previously invisible: a job could spin every
+   * cadence and accomplish nothing while still reporting healthy.
+   */
+  unproductiveCount: number;
+  /** Last classified terminal state of a run. */
+  lastOutcome?: RunOutcome | null;
+  /** Detail line for the last classified run. */
+  lastOutcomeDetail?: string | null;
   running: boolean;
   nextRunAt: number;
 }
@@ -293,6 +309,25 @@ function estimateNextRunAt(job: Pick<ScheduledJobState, 'cadenceMs' | 'cron'>): 
   return now + 60_000;
 }
 
+/**
+ * Is this run result an explicit "I did not do the work"?
+ *
+ * A job that returns `{ skipped: ... }` did NOT run — autopilot was off, the
+ * service was unconfigured, the guard was closed. Recording that as `lastOk:
+ * true` is how a job can look permanently healthy while doing nothing, and it
+ * means a stuck-signal on that job can never fire: the self-repair loop reads
+ * `lastOk === false` and only ever saw true.
+ *
+ * A skip is neither success nor failure. It is tracked as its own state so an
+ * operator can see "running, but consistently skipping" instead of "healthy".
+ */
+export function isSkipResult(result: unknown): boolean {
+  if (result === null || result === undefined) return false;
+  if (typeof result !== 'object') return false;
+  const skipped = (result as { skipped?: unknown }).skipped;
+  return typeof skipped === 'string' && skipped.length > 0;
+}
+
 /** Run the handler once, recording state exactly like a scheduled fire. */
 async function runJobOnce(job: ScheduledJobState): Promise<JobRunResult> {
   if (job.running) return { skipped: 'overlap guard' }; // belt-and-braces w/ noOverlap
@@ -300,14 +335,47 @@ async function runJobOnce(job: ScheduledJobState): Promise<JobRunResult> {
   try {
     const result = await job.run();
     job.lastRunAt = Date.now();
-    job.lastOk = true;
-    job.lastError = null;
+
+    // Terminal-state classification. A job that ran and threw nothing is NOT
+    // automatically a success: if it produced no verifiable artifact and did not
+    // declare a skip, the run was unproductive and is counted as such. An
+    // artifact that fails hash re-verification also lands here.
+    const report = classifyRun(job.id, result);
+    job.lastOutcome = report.outcome;
+    job.lastOutcomeDetail = report.detail;
+    if (report.tampered) {
+      // The run claimed evidence it cannot prove. Treat as a failure so the
+      // stuck-signal layer can see it.
+      job.lastOk = false;
+      job.lastError = report.detail;
+      job.lastSkipped = null;
+      job.failCount += 1;
+    } else if (report.outcome === 'skipped') {
+      job.lastOk = null;
+      job.lastError = null;
+      job.lastSkipped = skipReason(result);
+      job.skipCount += 1;
+    } else if (report.outcome === 'unproductive') {
+      // Ran, did not throw, produced nothing. Neither healthy nor errored —
+      // tracked distinctly so "permanently spinning" is visible.
+      job.lastOk = null;
+      job.lastError = null;
+      job.lastSkipped = null;
+      job.unproductiveCount += 1;
+    } else {
+      job.lastOk = true;
+      job.lastError = null;
+      job.lastSkipped = null;
+    }
     job.runCount += 1;
     return result;
   } catch (err) {
     job.lastRunAt = Date.now();
     job.lastOk = false;
     job.lastError = err instanceof Error ? err.message : String(err);
+    job.lastSkipped = null;
+    job.lastOutcome = 'unproductive';
+    job.lastOutcomeDetail = `threw: ${job.lastError}`;
     job.runCount += 1;
     job.failCount += 1;
     return null;
@@ -355,6 +423,11 @@ export function registerScheduledJob(def: ScheduledJobDef): { ok: boolean; error
     lastError: null,
     runCount: 0,
     failCount: 0,
+    skipCount: 0,
+    unproductiveCount: 0,
+    lastOutcome: null,
+    lastOutcomeDetail: null,
+    lastSkipped: null,
     running: false,
     nextRunAt: estimateNextRunAt(def),
   };

@@ -10,6 +10,7 @@
  * fabricated.
  */
 import { pdfExtractUrl, pdfSidecarHealth } from './pdfSidecarClient.js';
+import { resolveAndExtract } from './citationResolver.js';
 
 export interface OncologyEntity {
   id: string;
@@ -230,9 +231,16 @@ function checkTermsInText(text: string, claim: { asset_name: string; mechanism?:
 }
 
 /**
- * Cross-validate a biotech claim against the cited literature via the PDF
- * sidecar. Honest: when the sidecar is down or the citation has no URL, the
- * result reports `available:false` — never a fabricated pass/fail.
+ * Cross-validate a biotech claim against the cited literature.
+ *
+ * A curated citation is a reference string written for a human, not a URL, so
+ * this resolves it to open-access full text first (citationResolver → Europe
+ * PMC) and checks the claim's terms against what was actually retrieved.
+ *
+ * Honest: when the citation cannot be resolved, the sidecar is down, or the
+ * fetch fails, the result reports `available:false` with the reason — never a
+ * fabricated pass/fail. `tierConsistent` stays null: verifying an evidence tier
+ * needs the paper's methods section parsed, which this does not do.
  */
 export async function crossValidateWithLiterature(claim: {
   asset_name: string;
@@ -241,68 +249,92 @@ export async function crossValidateWithLiterature(claim: {
   source?: string;
 }): Promise<LiteratureCheckResult> {
   const details: string[] = [];
-  const url = claim.source ? extractUrl(claim.source) : null;
 
-  if (!url) {
-    return {
-      checked: true,
-      available: false,
-      urlExtracted: null,
-      mechanismFound: false,
-      targetFound: false,
-      tierConsistent: null,
-      summary: 'Literature check unavailable: no fetchable URL in citation',
-      details: ['Citation does not contain an http(s) URL; literature cross-validation skipped'],
-    };
+  // A caller may already hold a direct URL (e.g. a DOI or PDF link). Prefer it.
+  const directUrl = claim.source ? extractUrl(claim.source) : null;
+  let text: string | null = null;
+  let chars = 0;
+  let pages: number | undefined;
+  let resolvedVia = 'direct-url';
+
+  if (!directUrl) {
+    // No URL in the citation: resolve it against Europe PMC. This is the path
+    // every curated oncology citation takes.
+    const resolved = await resolveAndExtract(claim.source ?? '');
+    if (!resolved.ok) {
+      return {
+        checked: true,
+        available: false,
+        urlExtracted: null,
+        mechanismFound: false,
+        targetFound: false,
+        tierConsistent: null,
+        summary: `Literature check unavailable: ${resolved.reason ?? 'citation could not be resolved'}`,
+        details: [
+          `Citation could not be resolved to open-access full text: ${resolved.reason ?? 'unknown'}`,
+          ...(resolved.resolution.indexedTitle ? [`Closest indexed title: "${resolved.resolution.indexedTitle}"`] : []),
+        ],
+      };
+    }
+    text = resolved.text;
+    chars = resolved.chars;
+    resolvedVia = `europepmc:${resolved.resolution.pmcid}`;
+    details.push(
+      `Resolved citation to open-access full text ${resolved.resolution.pmcid}` +
+      (resolved.resolution.matchScore !== undefined ? ` (title match ${resolved.resolution.matchScore})` : ''),
+    );
+    if (resolved.resolution.indexedTitle) details.push(`Indexed title: "${resolved.resolution.indexedTitle}"`);
+  } else {
+    const health = await pdfSidecarHealth();
+    if (!health.ok) {
+      return {
+        checked: true,
+        available: false,
+        urlExtracted: directUrl,
+        mechanismFound: false,
+        targetFound: false,
+        tierConsistent: null,
+        summary: 'Literature check unavailable: PDF sidecar is down',
+        details: [`PDF sidecar unreachable: ${health.error ?? 'unknown error'}`],
+      };
+    }
+    const extracted = await pdfExtractUrl(directUrl, { maxPages: 10, timeoutMs: 15000 });
+    if (!extracted.ok || !extracted.text) {
+      return {
+        checked: true,
+        available: true,
+        urlExtracted: directUrl,
+        mechanismFound: false,
+        targetFound: false,
+        tierConsistent: null,
+        summary: extracted.scanned_only_image_pdf
+          ? 'Literature check: scanned/image-only PDF — no extractable text'
+          : 'Literature check: PDF extraction failed',
+        details: [extracted.error ?? 'no text extracted'],
+      };
+    }
+    text = extracted.text;
+    chars = extracted.total_chars ?? 0;
+    pages = extracted.page_count ?? undefined;
   }
 
-  const health = await pdfSidecarHealth();
-  if (!health.ok) {
-    return {
-      checked: true,
-      available: false,
-      urlExtracted: url,
-      mechanismFound: false,
-      targetFound: false,
-      tierConsistent: null,
-      summary: 'Literature check unavailable: PDF sidecar is down',
-      details: [`PDF sidecar unreachable: ${health.error ?? 'unknown error'}`],
-    };
-  }
-
-  const extracted = await pdfExtractUrl(url, { maxPages: 10, timeoutMs: 15000 });
-  if (!extracted.ok || !extracted.text) {
-    return {
-      checked: true,
-      available: true,
-      urlExtracted: url,
-      mechanismFound: false,
-      targetFound: false,
-      tierConsistent: null,
-      summary: extracted.scanned_only_image_pdf
-        ? 'Literature check: scanned/image-only PDF — no extractable text'
-        : 'Literature check: PDF extraction failed',
-      details: [extracted.error ?? 'no text extracted'],
-    };
-  }
-
-  const { mechanismFound, targetFound } = checkTermsInText(extracted.text, claim);
+  const { mechanismFound, targetFound } = checkTermsInText(text ?? '', claim);
   const tierConsistent = null; // Tier verification would require parsing the paper's methods section
 
   const summary = mechanismFound || targetFound
-    ? `Literature cross-validated: claim terms found in extracted paper text (${extracted.total_chars ?? 0} chars)`
-    : 'Literature check: claim terms NOT found in extracted paper text';
+    ? `Literature cross-validated via ${resolvedVia}: claim terms found in retrieved full text (${chars} chars)`
+    : `Literature check via ${resolvedVia}: claim terms NOT found in retrieved full text`;
 
-  details.push(`Extracted ${extracted.total_chars ?? 0} chars from ${extracted.page_count ?? '?'} pages`);
-  details.push(`Asset name "${claim.asset_name}" ${targetFound ? 'found' : 'NOT found'} in paper text`);
+  details.push(`Retrieved ${chars} chars${pages !== undefined ? ` from ${pages} pages` : ''}`);
+  details.push(`Asset name "${claim.asset_name}" ${targetFound ? 'found' : 'NOT found'} in the text`);
   if (claim.mechanism) {
-    details.push(`Mechanism terms ${mechanismFound ? 'found' : 'NOT found'} in paper text`);
+    details.push(`Mechanism terms ${mechanismFound ? 'found' : 'NOT found'} in the text`);
   }
 
   return {
     checked: true,
     available: true,
-    urlExtracted: url,
+    urlExtracted: directUrl,
     mechanismFound,
     targetFound,
     tierConsistent,

@@ -9,7 +9,7 @@ coverage/
 .selfhosted/
 __pycache__/
 *.pyc
-# Recourse runtime state (regenerated each run — not source)
+# Recourse runtime state (regenerated each run â€” not source)
 recourse_storage.json
 recourse_learner.json
 recourse_dream.json
@@ -41,5 +41,8 @@ recourse-fix-bundle/
 prometheus/prometheus
 prometheus/prometheus.tar
 
-# local secret-import script (contains a hardcoded key — rotate + move to Keywire)
+# local secret-import script (contains a hardcoded key â€” rotate + move to Keywire)
 scripts/kw-import-phoenix.js
+
+# runtime pid files for background loops (recreated on every start)
+*.pid
