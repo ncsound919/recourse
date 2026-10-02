@@ -64,6 +64,8 @@ export interface ReadoutRouterDeps {
   selfUseStatus(): Record<string, unknown>;
   /** Value ledger snapshot: real invocations, consumptions, usefulness, dead weight. */
   valueSnapshot?(): Record<string, unknown>;
+  /** Self-diagnosis: value-signal health, run outcomes, verification cost. */
+  introspectionReport?(): Record<string, unknown>;
   systemSnapshotsRef(): SystemSnapshot[];
   systemBaselineRef(): SystemSnapshot | null;
   legacyDigestRef(): Record<string, unknown> | null;
@@ -300,6 +302,17 @@ export function createReadoutRouter(deps: ReadoutRouterDeps): Router {
       return res.status(503).json({ success: false, error: 'value snapshot unavailable on this host' });
     }
     res.json({ success: true, ...snapshot });
+  });
+
+  // Self-diagnosis: is the system actually working, and what is it costing?
+  // Aggregates the three signals that decide that — value signal health, run
+  // outcomes, and verification cost — into one report with actionable concerns.
+  router.get('/introspection', (_req, res) => {
+    const report = deps.introspectionReport?.();
+    if (!report) {
+      return res.status(503).json({ success: false, error: 'introspection unavailable on this host' });
+    }
+    res.json({ success: true, ...report });
   });
 
   // System snapshot history (every materially distinct system state).

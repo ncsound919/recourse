@@ -108,6 +108,7 @@ import {
 } from './src/lib/staticAuditSignal.js';
 import { RoleRouter, DEFAULT_ROLE_POLICY, type ModelProfile } from './src/lib/roleRouter.js';
 import { toolValueLedger } from './src/lib/toolValueLedger.js';
+import { introspectionReport } from './src/lib/introspection.js';
 import { generationTargets, generationPlanDigest, summarizeBeliefsByDomain } from './src/lib/learnerGenerationPlan.js';
 import { runSleepComputeUnit, takeReadySleepArtifact } from './src/lib/sleepCompute.js';
 import { drainRemoteTasks, lastFinishedRemoteTask, readRemoteQueue, remoteComputeEnabled } from './src/lib/remoteCompute.js';
@@ -2422,6 +2423,7 @@ app.use('/api/recourse', createReadoutRouter({
   outcomeLedger,
     selfUseStatus,
     valueSnapshot,
+    introspectionReport: () => currentIntrospectionReport(),
   systemSnapshotsRef: () => systemSnapshots,
   systemBaselineRef: () => systemBaseline,
   legacyDigestRef: () => legacyDigest,
@@ -4848,6 +4850,27 @@ function valueSnapshot(): Record<string, unknown> {
     recent: ledger.recentEvents(20),
     note: 'deadWeight = ran with real arguments, output never consumed by any named consumer. Self-use differential tests and loop heartbeats are verification, not use, and are excluded.',
   };
+}
+
+/**
+ * Build the self-diagnosis report from LIVE host state.
+ *
+ * Every input here is something another component already measured: the value
+ * ledger's own counters, the scheduler's own run classification, and the
+ * analyzer's own result. Nothing is estimated. If a dimension has no
+ * observation yet it reports null rather than a plausible-looking zero.
+ */
+function currentIntrospectionReport(): Record<string, unknown> {
+  try {
+    return introspectionReport({
+      jobs: listScheduledJobs(),
+      audit: staticAuditCache?.result ?? null,
+      auditCachedAt: staticAuditCache?.at ?? null,
+    }) as unknown as Record<string, unknown>;
+  } catch (err) {
+    // Telemetry must never take the host down; an honest error beats a crash.
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 function toolHealthVerified(name: string): boolean {

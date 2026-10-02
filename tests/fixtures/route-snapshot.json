@@ -129,6 +129,7 @@
   "GET /api/recourse/intake/status",
   "GET /api/recourse/integrity/status",
   "GET /api/recourse/intel",
+  "GET /api/recourse/introspection",
   "GET /api/recourse/issues",
   "GET /api/recourse/keywire/axiom",
   "GET /api/recourse/keywire/pm2",
