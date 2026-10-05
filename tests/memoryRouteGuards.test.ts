@@ -25,7 +25,10 @@ function buildApp() {
   const app = express();
   app.use('/api/recourse', createMemoryRouter({
     ensureVectorMemory: async () => ({
-      status: async () => ({ embedder: 'lexical' as const, store: 'memory' as const, docs: 3 }),
+      status: async () => ({
+        embedder: 'lexical' as const, store: 'memory' as const, docs: 3,
+        mixedEmbedders: false,
+      }),
       recall: async () => [],
       remember: async () => {},
     }),

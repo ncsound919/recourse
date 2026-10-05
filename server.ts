@@ -288,6 +288,9 @@ import type {
 // Skill library accessor (catalog, search, read sibling skill repositories)
 import { scanSkillLibraries } from './src/skills/scanner.js';
 import { summarize as summarizeSkills, defaultSkillRoots } from './src/skills/index.js';
+import { catalogCoversRoots, missingSkillRoots } from './src/skills/rootIntegrity.js';
+import { forgeEpisodeOutcome, forgeEpisodeScore, forgeEpisodeSummary } from './src/lib/forgeEpisode.js';
+import { resolveLegoReadinessGate } from './src/lego/readinessGate.js';
 import type { SkillRoot, SkillDef, SkillSnapshot, SkillSummary } from './src/skills/types.js';
 // Composer (creative domain): the track routes live in src/routes/compose.ts;
 // the server still needs the style list + the learner for that router's mount.
@@ -4428,12 +4431,8 @@ const skillToolProvider = createSkillToolProvider({
 ensureCatalog: async () => {
     // Rescan when the catalog is empty, but also when a configured root is gone:
     // a persisted catalog lists the deleted root forever, so the entries behind it
-    // are permanently unreadable while still being offered to callers. A statSync
-    // per root is cheap next to a recursive SKILL.md walk.
-    const rootGone = skillRoots.some((r) => {
-      try { return !fs.statSync(r.root).isDirectory(); } catch { return true; }
-    });
-    if (!skillCatalog.length || rootGone) {
+    // are permanently unreadable while still being offered to callers.
+    if (!catalogCoversRoots(skillCatalog, skillRoots)) {
       try { await runSkillScan(); } catch { /* honest: leaves the catalog empty */ }
     }
     return skillCatalog;
@@ -5942,13 +5941,14 @@ function ensureScienceAutopilot(): void {
 // 8. LEGO COMPOSABLE ML & AUTONOMOUS SELF-ASSEMBLY ROUTES
 // =========================================================================
 // LEGO routes moved to src/routes/lego.ts.
-// Fail CLOSED when readiness has never been measured. `status.readinessScore` is
-// only assigned by runServerTickOnce(), so before the first tick (or from a state
-// file predating the field) it is undefined. Defaulting to 1 opened the durable
-// registry-commit gate to maximum readiness on an unmeasured system, while every
-// sibling consumer of the same field defaults to 0 (engine.ts:36, server.ts:5515,
-// server.ts:958). Unmeasured must never read as "fully stable".
-app.use(createLegoRouter({ readinessScore: () => (typeof status.readinessScore === 'number' ? status.readinessScore : 0) }));
+// Fail CLOSED when readiness has never been measured. `status.readinessScore`
+// is only assigned by runServerTickOnce(), so before the first tick (or from a
+// state file predating the field) it is undefined, and defaulting to 1 opened
+// the durable registry-commit gate to maximum readiness on an unmeasured
+// system. Resolved by `resolveLegoReadinessGate`, which fails closed on anything
+// that is not a finite number — every sibling consumer of the same field already
+// defaults to 0.
+app.use(createLegoRouter({ readinessScore: () => resolveLegoReadinessGate(status.readinessScore) }));
 
 // =========================================================================
 // 9. EXTERNAL INTAKE (LEARNING), GROUNDING, BENCHMARK + READOUT
@@ -6377,16 +6377,15 @@ async function runSkillScan(): Promise<SkillSnapshot> {
   // A configured root whose directory is gone can never appear in the catalog,
   // so nothing distinguishes "root deleted" from "root scanned, no skills" —
   // `/skills/status` reported `errors: []` while 137 of 673 catalog entries lived
-  // in deleted directories, because the boot gate below only compared root ids
-  // against a stale persisted catalog and so never re-ran the scan.
+  // in deleted directories, because the boot gate only compared root ids against
+  // a stale persisted catalog and so never re-ran the scan.
   // `scanSkillRoot` already surfaces a readdir ENOENT; add an explicit entry only
   // where it did not, so one dead root yields one error rather than two.
-  for (const r of skillRoots) {
-    let exists = true;
-    try { exists = fs.statSync(r.root).isDirectory(); } catch { exists = false; }
-    if (exists) continue;
-    const already = res.errors.some((e) => e.root === r.id);
-    if (!already) res.errors.push({ root: r.id, error: `skill root does not exist: ${r.root}` });
+  const alreadyReported = new Set(res.errors.map((e) => e.root));
+  for (const r of missingSkillRoots(skillRoots)) {
+    if (!alreadyReported.has(r.id)) {
+      res.errors.push({ root: r.id, error: `skill root does not exist: ${r.root}` });
+    }
   }
   skillCatalog = res.skills;
   skillFound = res.found;
@@ -6395,7 +6394,7 @@ async function runSkillScan(): Promise<SkillSnapshot> {
   skillLastScan = res.scannedAt;
   appendProvenanceEvent('skill_catalog_scanned', {
     roots: skillRoots.map((r) => r.id),
-    missingRoots: skillRoots.filter((r) => { try { return !fs.statSync(r.root).isDirectory(); } catch { return true; } }).map((r) => r.id),
+    missingRoots: missingSkillRoots(skillRoots).map((r) => r.id),
     indexed: skillCatalog.length,
     found: res.found,
     prunedTranslations: res.prunedTranslations,
@@ -7727,22 +7726,21 @@ function recordForgeEpisode(
   entry: ForgeLedgerEntry,
 ): void {
   try {
-    const kind: 'win' | 'loss' | 'neutral' =
-      entry.status === 'materialized' || entry.status === 'exists' ? 'win'
-        : entry.status === 'offline' ? 'neutral'
-          : 'loss';
-    // Prefer the sandbox verifier's own score; fall back to the quality gate's.
-    // Never invent one: an absent score is recorded as 0, not as a passing mark.
-    const score = typeof outcome.verifyScore === 'number'
-      ? outcome.verifyScore
-      : typeof entry.quality?.score === 'number' ? entry.quality.score : 0;
+    // Mapping, score and summary live in src/lib/forgeEpisode.ts so they are unit
+    // testable; `server.ts` exports nothing.
     recordEpisode({
       domain: spec.domain,
       instructions: spec.prompt ?? spec.name,
       toolName: outcome.name,
-      outcome: kind,
-      score,
-      summary: `forge ${entry.status}: ${outcome.name} (attempts ${outcome.attemptsUsed}/${outcome.maxTries}${outcome.reason ? `, reason=${outcome.reason}` : ''})`,
+      outcome: forgeEpisodeOutcome(entry.status),
+      score: forgeEpisodeScore({ verifyScore: outcome.verifyScore, qualityScore: entry.quality?.score }),
+      summary: forgeEpisodeSummary({
+        name: outcome.name,
+        status: entry.status,
+        attemptsUsed: outcome.attemptsUsed,
+        maxTries: outcome.maxTries,
+        reason: outcome.reason,
+      }),
       geneIds: [`gene:${outcome.name}`],
     });
   } catch {
@@ -9688,20 +9686,15 @@ setImmediate(() => {
   }
 });
 // Skill library: refresh the catalog in the background when persisted state
-// does not cover every configured root (e.g. new default libraries were added)
-// OR when any configured root has since disappeared from disk.
+// does not cover every configured root, OR when any configured root has since
+// disappeared from disk.
 //
 // The second condition is the one that mattered. A persisted non-empty catalog
-// satisfies the root-id check forever, so the scan never re-ran; when 9 of 13
+// satisfied the root-id check forever, so the scan never re-ran; when 9 of 13
 // roots were deleted, 137 catalog entries kept pointing at missing directories
-// and `/skills/status` still reported `errors: []`. Requiring every root to still
-// exist makes a deletion trigger a rescan, which then records the gap honestly.
+// and `/skills/status` still reported `errors: []`.
 setImmediate(() => {
-  const missingRoot = skillRoots.some((r) => {
-    try { return !fs.statSync(r.root).isDirectory(); } catch { return true; }
-  });
-  const covered = skillCatalog.length > 0 && skillRoots.every((r) => skillCatalog.some((s) => s.rootId === r.id));
-  if (covered && !missingRoot) return;
+  if (catalogCoversRoots(skillCatalog, skillRoots)) return;
   void runSkillScan()
     .then((snap) => console.log(`[Recourse] skill scan complete: ${snap.skills.length} skills across ${snap.roots.length} roots`))
     .catch((err: unknown) => console.warn('[Recourse] skill scan failed:', err instanceof Error ? err.message : String(err)));

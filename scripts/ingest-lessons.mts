@@ -33,6 +33,32 @@ import fs from 'node:fs';
 import path from 'node:path';
 import YAML from 'yaml';
 
+/**
+ * Load `.env` into `process.env` WITHOUT overwriting anything already set.
+ *
+ * Without this the ingester silently runs with a different configuration than the
+ * server: `EMBEDDING_MODEL` unset means every lesson gets a LEXICAL vector even
+ * though the server is configured for API embeddings. That produces a store whose
+ * rows cannot be searched by the running service — the exact mixed-embedding-space
+ * hazard `vectorMemory` now detects and reports.
+ */
+function loadEnv(): void {
+  const envPath = path.resolve(process.cwd(), '.env');
+  if (!fs.existsSync(envPath)) return;
+  for (const raw of fs.readFileSync(envPath, 'utf8').split(/\r?\n/)) {
+    const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(raw);
+    if (!m) continue;
+    const key = m[1];
+    let val = m[2].trim();
+    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+      val = val.slice(1, -1);
+    }
+    if (process.env[key] === undefined) process.env[key] = val;
+  }
+}
+
+loadEnv();
+
 const DEFAULT_LESSONS_DIR = 'C:\\Users\\User\\Downloads\\BUSINESS\\Coding lessons';
 const FLEET_MEMORY_MAX_TEXT = 10_000;
 const FLEET_MEMORY_MAX_DATA_CHARS = 20_000;

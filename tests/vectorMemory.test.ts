@@ -256,7 +256,10 @@ describe('VectorMemory (LanceDB when the native module loads)', () => {
     if (st.store === 'lancedb') {
       expect(st.dir).toBe(dir);
       // meta was persisted as a JSON string and rehydrated on recall.
-      expect(hits[0].meta).toEqual({ tag: 'x' });
+          // `remember` records which embedder produced the vector alongside the
+    // caller's own meta, so a store written lexically can never be silently
+    // searched with API embeddings (cosine across the two spaces is meaningless).
+    expect(hits[0].meta).toEqual({ tag: 'x', embedder: 'lexical' });
     } else {
       expect(st.dir).toBeUndefined();
     }
