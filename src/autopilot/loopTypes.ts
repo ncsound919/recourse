@@ -367,4 +367,7 @@ export interface LoopContext {
   currentProposal: UpgradeProposalT | null;
   prState: PRStateT | null;
   checkpoint: CheckpointT | null;
+  /** Which learner directive steered which gap. Recorded so the influence is
+   *  attributable in the run report rather than inferred from a score. */
+  directiveInfluence?: Array<{ directiveId: string; gapId: string }>;
 }

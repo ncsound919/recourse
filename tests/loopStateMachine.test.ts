@@ -92,7 +92,9 @@ describe('runLoop kill switch and gates', () => {
     process.env.RECOURSE_AUTOPILOT_DISABLED = '1';
     try {
       const out = await runLoop({
-        profile: makeProfile({ repoPath: repo }),
+        // A test run writes no report into the repository.
+        skipRunReport: true,
+profile: makeProfile({ repoPath: repo }),
         dryRun: true,
         adapters: { grader: graderFixture },
       });
@@ -111,7 +113,9 @@ describe('runLoop kill switch and gates', () => {
     // the irreversible remote write is gated.
     const repo = makeTmpRepo();
     const out = await runLoop({
-      profile: makeProfile({ repoPath: repo, autoMerge: false, proposeEnabled: false }),
+      // A test run writes no report into the repository.
+      skipRunReport: true,
+profile: makeProfile({ repoPath: repo, autoMerge: false, proposeEnabled: false }),
       adapters: { grader: graderFixture },
     });
     expect(out.state).toMatchObject({ status: 'pr_open', prNumber: -1, reason: 'propose_disabled' });
@@ -123,7 +127,9 @@ describe('runLoop kill switch and gates', () => {
   it('reports the caller-imposed restriction as dry_run, not as a profile fault', async () => {
     const repo = makeTmpRepo();
     const out = await runLoop({
-      profile: makeProfile({ repoPath: repo, autoMerge: false, proposeEnabled: true }),
+      // A test run writes no report into the repository.
+      skipRunReport: true,
+profile: makeProfile({ repoPath: repo, autoMerge: false, proposeEnabled: true }),
       dryRun: true,
       adapters: { grader: graderFixture },
     });
@@ -132,7 +138,9 @@ describe('runLoop kill switch and gates', () => {
 
   it('returns error no_repo_binding when the profile has no repo binding', async () => {
     const out = await runLoop({
-      profile: makeProfile(),
+      // A test run writes no report into the repository.
+      skipRunReport: true,
+profile: makeProfile(),
       dryRun: true,
       adapters: { grader: graderFixture },
     });
@@ -144,7 +152,9 @@ describe('runLoop dry-run happy path', () => {
   it('runs audit -> analyze -> generate -> gate and returns pr_open with prNumber -1', async () => {
     const repo = makeTmpRepo();
     const out = await runLoop({
-      profile: makeProfile({ repoPath: repo, autoMerge: true }),
+      // A test run writes no report into the repository.
+      skipRunReport: true,
+profile: makeProfile({ repoPath: repo, autoMerge: true }),
       dryRun: true,
       adapters: { grader: graderFixture },
       gateExecutors: allPassingExecutors(),
@@ -181,7 +191,9 @@ describe('runLoop with a real code planner', () => {
     const pass = vi.fn(async () => ({ passed: true, output: 'ok' }));
 
     const out = await runLoop({
-      profile,
+      // A test run writes no report into the repository.
+      skipRunReport: true,
+profile,
       dryRun: true,
       adapters: { grader: graderFixture },
       planner,
@@ -211,7 +223,9 @@ describe('runLoop with a real code planner', () => {
     const pass = vi.fn(async () => ({ passed: true, output: 'ok' }));
 
     const out = await runLoop({
-      profile,
+      // A test run writes no report into the repository.
+      skipRunReport: true,
+profile,
       dryRun: true,
       adapters: { grader: graderFixture },
       planner,
@@ -230,7 +244,9 @@ describe('runLoop with a real code planner', () => {
     const pass = vi.fn(async () => ({ passed: true, output: 'ok' }));
 
     const out = await runLoop({
-      profile,
+      // A test run writes no report into the repository.
+      skipRunReport: true,
+profile,
       dryRun: true,
       adapters: { grader: graderFixture },
       planner: async () => null,
@@ -255,7 +271,9 @@ describe('runLoop when no gap passes the gate', () => {
       sandbox: vi.fn(async () => ({ passed: false, output: 'blocked', error: 'blocked' })),
     };
     const out = await runLoop({
-      profile: makeProfile({ repoPath: repo, autoMerge: true }),
+      // A test run writes no report into the repository.
+      skipRunReport: true,
+profile: makeProfile({ repoPath: repo, autoMerge: true }),
       dryRun: true,
       adapters: { grader: graderFixture },
       gateExecutors: failing,

@@ -370,6 +370,10 @@ export async function probeAutopilotOnce(
         // now exercises the real audit team.
         adapters: defaultAuditAdapters(),
         learner: opts.learner,
+        // This probe fires every 10 ticks and is read-only by definition. Writing
+        // a run report per probe would fill docs/audits/runs with reports whose
+        // fitnessDelta is permanently null because a dry run never merges.
+        skipRunReport: true,
         ...(opts.planner ? { planner: opts.planner } : {}),
       });
       out.push({

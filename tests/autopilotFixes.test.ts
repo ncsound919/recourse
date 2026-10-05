@@ -426,6 +426,8 @@ describe('M4 gap quarantine', () => {
     // Dry-run the loop against a profile with the same gap text; the quarantined
     // gap must be skipped, leaving no candidate -> idle.
     const out = await runLoop({
+      // A test run writes no report into the repository.
+      skipRunReport: true,
       profile: makeProfile(repo, ['No public website for the product']),
       dryRun: true,
       adapters: { grader: HIGH_AUDIT },

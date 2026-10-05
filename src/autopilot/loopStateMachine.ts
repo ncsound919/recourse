@@ -21,6 +21,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   PRState,
+  verificationLane,
   type AuditorIdT,
   type AuditStatementT,
   type BusinessScorecardT,
@@ -48,6 +49,15 @@ import { analyzeGaps, type SynergyPair } from './gapAnalyzer';
 import type { Directive } from '../dream/learner-types';
 import { generateUpgrade, type PlannedChange } from './upgradeGenerator';
 import { runGate, autoDeployAllowedFor, type GateExecutors } from './preMergeGate';
+import {
+  RunReport,
+  assessSignificance,
+  countLocAdded,
+  newRunId,
+  writeRunReport,
+  type RunReportT,
+} from './runReport';
+import { directivesFor } from './gapAnalyzer';
 import { checkAndMerge, computeVetoDeadline, parseOwnerRepo, savePRState } from './vetoScheduler';
 import { fetchGitHubToken } from './keywireClient';
 import { createGitHubClient } from './gitHubClient';
@@ -93,9 +103,29 @@ export type LoopRunOptions = {
   synergy?: (gaps: GapT[]) => SynergyPair[];
   /** The recursive learner's directives, so gap ranking can be steered by them. */
   directives?: Directive[];
+  /**
+   * Learner calibration signals to fold into the run report. Supplied by the
+   * caller (the learner is a separate store) rather than read here, so a report
+   * never claims a calibration number it did not measure.
+   */
+  runReportSignals?: { forecastBrier?: number | null; forecastEce?: number | null; selfEce?: number | null };
+  /**
+   * Where to persist the run report. Defaults to `docs/audits/runs`. Tests pass
+   * a temp dir so a run does not write into the repository.
+   */
+  runReportDir?: string;
+  /** Suppress persisting the report entirely (used by the server-side probe). */
+  skipRunReport?: boolean;
 };
 
-export type LoopOutcome = { state: LoopState; context: LoopContext; skipped?: SkippedProposal[] };
+export type LoopOutcome = {
+  state: LoopState;
+  context: LoopContext;
+  skipped?: SkippedProposal[];
+  /** The run's significance record. Absent only when the report could not be
+   *  built (a write failure is logged, never silently dropped). */
+  report?: RunReportT;
+};
 
 /**
  * A proposal that produced nothing, and why. Surfaced on the outcome (and in the
@@ -107,10 +137,93 @@ export interface SkippedProposal {
   reason: string;
 }
 
+/**
+ * Everything the loop observed that a significance record needs. Kept on the
+ * context so `buildRunReport` can read it without re-deriving anything.
+ */
+export interface LoopRunEvidence {
+  runId: string;
+  proposals: number;
+  gatesPassed: number;
+  gatesFailed: number;
+  laneA: boolean;
+  laneB: boolean;
+  /** Post-merge scorecard delta, set by resumeAfterVeto once a merge lands. */
+  fitnessDelta: number | null;
+  /** Learner calibration at the end of the run. */
+  forecastBrier: number | null;
+  forecastEce: number | null;
+  selfEce: number | null;
+}
+
 const DEFAULT_AUDIT_DIR = 'data/business-profiles';
 
 function emptyContext(): LoopContext {
   return { profileSlug: '', scorecard: null, queue: null, currentProposal: null, prState: null, checkpoint: null };
+}
+
+/**
+ * Assemble and persist this run's significance record.
+ *
+ * `significant` is `filesChanged >= 2 && gatesPassed >= 1 && fitnessDelta > 0`.
+ * A dry run never sets `fitnessDelta` (nothing merges), so a dry run is honest
+ * about never being significant: it did not prove anything improved.
+ */
+function buildRunReport(
+  context: LoopContext,
+  queue: UpgradeQueueT | null,
+  evidence: LoopRunEvidence,
+  skipped: SkippedProposal[],
+  outcome: { status: string; reason?: string },
+): RunReportT | undefined {
+  try {
+    const proposal = context.currentProposal;
+    const files = proposal?.files ?? [];
+    const skippedByReason: Record<string, number> = {};
+    for (const s of skipped) skippedByReason[s.reason] = (skippedByReason[s.reason] ?? 0) + 1;
+
+    const compositeGaps = (queue?.gaps ?? []).filter((g) => g.id.startsWith('syn:'));
+    const { significant, note } = assessSignificance({
+      filesChanged: files.length,
+      gatesPassed: evidence.gatesPassed,
+      fitnessDelta: evidence.fitnessDelta,
+    });
+
+    const report = RunReport.parse({
+      runId: evidence.runId,
+      generatedAt: new Date().toISOString(),
+      profileSlug: context.profileSlug,
+      gapsConsidered: queue?.gaps.length ?? 0,
+      compositeGaps: compositeGaps.length,
+      proposals: evidence.proposals,
+      skipped: skippedByReason,
+      filesChanged: files.length,
+      locAdded: countLocAdded(files),
+      gatesPassed: evidence.gatesPassed,
+      gatesFailed: evidence.gatesFailed,
+      laneA: evidence.laneA,
+      laneB: evidence.laneB,
+      fitnessDelta: evidence.fitnessDelta,
+      forecastBrier: evidence.forecastBrier,
+      forecastEce: evidence.forecastEce,
+      selfEce: evidence.selfEce,
+      directiveInfluence: (context.directiveInfluence ?? []).map((d) => ({ ...d })),
+      compositePairs: compositeGaps.map((g) => ({
+        gapId: g.id,
+        domains: g.affectedDimensions,
+        rationale: g.description,
+        score: g.priorityScore,
+      })),
+      outcome: outcome.status,
+      ...(outcome.reason ? { outcomeReason: outcome.reason } : {}),
+      significant,
+      significanceNote: note,
+    });
+    return report;
+  } catch (err) {
+    console.warn(`[autopilot] could not build the run report: ${errMsg(err)}`);
+    return undefined;
+  }
 }
 
 function errMsg(err: unknown): string {
@@ -236,9 +349,25 @@ export async function resolveAuditDepth(opts: {
   return auditorsForDepth(chosen, available).length > 0 ? chosen : undefined;
 }
 
+/**
+ * runLoop: one full pass, always producing a run report.
+ *
+ * The public entry point is this wrapper: it persists whatever report the inner
+ * pass built, so no return path can silently skip it. `runLoopInner` stays
+ * unexported so there is exactly one place that writes.
+ */
 export async function runLoop(options: LoopRunOptions): Promise<LoopOutcome> {
+  const outcome = await runLoopInner(options);
+  if (outcome.report && !options.skipRunReport) {
+    writeRunReport(outcome.report, options.runReportDir ?? undefined);
+  }
+  return outcome;
+}
+
+async function runLoopInner(options: LoopRunOptions): Promise<LoopOutcome> {
   const { profile } = options;
   const slug = slugify(profile.business.name);
+  const runId = options.runReportDir === undefined ? newRunId() : `run-${newRunId()}`;
   const context: LoopContext = { ...emptyContext(), profileSlug: slug };
 
   // 1. Kill switch.
@@ -339,6 +468,13 @@ export async function runLoop(options: LoopRunOptions): Promise<LoopOutcome> {
   }
   context.queue = queue;
 
+  // Attribute the ranking: which directives actually landed on which gaps.
+  if (options.directives && options.directives.length > 0) {
+    context.directiveInfluence = queue.gaps.flatMap((gap) =>
+      directivesFor(gap, options.directives!).map((d) => ({ directiveId: d.id, gapId: gap.id })),
+    );
+  }
+
   // 6. GENERATE + GATE per gap. First gate-passing candidate is chosen.
   //    Auto-merge (non-dry-run) is restricted to TIER A proposals: tier B/C
   //    carry human-review markers and are never auto-merged, per spec §5.7.
@@ -353,6 +489,11 @@ export async function runLoop(options: LoopRunOptions): Promise<LoopOutcome> {
   // sail through a gate that has nothing to check and then be reported as this
   // run's upgrade. It is recorded as skipped instead and never selected.
   const skipped: SkippedProposal[] = [];
+  let proposals = 0;
+  let gatesPassed = 0;
+  let gatesFailed = 0;
+  let laneA = false;
+  let laneB = false;
   try {
     for (const gap of queue.gaps) {
       if (quarantinedGaps.has(gap.id)) continue;
@@ -362,6 +503,12 @@ export async function runLoop(options: LoopRunOptions): Promise<LoopOutcome> {
         skipped.push({ gapId: gap.id, reason: proposal.reason ?? 'planner_unavailable' });
         continue;
       }
+      proposals += 1;
+      if (proposal.verification) {
+        const lane = verificationLane(proposal.verification);
+        if (lane === 'lane_b') laneB = true;
+        else laneA = true;
+      }
       const result = await runGate(
         proposal,
         repo.localPath,
@@ -370,19 +517,42 @@ export async function runLoop(options: LoopRunOptions): Promise<LoopOutcome> {
         { applyFiles: !options.dryRun },
       );
       if (result.passed) {
+        gatesPassed += 1;
         current = proposal;
         break;
       }
+      gatesFailed += 1;
     }
   } catch (err) {
     return {
       state: { status: 'error', reason: `generate/gate failed: ${errMsg(err)}` },
       context,
       skipped,
+      report: buildRunReport(context, queue, {
+        runId, proposals, gatesPassed, gatesFailed, laneA, laneB,
+        fitnessDelta: null, forecastBrier: null, forecastEce: null, selfEce: null,
+      }, skipped, { status: 'error', reason: `generate/gate failed: ${errMsg(err)}` }),
     };
   }
+  const evidence = (): LoopRunEvidence => ({
+    runId,
+    proposals,
+    gatesPassed,
+    gatesFailed,
+    laneA,
+    laneB,
+    fitnessDelta: null,
+    forecastBrier: options.runReportSignals?.forecastBrier ?? null,
+    forecastEce: options.runReportSignals?.forecastEce ?? null,
+    selfEce: options.runReportSignals?.selfEce ?? null,
+  });
   if (!current) {
-    return { state: { status: 'idle' }, context, skipped };
+    return {
+      state: { status: 'idle' },
+      context,
+      skipped,
+      report: buildRunReport(context, queue, evidence(), skipped, { status: 'idle' }),
+    };
   }
   context.currentProposal = current;
 
@@ -410,10 +580,12 @@ export async function runLoop(options: LoopRunOptions): Promise<LoopOutcome> {
   // tier behaviour at merge time at all.
   const deploy = autoDeployAllowedFor(current);
   if (!deploy.allowed) {
+    const reason = `auto_merge_refused: ${deploy.reason}`;
     return {
-      state: { status: 'error', reason: `auto_merge_refused: ${deploy.reason}` },
+      state: { status: 'error', reason },
       context,
       skipped,
+      report: buildRunReport(context, queue, evidence(), skipped, { status: 'error', reason }),
     };
   }
 

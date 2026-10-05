@@ -105,7 +105,9 @@ describe('runLoop with requireCheckpoint', () => {
     const github = makeGithub();
 
     const out = await runLoop({
-      profile: makeProfile({ repoPath: repo, autoMerge: true }),
+      // A test run writes no report into the repository.
+      skipRunReport: true,
+profile: makeProfile({ repoPath: repo, autoMerge: true }),
       auditDir,
       adapters: { grader: graderFixture },
       gateExecutors: allPassingExecutors(),
@@ -126,7 +128,9 @@ describe('runLoop with requireCheckpoint', () => {
     const github = makeGithub();
 
     const out = await runLoop({
-      profile: makeProfile({ repoPath: repo, autoMerge: true }),
+      // A test run writes no report into the repository.
+      skipRunReport: true,
+profile: makeProfile({ repoPath: repo, autoMerge: true }),
       auditDir,
       adapters: { grader: graderFixture },
       gateExecutors: allPassingExecutors(),
