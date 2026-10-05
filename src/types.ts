@@ -608,6 +608,16 @@ export interface SystemStatus {
    * reflects "nothing to verify" rather than a passed check.
    */
   hashChainUnverified?: boolean;
+  /**
+   * Caught-and-ignored failures since boot, from src/lib/swallow.ts. A non-zero
+   * `total` means at least one request, metric or ledger write failed and the
+   * route returned its fallback instead — previously indistinguishable from
+   * "there was nothing to return".
+   */
+  swallowed?: {
+    total: number;
+    tags: Array<{ tag: string; count: number; lastMessage: string | null }>;
+  };
   registeredToolsCount: number;
   /**
    * Three-tier registry executability. A binary reading is dangerous here:

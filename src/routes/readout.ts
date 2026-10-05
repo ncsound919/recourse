@@ -30,6 +30,7 @@ import type { SystemSnapshot } from '../lib/systemDiff.js';
 import type { CapabilityDef } from '../lib/capabilities.js';
 import type { PromotedAuditSummary } from '../lib/promotedAudit.js';
 import type { ConsumptionReport } from '../lib/toolConsumption.js';
+import { swallowReport } from '../lib/swallow.js';
 import type {
   SystemStatus,
   ToolEntry,
@@ -164,6 +165,11 @@ export function createReadoutRouter(deps: ReadoutRouterDeps): Router {
     status.hashChainIntegrity = integrity.length > 0 ? integrity.valid : false;
     status.hashChainUnverified = integrity.length === 0;
     status.registeredToolsCount = registry.length;
+    // Caught-and-ignored failures. Before this a route could answer with an empty
+    // list while the thing that should have filled it was throwing, and nothing on
+    // the status route could distinguish the two. `swallowed.total > 0` means at
+    // least one silent failure has happened since boot.
+    status.swallowed = swallowReport();
     // Recomputed on every read, not cached on `status`: the boot-time assignment
     // ran before the registry finished loading and produced all zeros, which reads
     // as a measurement rather than as "not computed yet".

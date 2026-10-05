@@ -357,6 +357,7 @@ import { reverifyRegistry, type DreamGeneRef, type ReverifyReport } from './src/
 import { metrics } from './src/lib/metrics.js';
 import { tracer, runInSpan, parseTraceparent, formatTraceparent, currentSpan } from './src/lib/tracing.js';
 import { bootObservability, flushLangfuse } from './src/lib/observability.js';
+import { swallow } from './src/lib/swallow.js';
 import { A2A_SKILLS, openA2aTaskStore } from './src/lib/a2a.js';
 import type { A2aOperation } from './src/lib/a2a.js';
 import { buildOpenApiSpec } from './src/lib/openapi.js';
@@ -453,7 +454,7 @@ const fleetVoiceRouter = createFleetVoiceRouter({
           lastRunAt = stat.mtime.toISOString();
         }
       }
-    } catch { /* ignore */ }
+    } catch (e) { swallow('cron.chatComplete', e, undefined);  /* ignore */ }
     return {
       available: status.available,
       detail: status.detail,
@@ -509,7 +510,7 @@ setModelUsageSink((u) => {
       estimated: u.estimated,
       description: `model ${u.model} (${u.profile})`,
     });
-  } catch { /* metering must never break generation */ }
+  } catch (e) { swallow('usage.metering', e, undefined);  /* metering must never break generation */ }
   // Observability: every model call is counted (independent of metering success)
   // and traced as a child of whatever request/task span is active.
   const parentSpan = currentSpan();
@@ -526,7 +527,7 @@ setModelUsageSink((u) => {
   if (whole > 0) {
     try {
       wallet.debit(process.env.RECOURSE_MODEL_BUDGET_TOKEN || 'model', whole, `model ${u.model}`);
-    } catch { /* an absent/unfunded budget must never break generation */ }
+    } catch (e) { swallow('wallet.reserve', e, undefined);  /* an absent/unfunded budget must never break generation */ }
   }
 });
 
@@ -593,7 +594,7 @@ function currentBusinessProfile(): BusinessProfileT | null {
   try {
     const slugs = listBusinessSlugs();
     return slugs.length ? loadBusinessProfile(slugs[0]) : null;
-  } catch {
+  } catch (e) { swallow('voice.profileList', e, undefined);
     return null;
   }
 }
@@ -839,7 +840,7 @@ function acquireInstanceLock(): boolean {
       try {
         process.kill(existing, 0); // liveness probe only
         return refuse(existing);
-      } catch {
+      } catch (e) { swallow('metrics.snapshot', e, undefined);
         // Stale lock from a dead process ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â reclaim it.
       }
     }
@@ -857,7 +858,7 @@ function releaseInstanceLock(): void {
     if (fs.existsSync(LOCK_FILE) && String(fs.readFileSync(LOCK_FILE, 'utf-8')).trim() === String(process.pid)) {
       fs.unlinkSync(LOCK_FILE);
     }
-  } catch { /* best-effort */ }
+  } catch (e) { swallow('shutdown.stateFlush', e, undefined);  /* best-effort */ }
 }
 /**
  * Flush the debounced state save and close durable stores. Previously SIGINT /
@@ -868,7 +869,7 @@ function releaseInstanceLock(): void {
  */
 function flushDurableState(): void {
   try { stateStore?.flush(); } catch (err) { console.warn('[Recourse] state flush on shutdown failed:', err); }
-  try { closeMemoryStores(); } catch { /* best-effort */ }
+  try { closeMemoryStores(); } catch (e) { swallow('shutdown.closeMemoryStores', e, undefined);  /* best-effort */ }
 }
 let shuttingDown = false;
 function gracefulExit(code: number): void {
@@ -876,7 +877,7 @@ function gracefulExit(code: number): void {
   shuttingDown = true;
   flushDurableState();
   // Langfuse buffers client-side; without this a SIGTERM drops the tail.
-  try { flushLangfuse(); } catch { /* observability must never block exit */ }
+  try { flushLangfuse(); } catch (e) { swallow('shutdown.flushLangfuse', e, undefined);  /* observability must never block exit */ }
   releaseInstanceLock();
   process.exit(code);
 }
@@ -892,7 +893,7 @@ process.on('SIGTERM', () => gracefulExit(0));
 const CRASH_LOG = path.join(process.cwd(), 'recourse-crash.log');
 function logCrash(kind: string, err: unknown): void {
   const line = `[${new Date().toISOString()}] ${kind}: ${err instanceof Error ? (err.stack || err.message) : String(err)}`;
-  try { fs.appendFileSync(CRASH_LOG, line + '\n'); } catch { /* best-effort */ }
+  try { fs.appendFileSync(CRASH_LOG, line + '\n'); } catch (e) { swallow('crashlog.append', e, undefined);  /* best-effort */ }
   console.error(line);
 }
 process.on('uncaughtException', (err) => {
@@ -948,7 +949,7 @@ Rules:
       sourceCode: parsed.sourceCode,
       testSuiteCode: parsed.testSuiteCode,
     };
-  } catch {
+  } catch (e) { swallow('wallet.balances', e, undefined);
     return null;
   }
 }
@@ -969,7 +970,7 @@ const dreamEngine = new DreamingEngine(
     learnerEpisode: () => {
       try {
         return (learner as any).lastReport?.episode ?? 0;
-      } catch {
+      } catch (e) { swallow('wallet.readLedger', e, undefined);
         return 0;
       }
     },
@@ -978,7 +979,7 @@ const dreamEngine = new DreamingEngine(
     learnerCalibration: () => {
       try {
         return (learner as any).lastReport?.ece ?? 0;
-      } catch {
+      } catch (e) { swallow('wallet.compaction', e, undefined);
         return 0;
       }
     },
@@ -1503,7 +1504,7 @@ async function learnFromGhidra(input: GhidraLearnInput): Promise<GhidraLearnResu
         sha256: input.analysis?.sha256 ?? null,
       },
     );
-  } catch {
+  } catch (e) { swallow('intake.dispatch', e, undefined);
     // Vector memory is optional; the learner update above already happened.
   }
   appendProvenanceEvent('system_tick', {
@@ -2038,7 +2039,7 @@ function loadPersistedDreamGenesFromStorage(): Array<{ name: string; domain?: st
     if (!fs.existsSync(dreamFile)) return [];
     const stored = JSON.parse(fs.readFileSync(dreamFile, 'utf-8')) as { registry?: unknown };
     return Array.isArray(stored?.registry) ? (stored.registry as ReturnType<typeof loadPersistedDreamGenesFromStorage>) : [];
-  } catch {
+  } catch (e) { swallow('forge.provenanceRecord', e, undefined);
     return [];
   }
 }
@@ -2480,7 +2481,7 @@ function verifyCurrentSource(tool: ToolEntry | undefined): {
   if (looksLikeClaim) {
     try {
       return { vr: verifyBiotechClaim(JSON.parse(src) as BiotechClaim), depth: 'claim', src };
-    } catch {
+    } catch (e) { swallow('selfhosted.verify', e, undefined);
       return { vr: { passed: false, summary: 'FAILED (invalid JSON payload)', details: [], score: 0 }, depth: 'claim', src };
     }
   }
@@ -2903,7 +2904,7 @@ health: { alpha: number; beta: number; healthy: string[]; degraded: string[] } |
       health: updateOpenHubHealth(report),
       reason: 'report-found' as const,
     };
-  } catch {
+  } catch (e) { swallow('bridge.artifactHost', e, undefined);
     return { ...empty, reason: 'memory-unavailable' as const };
   }
 }
@@ -2972,7 +2973,7 @@ async function internalApiCall(
     signal: AbortSignal.timeout(INTERNAL_API_TIMEOUT_MS),
   });
   let data: any = null;
-  try { data = await res.json(); } catch { /* non-JSON */ }
+  try { data = await res.json(); } catch (e) { data = swallow('bridge.a2aResponseJson', e, null);  /* non-JSON */ }
   return { status: res.status, data };
 }
 
@@ -3507,7 +3508,7 @@ function loadAuditSnapshot(): ReporterState['audit'] {
     const raw = JSON.parse(fs.readFileSync(p, 'utf8')) as Record<string, unknown>;
     if (typeof raw.grade !== 'string' || !Array.isArray(raw.dimensions) || typeof raw.findings !== 'object') return null;
     return raw as unknown as ReporterState['audit'];
-  } catch {
+  } catch (e) { swallow('telemetry.selfReport', e, undefined);
     return null;
   }
 }
@@ -3593,7 +3594,7 @@ try {
     const p = providerStatuses();
     connections.push({ name: 'Local model', reachable: p.local.online === true, detail: `${p.local.model} (verified: ${p.local.verified})` });
     connections.push({ name: 'API model', reachable: p.api.online === true, detail: `${p.api.model} (verified: ${p.api.verified})` });
-  } catch { /* provider status unavailable ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â omitted, not invented */ }
+  } catch (e) { swallow('bridge.providerStatuses', e, undefined);  /* provider status unavailable ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â omitted, not invented */ }
   try {
     connections.push({ name: 'Axiom bridge', reachable: await axiomReachable() });
   } catch { connections.push({ name: 'Axiom bridge', reachable: false, detail: 'status check failed' }); }
@@ -3639,7 +3640,7 @@ try {
       provenanceEvents: factsProvenance.length,
       modelProfile: activeProfile,
 modelOnline: (() => {
-        try { return providerStatuses()[activeProfile].online === true; } catch { return false; }
+        try { return providerStatuses()[activeProfile].online === true; } catch (e) { return swallow('bridge.providerOnline', e, false); }
       })(),
     },
     audit: loadAuditSnapshot(),
@@ -3930,7 +3931,7 @@ async function sweepCapabilityAdoptions(): Promise<boolean> {
   }
   if (changed) {
     saveStateToDisk();
-    try { recordSystemChange('capability-adoption'); } catch { /* non-fatal */ }
+    try { recordSystemChange('capability-adoption'); } catch (e) { swallow('adoption.recordSystemChange', e, undefined);  /* non-fatal */ }
   }
   return changed;
 }
@@ -4097,14 +4098,14 @@ void (async () => {
   try {
     const rep = upgradeReport();
     if (rep.topChanged.length > 0) await rephraseToolDescriptions(rep.topChanged);
-  } catch { /* warm-up optional */ }
+  } catch (e) { swallow('boot.selfhostWarmup', e, undefined);  /* warm-up optional */ }
 })();
 
 
 // Boot adoption sweep runs after boot self-hosted verification completes.
 void (async () => {
   await new Promise((r) => setTimeout(r, 250));
-  try { await sweepCapabilityAdoptions(); } catch { /* non-fatal at boot */ }
+  try { await sweepCapabilityAdoptions(); } catch (e) { swallow('boot.sweepCapabilityAdoptions', e, undefined);  /* non-fatal at boot */ }
 })();
 
 // =========================================================================
@@ -4211,7 +4212,7 @@ function stateHygiene(): { snapshots: number; toolsStripped: number; vacuum?: { 
     const threshold = Number(process.env.RECOURSE_STATE_VACUUM_MB || 64) * 1024 * 1024;
     const store = ensureStateStore();
     if (fs.statSync(store.stateFile()).size > threshold) vacuum = store.vacuum();
-  } catch { /* best-effort; hygiene never blocks the loop */ }
+  } catch (e) { swallow('hygiene.vacuum', e, undefined);  /* best-effort; hygiene never blocks the loop */ }
 
   return { snapshots: systemSnapshots.length, toolsStripped, ...(vacuum ? { vacuum } : {}) };
 }
@@ -4296,7 +4297,7 @@ async function rephraseToolDescriptions(
         plainRephraseCache.set(e.name, plain);
       }
     }
-  } catch { /* model unavailable ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â keep deterministic descriptions */ }
+  } catch (e) { swallow('describe.modelRephrase', e, undefined);  /* model unavailable ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â keep deterministic descriptions */ }
 }
 
 function describeWithRephrase(name: string): string {
@@ -4338,7 +4339,7 @@ async function buildUpgradeReport() {
 // Boot baseline snapshot (captured once reconcile + self-host verify settle).
 void (async () => {
   await new Promise((r) => setTimeout(r, 300));
-  try { recordSystemChange('boot-baseline'); } catch { /* non-fatal */ }
+  try { recordSystemChange('boot-baseline'); } catch (e) { swallow('boot.recordSystemChange', e, undefined);  /* non-fatal */ }
 })();
 
 // =========================================================================
@@ -4369,13 +4370,13 @@ const selfhostedRouter = createSelfhostedRouter({
     appendProvenanceEvent('selfhosted_tool_removed', { tool: name, removedFile, removedGene: registryToolRemoved });
     saveStateToDisk();
     void sweepCapabilityAdoptions().catch(() => {});
-    try { recordSystemChange('selfhosted-remove'); } catch { /* non-fatal */ }
+    try { recordSystemChange('selfhosted-remove'); } catch (e) { swallow('selfhosted.removeRecord', e, undefined);  /* non-fatal */ }
     return { registryToolRemoved };
   },
 });
 app.use('/api/recourse', selfhostedRouter.router);
 // Boot auto-supervision after boot self-host verification settles.
-setTimeout(() => { try { selfhostedRouter.ensureLoops(); } catch { /* non-fatal */ } }, 400);
+setTimeout(() => { try { selfhostedRouter.ensureLoops(); } catch (e) { swallow('selfhosted.ensureLoops', e, undefined);  /* non-fatal */ } }, 400);
 
 // =========================================================================
 // FREE-TIER COMPUTE PLATFORMS (Kaggle, Hugging Face, E2B, Local)
@@ -4421,7 +4422,7 @@ function buildAgentSystemTools(): SystemTool[] {
         parameters: schema[id] ?? { type: 'object', properties: {} },
         invoke: (args: Record<string, unknown>) => op.run(args),
       }));
-  } catch {
+  } catch (e) { swallow('skills.snapshot', e, undefined);
     return [];
   }
 }
@@ -4440,7 +4441,7 @@ ensureCatalog: async () => {
     // a persisted catalog lists the deleted root forever, so the entries behind it
     // are permanently unreadable while still being offered to callers.
     if (!catalogCoversRoots(skillCatalog, skillRoots)) {
-      try { await runSkillScan(); } catch { /* honest: leaves the catalog empty */ }
+      try { await runSkillScan(); } catch (e) { swallow('boot.runSkillScan', e, undefined);  /* honest: leaves the catalog empty */ }
     }
     return skillCatalog;
   },
@@ -4966,7 +4967,7 @@ Your code is run in an isolated sandbox against your own tests. No placeholders.
     if (!content) return null;
     const block = extractJsonBlock(content);
     if (!block) return null;
-    try { return JSON.parse(block); } catch { return null; }
+    try { return JSON.parse(block); } catch (e) { return swallow('model.parseJsonBlock', e, null); }
   };
   if (result.ok && result.content) parsed = parseSwarmJson(result.content);
   // Tool-augmented turns are not JSON-constrained, so if the bounded loop did
@@ -5615,7 +5616,7 @@ async function runServerTickOnce() {
     }
     // Snapshot the system when it materially changed (cheap: no-op unless the
     // fingerprint moved). Keeps the upgrade-report baseline diff meaningful.
-    try { recordSystemChange('tick'); } catch { /* non-fatal */ }
+    try { recordSystemChange('tick'); } catch (e) { swallow('tick.recordSystemChange', e, undefined);  /* non-fatal */ }
 
     // 10-13. Activator sweep: failure-bias decision, swarm auto-dispatch,
     //        benchmark refresh, autopilot probe. None of these block the tick.
@@ -5726,8 +5727,8 @@ async function generateNextBiotechClaim(): Promise<LedgerBiotechClaim | { skippe
     }
     const block = extractJsonBlock(result.content);
     if (!block) return { skipped: true, reason: 'no JSON from model' };
-    let parsed: any = null;
-    try { parsed = JSON.parse(block); } catch { return { skipped: true, reason: 'invalid JSON from model' }; }
+    let parsed: any;
+    try { parsed = JSON.parse(block); } catch (e) { return swallow('model.parseClaimJson', e, { skipped: true, reason: 'invalid JSON from model' }); }
     if (!parsed?.mechanism) return { skipped: true, reason: 'model returned empty mechanism' };
     const validated = validateBiotechClaimAgainstKG({
       asset_name: drug.id,
@@ -6581,7 +6582,7 @@ async function literatureScoreForSpec(spec: ForgeSpec): Promise<{ score: number;
     const { scoreClaimSupport } = await import('./src/lib/literatureGrounding.js');
     const support = scoreClaimSupport(docs, `${spec.title}. ${spec.name} ${spec.domain}`, 1);
     return { score: support.presenceScore ?? 0, docs: support.presentTerms?.length ?? 0 };
-  } catch {
+  } catch (e) { swallow('axiom.snapshot', e, undefined);
     return null;
   }
 }
@@ -6658,7 +6659,7 @@ async function forgeSpecOrder(): Promise<ForgeSpec[]> {
       priorityDomains: fleet.degraded ? (['systemic'] as const) : [],
     });
     return ordered;
-  } catch {
+  } catch (e) { swallow('forge.axiomBridge', e, undefined);
     return specs;
   }
 }
@@ -6684,7 +6685,7 @@ async function forgeInspirationHint(spec: ForgeSpec): Promise<string | undefined
       `(do not copy blindly; the contract above is the real judge):\n${block}` +
       (experience ? `\n\n${experience}` : '')
     );
-  } catch {
+  } catch (e) { swallow('forge.devBridge', e, undefined);
     return undefined;
   }
 }
@@ -6700,7 +6701,7 @@ async function learnFromForgeOutcome(
   if (!update) return;
   try {
     await learner.learnRealTools([update]);
-  } catch {
+  } catch (e) { swallow('forge.openhubBridge', e, undefined);
     /* honest: learning is best-effort; the forge ledger is the source of truth */
   }
 }
@@ -6904,7 +6905,7 @@ function noveltyGate(source: string, name: string, origin: string, extra?: Recor
   try {
     appendProvenanceEvent('promotion_refused', { tool: name, origin, reason: `near-duplicate of ${dup}`, ...extra });
     recordDev('promotion-refused', false, `${name} (${origin}): near-duplicate of ${dup}`, { driver: 'novelty-gate' });
-  } catch { /* refusal logging is best-effort; the refusal itself still holds */ }
+  } catch (e) { swallow('dedupe.recordRefusal', e, undefined);  /* refusal logging is best-effort; the refusal itself still holds */ }
   return dup;
 }
 
@@ -6948,7 +6949,7 @@ function entryIsExecutable(entry: ToolEntry): boolean {
   try {
     const manifest = getSelfHostedEntry(name);
     if (manifest?.lastVerified?.passed === true) return true;
-  } catch {
+  } catch (e) { swallow('dedupe.hashRecord', e, undefined);
     /* fall through to the other shapes */
   }
 
@@ -7007,7 +7008,7 @@ function registryExecutablePair(): {
   let selfHostedVerified = 0;
   try {
     selfHostedVerified = listSelfHostedEntries().filter((e) => e.lastVerified?.passed).length;
-  } catch {
+  } catch (e) { swallow('novelty.hashRecord', e, undefined);
     /* manifest unreadable: reported as 0 rather than guessed */
   }
   for (const t of registry) {
@@ -7078,7 +7079,7 @@ function promoteTool(entry: ToolEntry, opts: { origin: string; gate?: boolean; p
         `${entry.name} (${opts.origin}): entrypoint ${entry.entrypoint} does not exist`,
         { driver: 'executability-gate' },
       );
-    } catch {
+    } catch (e) { swallow('novelty.templateRecord', e, undefined);
       /* refusal logging is best-effort; the refusal itself still holds */
     }
     return false;
@@ -7093,7 +7094,7 @@ function promoteTool(entry: ToolEntry, opts: { origin: string; gate?: boolean; p
             tool: entry.name, origin: opts.origin, reason: verdict.reason, lines: verdict.meaningfulLines,
           });
           recordDev('promotion-refused', false, `${entry.name} (${opts.origin}): ${verdict.reason}`, { driver: 'substance-gate' });
-        } catch { /* refusal logging is best-effort; the refusal itself still holds */ }
+        } catch (e) { swallow('novelty.recordRefusal', e, undefined);  /* refusal logging is best-effort; the refusal itself still holds */ }
         return false;
       }
       // Novelty (P1.4): the same algorithm with different constants under a new
@@ -7114,7 +7115,7 @@ function promoteTool(entry: ToolEntry, opts: { origin: string; gate?: boolean; p
             reason: 'family already over-represented with no measured consumption',
           });
           recordDev('promotion-refused', false, `${entry.name} (${opts.origin}): saturated family (no value)`, { driver: 'saturation-gate' });
-        } catch { /* best-effort */ }
+        } catch (e) { swallow('novelty.recordRefusalB', e, undefined);  /* best-effort */ }
         return false;
       }
     }
@@ -7415,7 +7416,7 @@ async function awaitVerifySelfHosted(entry: SelfHostedManifestEntry): Promise<st
   try {
     const verdict = await verifySelfHostedEntry(entry);
     return verdict.passed ? verdict.detail : null;
-  } catch {
+  } catch (e) { swallow('forge.capabilityAdoption', e, undefined);
     return null;
   }
 }
@@ -7505,7 +7506,7 @@ function appendOpenEndedCycle(result: OpenEndedCycleResult): void {
   try {
     fs.mkdirSync(path.dirname(OPEN_ENDED_CYCLES_FILE), { recursive: true });
     fs.appendFileSync(OPEN_ENDED_CYCLES_FILE, JSON.stringify({ at: Date.now(), ...result }) + '\n', 'utf-8');
-  } catch { /* best-effort cycle log */ }
+  } catch (e) { swallow('openEnded.recordCycle', e, undefined);  /* best-effort cycle log */ }
 }
 
 /** Build open-ended deps from real server state and run one engine cycle. */
@@ -7534,7 +7535,7 @@ async function runOpenEndedEngineCycle(): Promise<OpenEndedCycleResult | { skipp
       memory = hits
         .filter((h) => typeof h.text === 'string' && h.text.length > 20)
         .map((h) => ({ id: h.id, text: h.text, payload: h.meta }));
-    } catch { /* memory unavailable -> no inspiration */ }
+    } catch (e) { swallow('forge.inspirationFromMemory', e, undefined);  /* memory unavailable -> no inspiration */ }
 
     const verifyInSandbox = (source: string, suite: string) => {
       const run = executeTestSuite(source, suite);
@@ -7635,7 +7636,7 @@ async function runOpenEndedEngineCycle(): Promise<OpenEndedCycleResult | { skipp
           `Solved open-ended problem "${result.picked.title}" (${result.picked.domain}) against a minted acceptance test.`,
           { problemId: result.picked.id, domain: result.picked.domain, source: result.source.slice(0, 4000) },
         );
-      } catch { /* memory unavailable */ }
+      } catch (e) { swallow('forge.memoryLookup', e, undefined);  /* memory unavailable */ }
     }
     return result;
   } catch (err: any) {
@@ -7683,7 +7684,7 @@ async function runForgeCycle(): Promise<ForgeLedgerEntry | { skipped: boolean; r
   const groundedSpec: ForgeSpec = { ...spec, grounding };
   try {
     appendGroundingRecord(grounding, { tool: spec.name });
-  } catch { /* the ledger is a record, not a gate */ }
+  } catch (e) { swallow('forge.recordLedger', e, undefined);  /* the ledger is a record, not a gate */ }
 
   // Dream gene specs (id starts with 'backfill_' or 'dream_') already have verified
   // source code in the registry ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the dream engine synthesized and sandbox-verified
@@ -7749,7 +7750,7 @@ async function runForgeCycle(): Promise<ForgeLedgerEntry | { skipped: boolean; r
       recordBuilderOutcome(b.id, spec, outcome.ok === true, outcome.attemptsUsed);
       builderMetaStep(false);
       // P1 experience distillation: learn which (domain, strategy) actually works.
-      try { recordExperience(spec.domain, b.id, outcome.ok === true); } catch { /* best-effort */ }
+      try { recordExperience(spec.domain, b.id, outcome.ok === true); } catch (e) { swallow('forge.recordExperience', e, undefined);  /* best-effort */ }
     }
   }
 const entry = await materializeForgeOutcome(outcome, spec, literature);
@@ -7798,7 +7799,7 @@ function recordForgeEpisode(
       }),
       geneIds: [`gene:${outcome.name}`],
     });
-  } catch {
+  } catch (e) { swallow('forge.ledgerWrite', e, undefined);
     /* best-effort: the forge ledger remains the source of truth */
   }
 }
@@ -7814,7 +7815,7 @@ async function forgeSamplesForSpec(spec: ForgeSpec): Promise<number> {
       { uncertainty: summary?.uncertainty, meanReward: summary?.meanReward, promptChars: spec.prompt?.length },
       { max: Math.max(1, Number(process.env.FORGE_BUDGET_MAX) || 3) },
     );
-  } catch {
+  } catch (e) { swallow('forge.budgetReserve', e, undefined);
     return forgeSampleBudget({ promptChars: spec.prompt?.length });
   }
 }
@@ -8539,7 +8540,7 @@ async function collectStuckSignals(force = false): Promise<StuckSignal[]> {
           });
         }
       }
-    } catch {
+    } catch (e) { swallow('health.axiomProbe', e, undefined);
       /* goal-gap detection best-effort */
     }
   }
@@ -8563,7 +8564,7 @@ async function collectStuckSignals(force = false): Promise<StuckSignal[]> {
           });
         }
       }
-    } catch {
+    } catch (e) { swallow('health.devProbe', e, undefined);
       /* math goal-gap best-effort */
     }
   }
@@ -8641,7 +8642,7 @@ function remoteDiagnosisContextFor(issue: StuckIssue): { series: number[]; label
       }
       return { series: buckets, label: 'failures per 5-min bucket (last 30m)', note: 'failure-ledger spike' };
     }
-  } catch {
+  } catch (e) { swallow('health.openhubProbe', e, undefined);
     /* context is best-effort; absence means no remote diagnosis */
   }
   return null;
