@@ -103,9 +103,13 @@ async function fleetAuditSignals(): Promise<Array<{ uncertainty: number; meanRew
   }
 }
 
-// Real planner for Tier A code gaps: produces source + an acceptance test that
-// the pre-merge gate runs in the sandbox. Returns null when the model is offline.
-const codePlanner = createCodePlanner((messages) => chatComplete(messages));
+// Real planner for Tier A code gaps: produces one or more source files plus an
+// acceptance test that the pre-merge gate runs for real. Returns null when the
+// model is offline. Built per business so REPO CONTEXT is that repo's own export
+// index rather than the cron process's working directory.
+function plannerFor(repoRoot: string | undefined) {
+  return createCodePlanner((messages) => chatComplete(messages), repoRoot ? { repoRoot } : {});
+}
 
 /** GitHub client for a profile via the Keywire zero-trust token (PR-time only). */
 export async function githubForProfile(profile: BusinessProfileT): Promise<GitHubClient | null> {
@@ -230,6 +234,7 @@ export async function runScheduledAudit(
       // business, so a read-only profile was never measured.
       const autoMerge = isAutoMergeEnabled(profile);
       const mayPropose = isProposeEnabled(profile);
+      const repoRoot = repoBinding(profile)?.localPath;
 
       // Close the loop: OpenHub's latest self-report sets a floor on how deep
       // this audit goes — never shallower than the fleet's reported health.
@@ -301,7 +306,7 @@ export async function runScheduledAudit(
       const outcome = (await runLoop({
         profile,
         dryRun: effectiveDryRun,
-        planner: codePlanner,
+        planner: plannerFor(repoRoot),
         learner: getLearner(),
         externalAuditSignals,
         adapters: defaultAuditAdapters(),

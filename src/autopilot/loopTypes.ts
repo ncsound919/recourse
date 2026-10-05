@@ -157,18 +157,48 @@ export type UpgradeFileT = z.infer<typeof UpgradeFile>;
 /**
  * A machine-checkable acceptance test for a proposal's code change. When
  * present and `requiresSandboxVerify` is set, the pre-merge gate executes it in
- * the REAL sandbox against the changed file's content (never a fabricated pass).
- * `file` must match one of `files`.
+ * the REAL sandbox against the changed files' content (never a fabricated pass).
+ *
+ * `files` lists every changed file the test exercises. `file` is the legacy
+ * single-path field and is still honoured for proposals written before the
+ * multi-file planner existed.
  */
 export const ProposalVerification = z.object({
-  /** Repo-relative path of the changed file the test exercises. */
-  file: z.string(),
+  /** Repo-relative paths of the changed files the test exercises. */
+  files: z.array(z.string()).optional(),
+  /** Legacy single path; used when `files` is absent. */
+  file: z.string().optional(),
   /** Optional callable name; the sandbox resolves the entrypoint itself. */
   functionName: z.string().optional(),
-  /** Assertion body (`assert ...;` statements) run against the file's code. */
+  /** Assertion body (`assert ...;` statements) run against the change. */
   acceptanceTest: z.string().min(1),
+  /** Repo-relative vitest file to run in the materialize-and-typecheck lane. */
+  testFile: z.string().optional(),
+  /** Existing repo modules the change imports. Non-empty => gate lane B. */
+  imports: z.array(z.string()).optional(),
 });
 export type ProposalVerificationT = z.infer<typeof ProposalVerification>;
+
+/**
+ * Which verification lane a proposal needs.
+ *   'lane_a' — no repo imports: flatten the change into one program and run the
+ *              acceptance test in the isolated sandbox.
+ *   'lane_b' — it imports existing repo modules (or ships a vitest file): it can
+ *              only be proven by materializing it and running the real
+ *              typecheck + vitest.
+ */
+export type ProposalLaneT = 'lane_a' | 'lane_b';
+
+/** Every path a verification covers: `files` when set, else the legacy `file`. */
+export function verificationPaths(v: ProposalVerificationT): string[] {
+  if (v.files && v.files.length > 0) return v.files;
+  return v.file ? [v.file] : [];
+}
+
+/** The lane a verification must be checked in. */
+export function verificationLane(v: ProposalVerificationT): ProposalLaneT {
+  return (v.imports?.length ?? 0) > 0 || Boolean(v.testFile) ? 'lane_b' : 'lane_a';
+}
 
 export const UpgradeProposal = z.object({
   id: z.string(),
@@ -183,6 +213,10 @@ export const UpgradeProposal = z.object({
   requiresSandboxVerify: z.boolean().default(false),
   /** Present => the gate can run a real sandbox suite instead of refusing. */
   verification: ProposalVerification.optional(),
+  /** True when this proposal produced no code at all (see F2: skipped). */
+  skipped: z.boolean().optional(),
+  /** Why it was skipped: 'planner_unavailable' | 'planner_invalid'. */
+  reason: z.string().optional(),
   passedSandbox: z.boolean().optional(),
   passedLint: z.boolean().optional(),
   passedTypecheck: z.boolean().optional(),

@@ -45,7 +45,7 @@ import type { LearnerState } from '../dream/learner-types';
 import type { ToolDomain } from '../dream/types';
 import { loadLatestScorecard, projectScorecard, saveScorecard, slugify } from './scorecard';
 import { analyzeGaps } from './gapAnalyzer';
-import { generateUpgrade, type PlannedCode } from './upgradeGenerator';
+import { generateUpgrade, type PlannedChange } from './upgradeGenerator';
 import { runGate, type GateExecutors } from './preMergeGate';
 import { checkAndMerge, computeVetoDeadline, parseOwnerRepo, savePRState } from './vetoScheduler';
 import { fetchGitHubToken } from './keywireClient';
@@ -70,10 +70,11 @@ export type LoopRunOptions = {
   checkpointStore?: import('./checkpoint').CheckpointStore;
   /**
    * Optional real planner (model/forge) that synthesizes Tier A code and its
-   * acceptance test. When present, the produced file is gated by a real sandbox
-   * run of that test; when absent, Tier A code gaps stay honest placeholders.
+   * acceptance test. When present, the produced files are gated for real (in
+   * the sandbox, or — when the change imports repo modules — by a materialized
+   * typecheck + vitest run).
    */
-  planner?: (gap: GapT, profile: BusinessProfileT) => Promise<PlannedCode | null>;
+  planner?: (gap: GapT, profile: BusinessProfileT) => Promise<PlannedChange | null>;
   /** Recursive learner; when present, its domain beliefs choose the audit depth. */
   learner?: LearnerLike;
   /** Pin the learner domain whose depth applies to this repo's audits. */

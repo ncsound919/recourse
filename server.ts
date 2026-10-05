@@ -470,8 +470,9 @@ const policyEngine = openPolicyEngine();
 // Durable A2A task store so tasks/get survives a restart.
 const a2aTaskStore = openA2aTaskStore();
 // Real code planner for the business autopilot: Tier A code gaps get real
-// source + an acceptance test (gated by a real sandbox run) instead of a
-// placeholder. Offline/unparseable output falls back to the honest placeholder.
+// source (one or more files, imports allowed) plus an acceptance test the
+// pre-merge gate runs for real. Offline/unparseable output records the run as
+// skipped rather than emitting a placeholder that reads like an upgrade.
 const autopilotCodePlanner = createCodePlanner((messages) => chatComplete(messages));
 
 // ---------------------------------------------------------------------------

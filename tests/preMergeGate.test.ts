@@ -333,7 +333,34 @@ describe('preMergeGate DEFAULT_EXECUTORS.sandbox', () => {
     });
     const result = await DEFAULT_EXECUTORS.sandbox({ repoPath: repo, changedFiles: [], repoBinding: null, proposal });
     expect(result.passed).toBe(false);
-    expect(result.output).toMatch(/does not match any proposal file/);
+    expect(result.output).toMatch(/proposal has none of them/);
+  });
+
+  it('still honours the legacy single `file` verification field', async () => {
+    const repo = makeTmpRepo();
+    const proposal = makeProposal({
+      requiresSandboxVerify: true,
+      files: [{ path: 'add.js', action: 'create', content: 'export function add(a, b) { return a + b; }' }],
+      verification: { file: 'add.js', acceptanceTest: 'assert add(2, 3) === 5;' },
+    });
+    const result = await DEFAULT_EXECUTORS.sandbox({ repoPath: repo, changedFiles: [], repoBinding: null, proposal });
+    expect(result.passed).toBe(true);
+  });
+
+  it('refuses to flatten two verified files that declare the same top-level name', async () => {
+    const repo = makeTmpRepo();
+    const proposal = makeProposal({
+      requiresSandboxVerify: true,
+      files: [
+        { path: 'a.js', action: 'create', content: 'const shared = 1;' },
+        { path: 'b.js', action: 'create', content: 'const shared = 2;' },
+      ],
+      verification: { files: ['a.js', 'b.js'], acceptanceTest: 'assert shared === 1;' },
+    });
+    const result = await DEFAULT_EXECUTORS.sandbox({ repoPath: repo, changedFiles: [], repoBinding: null, proposal });
+    expect(result.passed).toBe(false);
+    expect(result.error).toMatch(/collision/);
+    expect(result.output).toContain("'shared'");
   });
 
   it('passes the full gate only when the provided verification suite is green', async () => {

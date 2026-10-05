@@ -171,8 +171,10 @@ describe('runLoop with a real code planner', () => {
     profile.gaps = ['Refactor input handling to sanitize the upload endpoint (code quality)'];
 
     const planner = async () => ({
-      file: 'src/sanitize.js',
-      content: 'export function sanitize(s) { return String(s).replace(/[<>]/g, ""); }',
+      files: [
+        { file: 'src/sanitize/core.js', content: 'export const strip = (s) => String(s).replace(/[<>]/g, "");' },
+        { file: 'src/sanitize/index.js', content: 'export const sanitize = (s) => strip(s);' },
+      ],
       acceptanceTest: 'assert sanitize("<x>") === "x";',
       functionName: 'sanitize',
     });
@@ -188,9 +190,13 @@ describe('runLoop with a real code planner', () => {
     });
 
     expect(out.state).toMatchObject({ status: 'pr_open' });
-    expect(out.context.currentProposal?.verification?.file).toBe('src/sanitize.js');
-    const file = out.context.currentProposal?.files.find((f) => f.path === 'src/sanitize.js');
-    expect(file?.content).toContain('export function sanitize');
+    // A multi-file plan reaches the gate as multi-file.
+    expect(out.context.currentProposal?.verification?.files).toEqual([
+      'src/sanitize/core.js',
+      'src/sanitize/index.js',
+    ]);
+    const file = out.context.currentProposal?.files.find((f) => f.path === 'src/sanitize/core.js');
+    expect(file?.content).toContain('strip');
   });
 
   it('rejects planner output whose acceptance test fails in the sandbox', async () => {
@@ -199,8 +205,7 @@ describe('runLoop with a real code planner', () => {
     profile.gaps = ['Refactor input handling to sanitize the upload endpoint (code quality)'];
 
     const planner = async () => ({
-      file: 'src/sanitize.js',
-      content: 'export function sanitize(s) { return String(s); }', // does NOT strip <>
+      files: [{ file: 'src/sanitize.js', content: 'export function sanitize(s) { return String(s); }' }], // does NOT strip <>
       acceptanceTest: 'assert sanitize("<x>") === "x";',
     });
     const pass = vi.fn(async () => ({ passed: true, output: 'ok' }));

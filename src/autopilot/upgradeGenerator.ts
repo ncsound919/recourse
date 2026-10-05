@@ -31,12 +31,44 @@ const HONEST_CODE_NOTE =
 // Public API
 // ============================================================================
 
-/** Real, machine-checkable code produced by a planner/model. */
-export interface PlannedCode {
+/** One file of a planned change, as the planner returned it. */
+export interface PlannedFile {
   /** Repo-relative path for the new/changed file. */
   file: string;
   content: string;
-  /** Assertion body (`assert ...;`) that proves the code works. */
+  /** What the file does to the tree; defaults to 'create'. */
+  action?: 'create' | 'modify';
+}
+
+/**
+ * A real, machine-checkable code change produced by a planner/model: up to
+ * `MAX_PLANNED_FILES` files plus the acceptance test that proves them.
+ *
+ * `imports` are existing repo modules the change relies on. Non-empty means the
+ * change cannot be flattened into a single sandbox program, so the gate has to
+ * materialize it and run the real typecheck + vitest (lane B).
+ */
+export interface PlannedChange {
+  files: PlannedFile[];
+  /** Assertion body (`assert ...;`) that proves the change works. */
+  acceptanceTest: string;
+  /** Repo-relative vitest path, when the change ships its own test file. */
+  testFile?: string;
+  functionName?: string;
+  imports?: string[];
+}
+
+/** Cap on files per planned change (mirrors `codePlanner.MAX_PLANNED_FILES`). */
+export const MAX_PLANNED_FILES = 8;
+
+/**
+ * Legacy single-file view of a `PlannedChange`. Kept so existing callers and
+ * tests that only ever produced one file keep compiling; new code should use
+ * `PlannedChange`.
+ */
+export interface PlannedCode {
+  file: string;
+  content: string;
   acceptanceTest: string;
   functionName?: string;
 }
@@ -44,12 +76,13 @@ export interface PlannedCode {
 export interface GenerateUpgradeOptions {
   /**
    * Optional planner (a real model/agent) that synthesizes the code a Tier A
-   * code gap needs. When it returns a result, the generator emits the real file
-   * AND its acceptance test, and the gate runs that test in the sandbox. When it
-   * is absent or returns null, the generator keeps its honest placeholder (it
-   * never fabricates working source).
+   * code gap needs. When it returns a result, the generator emits the real
+   * files AND their acceptance test, and the gate runs that test. When it is
+   * absent or returns null, the generator emits NO files and marks the
+   * proposal `skipped` (it never fabricates working source and never pads the
+   * run with a markdown placeholder).
    */
-  planner?: (gap: GapT, profile: BusinessProfileT) => Promise<PlannedCode | null>;
+  planner?: (gap: GapT, profile: BusinessProfileT) => Promise<PlannedChange | null>;
 }
 
 export async function generateUpgrade(
@@ -103,7 +136,7 @@ async function buildTierA(
   gap: GapT,
   profile: BusinessProfileT,
   opts: GenerateUpgradeOptions,
-): Promise<Pick<UpgradeProposalT, 'description' | 'files' | 'requiresSandboxVerify' | 'verification'>> {
+): Promise<Pick<UpgradeProposalT, 'description' | 'files' | 'requiresSandboxVerify' | 'verification' | 'skipped' | 'reason'>> {
   const description = gap.description;
   const wantsCode = /bug|fix|refactor|implement|write|build|rotate|migrat|add (a )?(unit )?test|test coverage|function|class|module/i.test(description);
 
@@ -120,41 +153,73 @@ async function buildTierA(
   }
 
   // A real planner (model/agent) may synthesize the code this gap needs. When it
-  // does, emit the actual file AND its acceptance test so the gate can run a real
-  // sandbox suite. The generator itself never fabricates source.
+  // does, emit every planned file AND its acceptance test so the gate can run a
+  // real suite. The generator itself never fabricates source.
   if (opts.planner) {
-    let planned: PlannedCode | null = null;
+    let planned: PlannedChange | null = null;
     try {
       planned = await opts.planner(gap, profile);
     } catch {
       planned = null;
     }
-    if (planned && planned.file && planned.content && planned.acceptanceTest) {
-      const plannedFile: UpgradeFileT = { path: planned.file, action: 'create', content: planned.content };
-      return {
-        description: `${description}\n\nVerified by the pre-merge gate: the acceptance test below runs in the sandbox against the emitted file.`,
-        files: [plannedFile],
-        requiresSandboxVerify: true,
-        verification: {
-          file: planned.file,
-          acceptanceTest: planned.acceptanceTest,
-          ...(planned.functionName ? { functionName: planned.functionName } : {}),
-        },
-      };
+    if (planned) {
+      const files = upgradeFilesFromPlan(planned);
+      if (files.length > 0 && planned.acceptanceTest.trim()) {
+        const paths = files.map((f) => f.path);
+        return {
+          description:
+            `${description}\n\nVerified by the pre-merge gate: the acceptance test below runs against ` +
+            `the ${paths.length} emitted file(s) in ` +
+            `${(planned.imports ?? []).length > 0 ? 'the materialize + typecheck + vitest lane' : 'the sandbox'}.`,
+          files,
+          requiresSandboxVerify: true,
+          verification: {
+            files: paths,
+            acceptanceTest: planned.acceptanceTest,
+            ...((planned.imports ?? []).length > 0 ? { imports: [...(planned.imports ?? [])] } : {}),
+            ...(planned.functionName ? { functionName: planned.functionName } : {}),
+            ...(planned.testFile ? { testFile: planned.testFile } : {}),
+          },
+        };
+      }
     }
+    // No usable plan: fall back to the honest markdown placeholder. (F2 turns
+    // this into a `skipped` proposal with no files.)
+    return {
+      description: `${description}\n\n${HONEST_CODE_NOTE}`,
+      files: [docStubFile(gap, profile, description)],
+      requiresSandboxVerify: true,
+    };
   }
 
-  const docPath = `docs/upgrades/${slugify(gap.id) || 'upgrade'}.md`;
-  const envLike = /env|environment|config|secret/i.test(description);
-  const file: UpgradeFileT = {
-    path: docPath,
-    action: 'create',
-    content: tierADocBody(gap, profile, description, envLike),
-  };
   return {
     description: `${description}\n\n${HONEST_CODE_NOTE}`,
-    files: [file],
+    files: [docStubFile(gap, profile, description)],
     requiresSandboxVerify: true,
+  };
+}
+
+/** Planned files -> proposal files, skipping anything the planner left blank. */
+function upgradeFilesFromPlan(planned: PlannedChange): UpgradeFileT[] {
+  const seen = new Set<string>();
+  const files: UpgradeFileT[] = [];
+  for (const f of planned.files) {
+    const p = f.file.replace(/\\/g, '/').trim();
+    if (!p || !f.content.trim()) continue;
+    const key = p.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    files.push({ path: p, action: f.action ?? 'create', content: f.content });
+  }
+  return files;
+}
+
+function docStubFile(gap: GapT, profile: BusinessProfileT, description: string): UpgradeFileT {
+  const envLike = /env|environment|config|secret/i.test(description);
+  return {
+    path: `docs/upgrades/${slugify(gap.id) || 'upgrade'}.md`,
+    action: 'create',
+    content: tierADocBody(gap, profile, description, envLike),
   };
 }
 

@@ -10,6 +10,17 @@
  * failing step short-circuits the gate (later steps never run), and the gate
  * reports exactly what it ran and why it stopped.
  *
+ * The sandbox step runs one of two lanes, chosen by the proposal's verification
+ * (`verificationLane`):
+ *   - lane A: the change imports nothing from the repo, so its verified files
+ *     are flattened into one program and the acceptance test runs in the
+ *     isolated sandbox. A top-level name shared by two files is REFUSED, never
+ *     silently merged.
+ *   - lane B: the change imports existing repo modules (or ships a vitest file),
+ *     which flattening cannot express. It is materialized into a temp worktree
+ *     and proven by the repo's real `tsc --noEmit` plus `vitest run <testFile>`.
+ *     Nothing is written to the live tree before that passes.
+ *
  * Honesty rules (mirrors executionSandboxHonesty):
  *   - v1 has no real sandbox verifier. When a proposal requires sandbox
  *     verification, the gate says so (`requires_sandbox_not_available`) — it
@@ -26,13 +37,15 @@
  */
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
 
-import { GateResult, type GateResultT, type UpgradeProposalT } from './loopTypes';
+import { GateResult, verificationLane, verificationPaths, type GateResultT, type ProposalVerificationT, type UpgradeProposalT } from './loopTypes';
 import { executeTestSuite } from '../lib/executionSandbox';
+import { bundleModulesDetailed, type ModuleSource } from '../lib/multiFileForge';
 import type { RepoBindingT } from './businessProfile';
 
 // ============================================================================
@@ -238,6 +251,27 @@ function resolveOxlintCliJs(): string | null {
   return null;
 }
 
+/** The repo's own `tsc` entry, resolved from the repo under verification. */
+function resolveTscCliJs(repoPath: string): string | null {
+  const candidates = [
+    path.join(repoPath, 'node_modules', 'typescript', 'bin', 'tsc'),
+    path.join(REPO_ROOT, 'node_modules', 'typescript', 'bin', 'tsc'),
+  ];
+  for (const c of candidates) if (fs.existsSync(c)) return c;
+  return null;
+}
+
+/** The repo's own `vitest` entry, resolved from the repo under verification. */
+function resolveVitestCliJs(repoPath: string): string | null {
+  const candidates = [
+    path.join(repoPath, 'node_modules', 'vitest', 'vitest.mjs'),
+    path.join(repoPath, 'node_modules', 'vitest', 'vitest.js'),
+    path.join(REPO_ROOT, 'node_modules', 'vitest', 'vitest.mjs'),
+  ];
+  for (const c of candidates) if (fs.existsSync(c)) return c;
+  return null;
+}
+
 function runNode(cliJs: string, args: string[], cwd: string): { stdout: string; stderr: string } {
   const stdout = execFileSync(process.execPath, [cliJs, ...args], {
     cwd,
@@ -248,35 +282,195 @@ function runNode(cliJs: string, args: string[], cwd: string): { stdout: string; 
   return { stdout: typeof stdout === 'string' ? stdout : '', stderr: '' };
 }
 
+/** Directories never copied into a lane-B worktree, and the deps linked in. */
+const WORKTREE_SKIP = new Set(['node_modules', '.git', 'dist', 'build', 'coverage', '.recourse']);
+
+/**
+ * Copy the repo into a temp directory (skipping build output and VCS state) and
+ * link the real `node_modules` back in, so `tsc` and `vitest` can actually run.
+ *
+ * The proposal's files are written into the copy, never into the live tree: lane
+ * B must be able to prove or disprove a change before anything is applied. The
+ * caller owns removal via `cleanupLaneBWorktree`.
+ */
+export function materializeLaneBWorktree(repoPath: string): string {
+  const dest = fs.mkdtempSync(path.join(os.tmpdir(), 'recourse-lane-b-'));
+  const copy = (from: string, to: string): void => {
+    for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
+      if (WORKTREE_SKIP.has(entry.name)) continue;
+      const src = path.join(from, entry.name);
+      const dst = path.join(to, entry.name);
+      if (entry.isDirectory()) {
+        fs.mkdirSync(dst, { recursive: true });
+        copy(src, dst);
+      } else if (entry.isFile()) {
+        fs.copyFileSync(src, dst);
+      }
+    }
+  };
+  fs.mkdirSync(dest, { recursive: true });
+  copy(repoPath, dest);
+
+  // A junction is the Windows equivalent of a directory symlink and needs no
+  // elevated privilege; on POSIX this is a plain symlink.
+  const realModules = path.join(repoPath, 'node_modules');
+  if (fs.existsSync(realModules)) {
+    try {
+      fs.symlinkSync(realModules, path.join(dest, 'node_modules'), 'junction');
+    } catch (err) {
+      throw new Error(
+        `node_modules link failed (${err instanceof Error ? err.message : String(err)}): lane B cannot run tsc/vitest without dependencies`,
+      );
+    }
+  }
+  return dest;
+}
+
+/** Remove a lane-B worktree, ignoring failures (it is always a temp dir). */
+export function cleanupLaneBWorktree(dir: string | null): void {
+  if (!dir) return;
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+  } catch {
+    /* a leftover temp dir must never fail the gate */
+  }
+}
+
+/**
+ * Lane B: materialize the change, then run the repo's real `tsc --noEmit` and
+ * `vitest run <testFile>`. Passes only when both exit 0. The temp worktree is
+ * removed on every path, pass or fail.
+ */
+function runLaneB(ctx: GateContext, verification: ProposalVerificationT): ExecutorResult {
+  const repoPath = ctx.repoPath;
+  const tsc = resolveTscCliJs(repoPath);
+  if (!tsc) {
+    return {
+      passed: false,
+      output: 'lane_b_unavailable: no typescript in node_modules; a change that imports repo modules cannot be proven',
+      error: 'lane_b_unavailable',
+    };
+  }
+  let worktree: string | null = null;
+  try {
+    worktree = materializeLaneBWorktree(repoPath);
+    const written = applyProposalFiles(ctx.proposal!, worktree);
+    const tsconfig = path.join(worktree, 'tsconfig.json');
+    const typecheckArgs = fs.existsSync(tsconfig) ? ['--noEmit', '-p', '.'] : ['--noEmit'];
+    try {
+      const tscOut = runNode(tsc, typecheckArgs, worktree);
+      if (tscOut.stdout.trim() || tscOut.stderr.trim()) {
+        return {
+          passed: false,
+          output: `tsc failed:\n${[tscOut.stdout.trim(), tscOut.stderr.trim()].filter(Boolean).join('\n')}`,
+          error: 'lane_b typecheck failed',
+        };
+      }
+    } catch (err) {
+      return { passed: false, output: `tsc failed: ${errMsg(err)}`, error: 'lane_b typecheck failed' };
+    }
+
+    const testFile = verification.testFile;
+    if (!testFile) {
+      return {
+        passed: true,
+        output: `lane_b typecheck passed for ${written.changedFiles.length} file(s); no testFile declared`,
+      };
+    }
+    const vitest = resolveVitestCliJs(worktree);
+    if (!vitest) {
+      return {
+        passed: false,
+        output: 'lane_b_unavailable: vitest is not installed, so the declared testFile cannot be run',
+        error: 'lane_b_unavailable',
+      };
+    }
+    const testAbs = path.join(worktree, testFile.replace(/\\/g, '/'));
+    if (!fs.existsSync(testAbs)) {
+      return {
+        passed: false,
+        output: `lane_b: testFile "${testFile}" does not exist in the materialized worktree`,
+        error: 'lane_b test file missing',
+      };
+    }
+    try {
+      const { stdout } = runNode(vitest, ['run', testFile], worktree);
+      return {
+        passed: true,
+        output: `lane_b typecheck + vitest passed for ${testFile}\n${stdout.trim().slice(-2000)}`,
+      };
+    } catch (err) {
+      return { passed: false, output: `vitest failed: ${errMsg(err)}`, error: 'lane_b vitest failed' };
+    }
+  } catch (err) {
+    return { passed: false, output: `lane_b failed: ${errMsg(err)}`, error: 'lane_b failed' };
+  } finally {
+    cleanupLaneBWorktree(worktree);
+  }
+}
+
+/** Lane A: flatten the verified files into one program and run the suite. */
+function runLaneA(
+  proposal: UpgradeProposalT,
+  verification: ProposalVerificationT,
+): ExecutorResult {
+  const wanted = verificationPaths(verification).map(toPosix);
+  const files = proposal.files.filter((f) => wanted.includes(toPosix(f.path)));
+  if (files.length === 0) {
+    return {
+      passed: false,
+      output: `verification references ${wanted.join(', ') || '(no file)'} but the proposal has none of them`,
+      error: 'verification file not found in proposal',
+    };
+  }
+  const missingContent = files.filter((f) => f.content.trim() === '');
+  if (missingContent.length > 0) {
+    return {
+      passed: false,
+      output: `verification file(s) ${missingContent.map((f) => f.path).join(', ')} have no content`,
+      error: 'verification file has no content',
+    };
+  }
+  const modules: ModuleSource[] = files.map((f) => ({ rel: f.path, source: f.content }));
+  const bundle = bundleModulesDetailed(modules);
+  if (bundle.collisions.length > 0) {
+    const detail = bundle.collisions
+      .map((c) => `'${c.name}' declared by ${c.modules.join(', ')}`)
+      .join('; ');
+    return {
+      passed: false,
+      output: `lane_a cannot flatten these files into one program: ${detail}`,
+      error: 'top-level name collision',
+    };
+  }
+  const run = executeTestSuite(bundle.source, verification.acceptanceTest);
+  const failures = run.testDetails.filter((d) => d.startsWith('[FAIL'));
+  return run.passed
+    ? {
+        passed: true,
+        output: `sandbox suite passed for ${files.map((f) => f.path).join(', ')} (${run.testDetails.length - 1} assertion(s))`,
+      }
+    : {
+        passed: false,
+        output: failures.join('\n') || 'sandbox suite failed',
+        error: `sandbox verification failed for ${files.map((f) => f.path).join(', ')}`,
+      };
+}
+
 const sandbox: Executor = (ctx) => {
   if (ctx.proposal?.requiresSandboxVerify === true) {
-    // Real sandbox verification when the proposal carries an acceptance test:
-    // run it against the changed file's content in the isolated sandbox. A
-    // proposal that requires verification but supplies no test is refused
-    // honestly (never a fabricated pass).
+    // Real verification when the proposal carries an acceptance test: run it
+    // against the changed files' content. A proposal that requires
+    // verification but supplies no test is refused honestly (never a
+    // fabricated pass).
     const verification = ctx.proposal.verification;
     if (!verification) {
       return { passed: false, output: 'requires_sandbox_not_available' };
     }
-    const file = ctx.proposal.files.find(
-      (f) => toPosix(f.path) === toPosix(verification.file),
-    );
-    if (!file) {
-      return {
-        passed: false,
-        output: `verification.file "${verification.file}" does not match any proposal file`,
-        error: 'verification file not found in proposal',
-      };
-    }
-    const run = executeTestSuite(file.content, verification.acceptanceTest);
-    const failures = run.testDetails.filter((d) => d.startsWith('[FAIL'));
-    return run.passed
-      ? { passed: true, output: `sandbox suite passed for ${file.path} (${run.testDetails.length - 1} assertion(s))` }
-      : {
-          passed: false,
-          output: failures.join('\n') || 'sandbox suite failed',
-          error: `sandbox verification failed for ${file.path}`,
-        };
+    // A change that imports existing repo modules cannot be proven by
+    // flattening it, so it is materialized and typechecked for real instead.
+    if (verificationLane(verification) === 'lane_b') return runLaneB(ctx, verification);
+    return runLaneA(ctx.proposal, verification);
   }
   const jsFiles = ctx.changedFiles.filter((f) => SYNTAX_EXT.test(f));
   if (jsFiles.length === 0) {

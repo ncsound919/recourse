@@ -114,15 +114,14 @@ describe('upgradeGenerator', () => {
     });
     const proposal = await generateUpgrade(gap, makeProfile(), {
       planner: async () => ({
-        file: 'src/sanitize.js',
-        content: 'export function sanitize(s) { return String(s).replace(/[<>]/g, ""); }',
+        files: [{ file: 'src/sanitize.js', content: 'export function sanitize(s) { return String(s).replace(/[<>]/g, ""); }' }],
         acceptanceTest: 'assert sanitize("<x>") === "x";',
         functionName: 'sanitize',
       }),
     });
 
     expect(proposal.requiresSandboxVerify).toBe(true);
-    expect(proposal.verification?.file).toBe('src/sanitize.js');
+    expect(proposal.verification?.files).toEqual(['src/sanitize.js']);
     expect(proposal.verification?.acceptanceTest).toMatch(/sanitize/);
     const file = proposal.files.find((f) => f.path === 'src/sanitize.js');
     expect(file?.content).toContain('export function sanitize');
