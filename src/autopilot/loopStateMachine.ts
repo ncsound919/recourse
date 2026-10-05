@@ -44,7 +44,8 @@ import { auditorsForDepth, depthFromSignals, planAuditDepth, type AuditDepth } f
 import type { LearnerState } from '../dream/learner-types';
 import type { ToolDomain } from '../dream/types';
 import { loadLatestScorecard, projectScorecard, saveScorecard, slugify } from './scorecard';
-import { analyzeGaps } from './gapAnalyzer';
+import { analyzeGaps, type SynergyPair } from './gapAnalyzer';
+import type { Directive } from '../dream/learner-types';
 import { generateUpgrade, type PlannedChange } from './upgradeGenerator';
 import { runGate, autoDeployAllowedFor, type GateExecutors } from './preMergeGate';
 import { checkAndMerge, computeVetoDeadline, parseOwnerRepo, savePRState } from './vetoScheduler';
@@ -83,6 +84,15 @@ export type LoopRunOptions = {
   auditDepth?: AuditDepth;
   /** External fleet audit signals (e.g. OpenHub self-report health). */
   externalAuditSignals?: Array<{ uncertainty: number; meanReward: number; attempts: number }>;
+  /**
+   * Cross-domain synergy resolver (synchronous — see `AnalyzeGapsOptions`).
+   * Composite gaps built from its pairs carry both domains' repo context into
+   * the planner, so a gap can be closed with machinery from another domain
+   * rather than only its own.
+   */
+  synergy?: (gaps: GapT[]) => SynergyPair[];
+  /** The recursive learner's directives, so gap ranking can be steered by them. */
+  directives?: Directive[];
 };
 
 export type LoopOutcome = { state: LoopState; context: LoopContext; skipped?: SkippedProposal[] };
@@ -313,10 +323,14 @@ export async function runLoop(options: LoopRunOptions): Promise<LoopOutcome> {
   }
   context.scorecard = scorecard;
 
-  // 5. ANALYZE.
+  // 5. ANALYZE. The learner's directives steer the ranking and, when the
+  // caller resolved cross-domain pairs, composite gaps join the queue.
   let queue: UpgradeQueueT;
   try {
-    queue = analyzeGaps(scorecard, profile);
+    queue = analyzeGaps(scorecard, profile, undefined, {
+      ...(options.synergy ? { synergy: options.synergy } : {}),
+      ...(options.directives && options.directives.length > 0 ? { directives: options.directives } : {}),
+    });
   } catch (err) {
     return {
       state: { status: 'error', reason: `gap analysis failed: ${errMsg(err)}` },

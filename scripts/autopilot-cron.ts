@@ -55,6 +55,11 @@ import { createGitHubClient } from '../src/autopilot/gitHubClient';
 import type { GitHubClient } from '../src/autopilot/loopTypes';
 import { readWallet, computeBalances, canAutoMerge } from '../src/lib/wallet';
 import { createCodePlanner } from '../src/autopilot/codePlanner';
+import type { SynergyPair } from '../src/autopilot/gapAnalyzer';
+import { domainsForGap } from '../src/autopilot/gapAnalyzer';
+import type { GapT } from '../src/autopilot/loopTypes';
+import type { Directive } from '../src/dream/learner-types';
+import { readSynergyMap } from '../src/lib/synergy/store';
 import { chatComplete } from '../src/lib/modelProvider';
 import { createLearnerStore, RecursiveLearner } from '../src/dream/learner.js';
 import { openVectorMemory } from '../src/lib/vectorMemory.js';
@@ -99,6 +104,66 @@ async function fleetAuditSignals(): Promise<Array<{ uncertainty: number; meanRew
     const s = report ? deriveOpenHubAuditSignals(report) : null;
     return s ? [s] : [];
   } catch {
+    return [];
+  }
+}
+
+/**
+ * Cross-domain synergy resolver for gap intake.
+ *
+ * Reads the SAME synergy map the `/synergy/*` routes serve, so the composite
+ * gaps the loop plans are grounded in transfers the engine already measured —
+ * not in a fresh guess. Gated by `SYNERGY_IN_LOOP=1`: the map is a persisted
+ * artifact from another subsystem, so the default is off until an operator has
+ * seen what it produces.
+ */
+function synergyFor(profile: BusinessProfileT) {
+  return (gaps: GapT[]): SynergyPair[] => {
+    if (String(process.env.SYNERGY_IN_LOOP ?? '').trim() !== '1') return [];
+    try {
+      const map = readSynergyMap();
+      if (!map || map.candidates.length === 0) return [];
+      // Each gap's ToolDomains come from the gap analyzer (dimension mapping +
+      // whatever its own text mentions), so pairing is on a real signal rather
+      // than on a guess made here.
+      const domainsByGap = new Map<string, Set<string>>();
+      for (const g of gaps) domainsByGap.set(g.id, new Set(domainsForGap(g)));
+      const out: SynergyPair[] = [];
+      const used = new Set<string>();
+      for (const c of map.candidates) {
+        if (c.score < 0.5) continue;
+        const free = (d: string) => [...gaps.filter((g) => (domainsByGap.get(g.id)?.has(d) ?? false) && !used.has(g.id))];
+        const a = free(c.fromDomain)[0];
+        const b = free(c.toDomain)[0];
+        if (!a || !b || a.id === b.id) continue;
+        used.add(a.id);
+        used.add(b.id);
+        out.push({
+          a: a.id, b: b.id,
+          domainA: c.fromDomain, domainB: c.toDomain,
+          score: c.score,
+          rationale: `the synergy engine scores this ${c.fromDomain}->${c.toDomain} transfer at ${c.score.toFixed(2)} (${c.bridges.length} bridge(s), support ${c.support.toFixed(2)})`,
+        });
+        if (out.length >= 5) break;
+      }
+      if (out.length > 0) {
+        console.log(`[autopilot] synergy: ${out.length} composite gap pair(s) from ${map.candidates.length} candidate(s) for ${profile.business.name}`);
+      }
+      return out;
+    } catch (err) {
+      console.warn(`[autopilot] synergy map unreadable, continuing without composite gaps: ${err instanceof Error ? err.message : String(err)}`);
+      return [];
+    }
+  };
+}
+
+/** The learner's current directives, so gap ranking can be steered by them. */
+async function learnerDirectives(): Promise<Directive[]> {
+  try {
+    const state = await getLearner().status();
+    return Array.isArray(state.directives) ? state.directives : [];
+  } catch (err) {
+    console.warn(`[autopilot] learner directives unavailable: ${err instanceof Error ? err.message : String(err)}`);
     return [];
   }
 }
@@ -310,6 +375,8 @@ export async function runScheduledAudit(
         learner: getLearner(),
         externalAuditSignals,
         adapters: defaultAuditAdapters(),
+        synergy: synergyFor(profile),
+        directives: await learnerDirectives(),
         // `checkpointStore` is omitted on purpose: runLoop defaults it to a
         // FileCheckpointStore rooted at the audit dir. Passing the CLASS here
         // would pass a constructor where an instance is expected.
