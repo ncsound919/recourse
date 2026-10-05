@@ -41,8 +41,8 @@ function genesisState(): LearnerState {
   return {
     schema: LEARNER_SCHEMA, episode: 0,
     meta: { learningRate: 0.2, temperature: 0.5, promotionThreshold: 0.85, decayFactor: 0.5, calibrationGate: 0.20, minForecasts: 10 },
-    geneBeliefs: {}, selfScore: 0.5, calibrationError: 0.5, brierScore: 0, ece: 0.5,
-    forecastWindow: [], directives: [], ledgerHead: '00000000',
+    geneBeliefs: {}, selfScore: 0.5, meanAbsSurprise: 0.5, brierScore: 0, ece: 0.5, selfEce: 0.5,
+    forecastWindow: [], selfForecastWindow: [], directives: [], ledgerHead: '00000000',
     updatedAt: new Date().toISOString(),
   };
 }
@@ -216,14 +216,13 @@ describe('learner.ts coverage', () => {
       expect(report.genesEvaluated).toBe(1);
     });
 
-    it('decays the learning rate when calibration is low', async () => {
-      // externalScore == priorMean (0.5) -> prediction error ~0 -> calibration
-      // <= 0.15 -> learningRate *= 0.95 (line 469).
+    it('holds the learning rate steady inside the Brier dead band', async () => {
       const reg = new MockRegistry([makeGene('g1', 'g1', 'coding')]);
       const learner = freshLearner(reg);
       await learner.runEpisode(0.5);
       const s = await learner.status();
-      expect(s.meta.learningRate).toBeLessThan(0.2);
+      // One episode cannot establish a trend, so the rate must not move.
+      expect(s.meta.learningRate).toBe(0.2);
     });
 
     it('runs multiple episodes via runEpisodes', async () => {
@@ -477,6 +476,124 @@ describe('learner.ts coverage', () => {
       const s = await learner.status();
       // avgEntropy = 0 -> temperature clamped to the 0.2 floor
       expect(s.meta.temperature).toBe(0.2);
+    });
+  });
+
+  describe('calibration loop measures what it claims to measure', () => {
+    function rewardOnlyGene(id: string): RegistryGene {
+      return { ...makeGene(id, id, 'coding'), testVectors: [] };
+    }
+
+    it('never puts a self-forecast in the gene window or its reliability bins', async () => {
+      const reg = new MockRegistry([rewardOnlyGene('g1')]);
+      const learner = freshLearner(reg);
+      for (let i = 0; i < 6; i++) await learner.runEpisode(i % 2 === 0 ? 0.05 : 0.95);
+      const s = await learner.status();
+
+      // Every gene forecast carries its two inputs; every self-forecast carries
+      // neither, because it has no belief behind it.
+      expect(s.forecastWindow.length).toBeGreaterThan(0);
+      expect(s.selfForecastWindow.length).toBeGreaterThan(0);
+      for (const f of s.forecastWindow) {
+        expect(f.betaMean).toBeDefined();
+        expect(f.emaMean).toBeDefined();
+      }
+      for (const f of s.selfForecastWindow) {
+        expect(f.betaMean).toBeUndefined();
+        expect(f.emaMean).toBeUndefined();
+      }
+      // Self-forecasts are not silently folded into the gene count: one episode
+      // with one gene and one external score adds exactly one of each.
+      expect(s.forecastWindow.length).toBe(s.selfForecastWindow.length);
+
+      // A wild self-forecast must not move the gene ECE. Seed a perfectly
+      // calibrated gene window, then feed a self-forecast that is nowhere near
+      // the learner's prediction.
+      freshLearner(reg);
+      seedState({
+        forecastWindow: Array.from({ length: 20 }, () => ({ predicted: 0.5, realized: 0.5 })),
+        ece: 0,
+        brierScore: 0,
+        selfForecastWindow: [],
+      });
+      const seeded = learnerOnSeededState(reg);
+      await seeded.runEpisode(0.99);
+      const after = await seeded.status();
+      expect(after.forecastWindow).toHaveLength(21);
+      expect(after.selfForecastWindow).toHaveLength(1);
+      // The self-forecast realized 0.99 against a ~0.5 prediction: that is a
+      // self-window event, and it shows up as selfEce, not as gene ECE.
+      expect(after.selfEce).toBeGreaterThan(0);
+    });
+
+    it('lowers the learning rate when gene Brier worsens and raises it when it improves', async () => {
+      const reg = new MockRegistry([rewardOnlyGene('g1')]);
+      // A belief whose blended forecast is 0.9 (posterior 0.9, EMA 0.9), so the
+      // only thing that moves Brier is whether the realized reward matches.
+      const confident = belief('g1', { alpha: 18, beta: 2, attempts: 10, meanReward: 0.9, weight: 0.9 });
+
+      // Worsening: the window was previously perfect, this episode is not.
+      freshLearner(reg);
+      seedState({
+        geneBeliefs: { g1: confident },
+        forecastWindow: [
+          { predicted: 0.9, realized: 0.9 },
+          { predicted: 0.9, realized: 0.9 },
+        ],
+      });
+      const startRate = 0.2;
+      await learnerOnSeededState(reg).runEpisode(0.1);
+      const dropped = (await learnerOnSeededState(reg).status()).meta.learningRate;
+      expect(dropped).toBeLessThan(startRate);
+      expect(dropped).toBeCloseTo(startRate * 0.9, 4);
+
+      // Improving: the window was previously terrible, this episode is clean.
+      freshLearner(reg);
+      seedState({
+        geneBeliefs: { g1: confident },
+        forecastWindow: [
+          { predicted: 0.5, realized: 0.9 },
+          { predicted: 0.5, realized: 0.9 },
+        ],
+      });
+      await learnerOnSeededState(reg).runEpisode(0.9);
+      const raised = (await learnerOnSeededState(reg).status()).meta.learningRate;
+      expect(raised).toBeGreaterThan(startRate);
+      expect(raised).toBeCloseTo(startRate * 1.05, 4);
+    });
+
+    it('keeps the learning rate inside its floor and cap', async () => {
+      const reg = new MockRegistry([rewardOnlyGene('g1')]);
+      const learner = freshLearner(reg);
+      // Alternate violently so Brier jumps around in both directions.
+      for (let i = 0; i < 200; i++) await learner.runEpisode(i % 2 === 0 ? 1 : 0);
+      const { meta } = await learner.status();
+      expect(meta.learningRate).toBeGreaterThanOrEqual(0.05);
+      expect(meta.learningRate).toBeLessThanOrEqual(0.3);
+    });
+
+    it('tracks selfScore as an EMA of the external signal, not of 1 - surprise', async () => {
+      const reg = new MockRegistry([rewardOnlyGene('g1')]);
+      const learner = freshLearner(reg);
+      // A steady 0.8 external signal drives selfScore toward 0.8. Under the old
+      // rule selfScore chased `1 - mean|surprise|`, which for a steady signal
+      // sits near 1 - 0.5 = 0.5 and never left there.
+      for (let i = 0; i < 30; i++) await learner.runEpisode(0.8);
+      const s = await learner.status();
+      expect(s.selfScore).toBeGreaterThan(0.7);
+      expect(s.selfScore).toBeLessThan(0.9);
+    });
+
+    it('replays bit-for-bit after the schema bump', async () => {
+      const reg = new MockRegistry([rewardOnlyGene('g1'), rewardOnlyGene('g2')]);
+      const learner = freshLearner(reg);
+      for (let i = 0; i < 5; i++) await learner.runEpisode(i / 10);
+      const report = await learner.replayFromGenesis();
+      expect(report.schemaChangedAtEpisode).toBeNull();
+      expect(report.divergedAtEpisode).toBeNull();
+      expect(report.partial).toBe(false);
+      expect(report.replayed).toBe(report.totalEpisodes);
+      expect(report.matchesHead).toBe(true);
     });
   });
 });

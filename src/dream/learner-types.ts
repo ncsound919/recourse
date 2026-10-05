@@ -26,7 +26,8 @@ export interface GeneBelief {
 
 /** Hyperparameters the learner tunes about ITSELF (the recursive layer). */
 export interface MetaParams {
-  learningRate: number;       // EMA rate for rewards (self-adjusted)
+  learningRate: number;       // EMA rate for rewards, and the weight of the EMA
+                              // in a blended forecast (see ForecastRecord)
   temperature: number;        // exploration temperature (entropy-driven)
   promotionThreshold: number; // meanReward needed for 'amplify' directives
   decayFactor: number;        // forgetting rate for unevaluated genes
@@ -45,6 +46,20 @@ export interface Directive {
   episode: number;
   templateId?: string;
   targetDomain?: ToolDomain;
+}
+
+/**
+ * One (predicted, realized) pair.
+ *
+ * `betaMean` and `emaMean` record the two inputs to `predicted`, so a bad
+ * forecast can be attributed to the posterior or to the EMA rather than guessed
+ * at. Both are absent on self-forecasts, which have no belief behind them.
+ */
+export interface ForecastRecord {
+  predicted: number;
+  realized: number;
+  betaMean?: number;
+  emaMean?: number;
 }
 
 /** Append-only, hash-chained learning ledger. */
@@ -74,25 +89,47 @@ export interface LedgerEntry {
   };
   /** Per-forecast (predicted, realized) pairs from this episode, used to
    *  compute Brier score and reliability curves. */
-  forecasts?: Array<{ predicted: number; realized: number }>;
+  forecasts?: ForecastRecord[];
 }
 
 export interface LearnerState {
   /**
-   * Which learner algorithm wrote this state. 2 = gene beliefs are keyed by
-   * (geneId, versionHash) with a prior shrink on mutation and a capped
-   * effective sample size. Older states are migrated on load; a state at an
-   * older schema is never re-claimed as reproducible.
+   * Which learner algorithm wrote this state. 3 = gene-window and self-window
+   * forecasts are measured separately, `meanAbsSurprise` replaced
+   * `calibrationError`, and the learning rate is driven by Brier rather than by
+   * surprise. Older states are migrated on load; a state at an older schema is
+   * never re-claimed as reproducible.
    */
   schema: number;
   episode: number;
   meta: MetaParams;
   geneBeliefs: Record<string, GeneBelief>;
-  selfScore: number;         // EMA of the learner's own prediction accuracy
-  calibrationError: number;  // mean |realized - predicted| last episode
-  brierScore: number;        // Brier score over recent forecasts
-  ece: number;               // expected calibration error over recent forecasts
-  forecastWindow: Array<{ predicted: number; realized: number }>; // rolling window for calibration
+  /**
+   * EMA of recent external outcome signals (verifier pass rate, scorecard
+   * delta). This is the learner's read on the ecosystem, NOT its own accuracy.
+   * It was previously driven toward `1 - calibrationError`, which made it a
+   * restatement of surprise wearing a different name.
+   */
+  selfScore: number;
+  /**
+   * Mean |realized - predicted| over this episode's GENE forecasts. This is
+   * surprise, not calibration: it says how far the results were from the
+   * prediction, not whether the prediction was honest. Calibration is
+   * `ece`/`brierScore`, which are proper scoring rules.
+   */
+  meanAbsSurprise: number;
+  /** Brier over the gene forecast window. Lower is better. Drives learningRate. */
+  brierScore: number;
+  /** Expected calibration error over the gene forecast window. */
+  ece: number;
+  /** Expected calibration error over the SELF forecast window only. */
+  selfEce: number;
+  /** Rolling window of GENE forecasts. Feeds `brierScore` and `ece`. */
+  forecastWindow: ForecastRecord[];
+  /** Rolling window of self-forecasts (selfScore vs externalScore). Never mixed
+   *  into `ece`/`brierScore`: a self-forecast is a different kind of claim and
+   *  mixing the two makes both meaningless. */
+  selfForecastWindow: ForecastRecord[];
   directives: Directive[];
   ledgerHead: string;
   updatedAt: string;
@@ -102,10 +139,11 @@ export interface EpisodeReport {
   episode: number;
   genesEvaluated: number;
   avgReward: number;
-  calibrationError: number;
+  meanAbsSurprise: number;
   selfScore: number;
   brierScore: number;
   ece: number;
+  selfEce: number;
   meta: MetaParams;
   directives: Directive[];
   stateHash: string;

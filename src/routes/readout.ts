@@ -64,7 +64,22 @@ export interface ReadoutRouterDeps {
   forgeLedgerRef(): ForgeLedgerEntry[];
   benchmarkHistoryRef(): BenchmarkRun[];
   latestBenchmarkRef(): BenchmarkRun | null;
-  learnerStore: { loadState(): Promise<{ episode?: number; calibrationError?: number; selfScore?: number; updatedAt?: string } | null> };
+  learnerStore: {
+    loadState(): Promise<
+      | {
+          episode?: number;
+          /** Renamed from `calibrationError`; the old name is still read from
+           *  saves written before the rename. */
+          meanAbsSurprise?: number;
+          calibrationError?: number;
+          ece?: number;
+          selfEce?: number;
+          selfScore?: number;
+          updatedAt?: string;
+        }
+      | null
+    >;
+  };
   provenanceEventsRef(): ProvenanceEvent[];
   serveCapability(capId: string, ctx: unknown): Promise<unknown>;
   failureLedger: FailureEntry[];
@@ -287,7 +302,9 @@ export function createReadoutRouter(deps: ReadoutRouterDeps): Router {
       if (persisted) {
         (status as any).learner = {
           episode: persisted.episode ?? 0,
-          calibrationError: persisted.calibrationError ?? 0,
+          meanAbsSurprise: persisted.meanAbsSurprise ?? persisted.calibrationError ?? 0,
+          ece: persisted.ece ?? 0,
+          selfEce: persisted.selfEce ?? 0,
           selfScore: persisted.selfScore ?? 0,
           lastUpdatedAt: persisted.updatedAt ?? null,
         };

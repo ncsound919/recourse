@@ -36,10 +36,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { GeneRegistryStore } from './mutator';
 import type { RegistryGene } from './mutator-types';
-import { calibrationReport, isCalibrated } from '../lib/calibration';
+import { brierScore, calibrationReport, isCalibrated } from '../lib/calibration';
 import type {
   Directive,
   EpisodeReport,
+  ForecastRecord,
   GeneBelief,
   LedgerEntry,
   LearnerState,
@@ -55,7 +56,7 @@ const MAX_DIRECTIVES = 20;
  * changes in a way the previous version cannot reproduce, so an old chain is
  * reported as `partial` rather than as a divergence nobody observed.
  */
-export const LEARNER_SCHEMA = 2;
+export const LEARNER_SCHEMA = 3;
 /**
  * Belief evidence carried across a gene mutation.
  *
@@ -73,6 +74,32 @@ const VERSION_KEEP = 0.25;
  * shown to be bad again. Capping preserves the mean and restores adaptivity.
  */
 const MAX_ESS = 40;
+
+/**
+ * Forecast = BLEND_POSTERIOR * Beta posterior mean + BLEND_EMA * reward EMA.
+ * The posterior alone ignores the tuned learning rate; the blend means the rate
+ * the learner tunes actually reaches the forecast it is judged on. Both halves
+ * are recorded per forecast so a miss can be attributed to one of them.
+ */
+const BLEND_POSTERIOR = 0.5;
+const BLEND_EMA = 0.5;
+/** Brier change above/below these factors counts as worse/better. A dead band
+ *  between them keeps the rate from oscillating on noise. */
+const BRIER_WORSEN = 1.05;
+const BRIER_IMPROVE = 0.95;
+const LR_DOWN = 0.9;
+const LR_UP = 1.05;
+const LR_FLOOR = 0.05;
+const LR_CAP = 0.3;
+
+/** Append to a rolling window, dropping the oldest entries past the cap. */
+function pushWindow(window: ForecastRecord[], add: ForecastRecord[]): void {
+  if (add.length === 0) return;
+  window.push(...add);
+  if (window.length > FORECAST_WINDOW_SIZE) {
+    window.splice(0, window.length - FORECAST_WINDOW_SIZE);
+  }
+}
 /** Ledger window a replay may re-execute. The window always starts at
  *  genesis, and a window shorter than the chain is reported as
  *  `partial: true` — never as a verified or diverged chain. The cap exists
@@ -120,10 +147,12 @@ function canonicalState(s: LearnerState): unknown {
     episode: s.episode,
     meta: s.meta,
     selfScore: s.selfScore,
-    calibrationError: s.calibrationError,
+    meanAbsSurprise: s.meanAbsSurprise,
     brierScore: s.brierScore,
     ece: s.ece,
+    selfEce: s.selfEce,
     forecastWindow: s.forecastWindow,
+    selfForecastWindow: s.selfForecastWindow,
     ledgerHead: s.ledgerHead,
     geneBeliefs: s.geneBeliefs,
     directives: s.directives,
@@ -410,10 +439,11 @@ export class RecursiveLearner {
       episode: state.episode,
       genesEvaluated: tools.length,
       avgReward: Object.values(means).reduce((a, b) => a + b, 0) / Math.max(1, Object.keys(means).length),
-      calibrationError: state.calibrationError,
+      meanAbsSurprise: state.meanAbsSurprise,
       selfScore: state.selfScore,
       brierScore: state.brierScore,
       ece: state.ece,
+      selfEce: state.selfEce,
       meta: { ...state.meta },
       directives: [...state.directives],
       stateHash: state.ledgerHead,
@@ -555,9 +585,9 @@ export class RecursiveLearner {
     );
 
     const evaluated = new Set(genes.map((g) => g.id));
-    const predictionErrors: number[] = [];
+    const geneSurprise: number[] = [];
     const rewards: number[] = [];
-    const episodeForecasts: Array<{ predicted: number; realized: number }> = [];
+    const geneForecasts: ForecastRecord[] = [];
 
     for (const gene of genes) {
       const useExternal = typeof externalScore === 'number' && Number.isFinite(externalScore);
@@ -599,8 +629,14 @@ export class RecursiveLearner {
       belief.versionHash = vh;
 
       const priorMean = belief.alpha / (belief.alpha + belief.beta);
-      predictionErrors.push(Math.abs(reward - priorMean));
-      episodeForecasts.push({ predicted: round4(priorMean), realized: round4(reward) });
+      // The forecast blends the posterior with the EMA, so the rate the learner
+      // tunes actually affects what it predicts. Using the posterior alone made
+      // `learningRate` a knob that changed meanReward/weight but never a single
+      // forecast — the docs claimed otherwise.
+      const emaMean = belief.meanReward;
+      const predicted = round4(priorMean * BLEND_POSTERIOR + emaMean * BLEND_EMA);
+      geneSurprise.push(Math.abs(reward - predicted));
+      geneForecasts.push({ predicted, realized: round4(reward), betaMean: round4(priorMean), emaMean: round4(emaMean) });
 
       belief.alpha = round4(belief.alpha + reward);
       belief.beta = round4(belief.beta + (1 - reward));
@@ -615,11 +651,14 @@ export class RecursiveLearner {
       state.geneBeliefs[gene.id] = belief;
     }
 
+    // The learner's read on the ecosystem, forecast separately. It is scored in
+    // its own window and never mixed into the gene reliability bins: a
+    // self-forecast is a claim about the outside world, not about a gene.
+    const selfForecasts: ForecastRecord[] = [];
     if (typeof externalScore === 'number' && Number.isFinite(externalScore)) {
       const clamped = Math.min(1, Math.max(0, externalScore));
-      predictionErrors.push(Math.abs(clamped - state.selfScore));
       rewards.push(clamped);
-      episodeForecasts.push({ predicted: round4(state.selfScore), realized: round4(clamped) });
+      selfForecasts.push({ predicted: round4(state.selfScore), realized: round4(clamped) });
     }
 
     // Decay genes that were not evaluated this episode
@@ -629,27 +668,34 @@ export class RecursiveLearner {
       }
     }
 
-    // L1: meta-learning — the learner rewrites its own hyperparameters
-    const calibration = predictionErrors.length
-      ? round4(predictionErrors.reduce((a, b) => a + b, 0) / predictionErrors.length)
-      : state.calibrationError;
-    state.calibrationError = calibration;
+    // L1: meta-learning — the learner rewrites its own hyperparameters.
+    state.meanAbsSurprise = geneSurprise.length
+      ? round4(geneSurprise.reduce((a, b) => a + b, 0) / geneSurprise.length)
+      : state.meanAbsSurprise;
 
-    // Rolling forecast window for Brier/ECE computation
-    state.forecastWindow.push(...episodeForecasts);
-    if (state.forecastWindow.length > FORECAST_WINDOW_SIZE) {
-      state.forecastWindow = state.forecastWindow.slice(-FORECAST_WINDOW_SIZE);
-    }
+    // Brier BEFORE this episode's forecasts join the window: that is the
+    // previous episode's score, and the comparison the learning rate needs.
+    const priorGeneBrier = state.forecastWindow.length
+      ? brierScore(state.forecastWindow)
+      : null;
+
+    pushWindow(state.forecastWindow, geneForecasts);
+    pushWindow(state.selfForecastWindow, selfForecasts);
 
     const calReport = calibrationReport(state.forecastWindow);
     state.brierScore = calReport.brier;
     state.ece = calReport.ece;
+    state.selfEce = calibrationReport(state.selfForecastWindow).ece;
 
-    if (predictionErrors.length) {
-      if (calibration > 0.15) {
-        meta.learningRate = round4(Math.min(0.5, meta.learningRate * 1.1));
-      } else {
-        meta.learningRate = round4(Math.max(0.05, meta.learningRate * 0.95));
+    // Drive the learning rate from Brier — a proper scoring rule over the same
+    // forecasts it produces. Surprise is not a scoring rule: it falls when the
+    // outcome is boring, which is not the same as the forecast being good, and
+    // the old rule raised the rate exactly when the learner was most surprised.
+    if (priorGeneBrier !== null && geneForecasts.length > 0) {
+      if (calReport.brier > priorGeneBrier * BRIER_WORSEN) {
+        meta.learningRate = round4(Math.max(LR_FLOOR, meta.learningRate * LR_DOWN));
+      } else if (calReport.brier < priorGeneBrier * BRIER_IMPROVE) {
+        meta.learningRate = round4(Math.min(LR_CAP, meta.learningRate * LR_UP));
       }
     }
 
@@ -661,10 +707,16 @@ export class RecursiveLearner {
       meta.temperature = round4(clamp(0.2 + avgEntropy, 0.2, 1.5));
     }
 
-    if (predictionErrors.length) {
-      state.selfScore = round4(
-        clamp(state.selfScore + meta.learningRate * ((1 - calibration) - state.selfScore), 0, 1),
-      );
+    // selfScore is an EMA of the ecosystem signal it actually receives. It used
+    // to chase `1 - calibrationError`, so it was a second reading of surprise
+    // and nothing downstream could tell the two apart.
+    if (selfForecasts.length > 0) {
+      const realized = selfForecasts[selfForecasts.length - 1].realized;
+      state.selfScore = round4(clamp(
+        state.selfScore + meta.learningRate * (realized - state.selfScore),
+        0,
+        1,
+      ));
     }
 
     // L2: directives — recommendations back into the ecosystem
@@ -684,8 +736,14 @@ export class RecursiveLearner {
           ? round4(Math.min(1, Math.max(0, externalScore)))
           : undefined,
       },
-      forecasts: episodeForecasts.length > 0 ? episodeForecasts : undefined,
-      summary: `episode ${state.episode}: ${genes.length} genes, avg reward ${rewards.length ? round4(rewards.reduce((a, b) => a + b, 0) / rewards.length) : 'n/a'}, calibration ${calibration.toFixed(3)}, ECE ${state.ece.toFixed(3)}, Brier ${state.brierScore.toFixed(3)}${typeof externalScore === 'number' && Number.isFinite(externalScore) ? `, external verifier score ${externalScore.toFixed(3)}` : ''}`,
+      forecasts: geneForecasts.length > 0 ? geneForecasts : undefined,
+      summary:
+        `episode ${state.episode}: ${genes.length} genes, avg reward ` +
+        `${rewards.length ? round4(rewards.reduce((a, b) => a + b, 0) / rewards.length) : 'n/a'}, ` +
+        `gene ECE ${state.ece.toFixed(3)}, Brier ${state.brierScore.toFixed(3)}, ` +
+        `mean |surprise| ${state.meanAbsSurprise.toFixed(3)}` +
+        `${selfForecasts.length > 0 ? `, self ECE ${state.selfEce.toFixed(3)}` : ''}` +
+        `${typeof externalScore === 'number' && Number.isFinite(externalScore) ? `, external verifier score ${externalScore.toFixed(3)}` : ''}`,
       createdAt: new Date().toISOString(),
     };
     state.ledgerHead = stateHash;
@@ -706,9 +764,13 @@ export class RecursiveLearner {
       quantum_sim: 'tpl_bell_entangler'
     };
 
+    // The promotion gate reads the GENE window only. `forecastWindow` holds
+    // gene forecasts exclusively (self-forecasts live in their own window), so
+    // a self-forecast cannot pad `n` past minForecasts and unlock a promotion
+    // the gene forecasts do not support.
     const calGateActive = state.meta.calibrationGate > 0;
     const calTrusted = isCalibrated(
-      { brier: state.brierScore, ece: state.ece, mae: state.calibrationError, bins: [], n: state.forecastWindow.length },
+      { brier: state.brierScore, ece: state.ece, mae: state.meanAbsSurprise, bins: [], n: state.forecastWindow.length },
       state.meta.minForecasts,
       state.meta.calibrationGate,
     );
@@ -778,10 +840,11 @@ export class RecursiveLearner {
       episode: state.episode,
       genesEvaluated,
       avgReward,
-      calibrationError: state.calibrationError,
+      meanAbsSurprise: state.meanAbsSurprise,
       selfScore: state.selfScore,
       brierScore: state.brierScore,
       ece: state.ece,
+      selfEce: state.selfEce,
       meta: { ...state.meta },
       directives: [...state.directives],
       stateHash: entry.stateHash,
@@ -804,10 +867,12 @@ export class RecursiveLearner {
       meta,
       geneBeliefs: {},
       selfScore: 0.5,
-      calibrationError: 0.5,
+      meanAbsSurprise: 0.5,
       brierScore: 0,
       ece: 0.5,
+      selfEce: 0.5,
       forecastWindow: [],
+      selfForecastWindow: [],
       directives: [],
       ledgerHead: '0'.repeat(8),
       updatedAt: new Date().toISOString(),
@@ -835,7 +900,14 @@ export class RecursiveLearner {
    * A belief with no `versionHash` is left undefined on purpose: the next
    * episode sets it and skips the prior shrink. Applying the shrink here
    * would silently discard evidence that is perfectly good for the version it
-   * was actually collected against. */
+   * was actually collected against.
+   *
+   * `calibrationError` was renamed to `meanAbsSurprise`; a save that predates
+   * the rename has the same number under the old name, so it is read from
+   * there. Its historical forecasts were self-forecasts mixed in with gene
+   * forecasts, so that window is NOT carried over — the two windows are only
+   * meaningful once separated, and keeping the contaminated one would let the
+   * old mixing bias the new Brier/ECE. */
   private migrateState(raw: LearnerState): { state: LearnerState; changed: boolean } {
     const genesis = this.makeGenesis();
     let changed = false;
@@ -853,13 +925,27 @@ export class RecursiveLearner {
     state.meta = meta;
 
     if (!Array.isArray(raw.forecastWindow)) { state.forecastWindow = []; changed = true; }
+    if (!Array.isArray(raw.selfForecastWindow)) { state.selfForecastWindow = []; changed = true; }
     if (!raw.geneBeliefs || typeof raw.geneBeliefs !== 'object') { state.geneBeliefs = {}; changed = true; }
     if (!Array.isArray(raw.directives)) { state.directives = []; changed = true; }
 
     if (!Number.isFinite(raw.selfScore)) { state.selfScore = genesis.selfScore; changed = true; }
-    if (!Number.isFinite(raw.calibrationError)) { state.calibrationError = genesis.calibrationError; changed = true; }
+    // `meanAbsSurprise` under its old name.
+    const legacySurprise = (raw as unknown as { calibrationError?: unknown }).calibrationError;
+    if (!Number.isFinite(raw.meanAbsSurprise)) {
+      state.meanAbsSurprise = Number.isFinite(legacySurprise)
+        ? round4(legacySurprise as number)
+        : genesis.meanAbsSurprise;
+      changed = true;
+    }
     if (!Number.isFinite(raw.brierScore)) { state.brierScore = genesis.brierScore; changed = true; }
     if (!Number.isFinite(raw.ece)) { state.ece = genesis.ece; changed = true; }
+    if (!Number.isFinite(raw.selfEce)) { state.selfEce = genesis.selfEce; changed = true; }
+    // A pre-separation window is dropped, not carried: see the note above.
+    if (!Number.isFinite(raw.brierScore) && Array.isArray(raw.forecastWindow) && raw.forecastWindow.length > 0) {
+      state.forecastWindow = [];
+      changed = true;
+    }
     if (!Number.isFinite(raw.episode) || raw.episode < 0) { state.episode = genesis.episode; changed = true; }
     if (typeof raw.ledgerHead !== 'string') { state.ledgerHead = genesis.ledgerHead; changed = true; }
 

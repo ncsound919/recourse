@@ -969,9 +969,11 @@ const dreamEngine = new DreamingEngine(
         return 0;
       }
     },
+    // ECE, not the old mean|realized - predicted|. Surprise and calibration are
+    // different quantities and only one of them is calibration.
     learnerCalibration: () => {
       try {
-        return (learner as any).lastReport?.calibrationError ?? 0;
+        return (learner as any).lastReport?.ece ?? 0;
       } catch {
         return 0;
       }
@@ -5511,7 +5513,8 @@ async function runServerTickOnce() {
       energyBudget: Math.round((mathResult.energyBudget?.energyJoulesOrFlops ?? 0) * 100) / 100,
       energyConsumed: Math.round((energyConsumed || 0) * 100) / 100,
       learnerEp: learnerReport?.episode ?? 0,
-      learnerCal: Math.round((learnerReport?.calibrationError ?? 0) * 10000) / 10000,
+      learnerEce: Math.round((learnerReport?.ece ?? 0) * 10000) / 10000,
+      learnerSurprise: Math.round((learnerReport?.meanAbsSurprise ?? 0) * 10000) / 10000,
       legoAssemblies: globalLegoEngine.getState().registry.length,
       determinismDepth: status.determinismDepth ?? 0,
     });
@@ -5583,7 +5586,7 @@ async function runServerTickOnce() {
         energyConsumed: energyConsumed || 0,
         learnerEpisode: learnerReport?.episode ?? 0,
         learnerAvgReward: learnerReport?.avgReward ?? 0,
-        learnerCalibration: learnerReport?.calibrationError ?? 0,
+        learnerCalibration: learnerReport?.ece ?? 0,
         dream: dreamFired,
         axiomAdded,
         axiom: typeof axiom === 'string' ? axiom : undefined,

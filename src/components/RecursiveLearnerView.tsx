@@ -197,9 +197,27 @@ export const RecursiveLearnerView: React.FC<RecursiveLearnerViewProps> = ({ onNo
             </span>
           </div>
           <div className="bg-ink-950/60 p-4 rounded-xl border border-ink-800/80">
-            <span className="text-ink-500 text-[10px] block mb-1">Calibration error</span>
+            <span className="text-ink-500 text-[10px] block mb-1" title="Expected calibration error over GENE forecasts only. Self-forecasts are scored separately.">
+              Gene ECE
+            </span>
             <span className="text-xl font-semibold text-warn-400">
-              {state.calibrationError.toFixed(4)}
+              {state.ece.toFixed(4)}
+            </span>
+          </div>
+          <div className="bg-ink-950/60 p-4 rounded-xl border border-ink-800/80">
+            <span className="text-ink-500 text-[10px] block mb-1" title="Mean |realized - predicted| over gene forecasts. This is SURPRISE, not calibration — see Gene ECE.">
+              Mean |surprise|
+            </span>
+            <span className="text-xl font-semibold text-warn-400">
+              {state.meanAbsSurprise.toFixed(4)}
+            </span>
+          </div>
+          <div className="bg-ink-950/60 p-4 rounded-xl border border-ink-800/80">
+            <span className="text-ink-500 text-[10px] block mb-1" title="Expected calibration error over SELF forecasts (selfScore vs external outcome) only.">
+              Self ECE
+            </span>
+            <span className="text-xl font-semibold text-warn-400">
+              {state.selfEce.toFixed(4)}
             </span>
           </div>
           <div className="bg-ink-950/60 p-4 rounded-xl border border-ink-800/80">
