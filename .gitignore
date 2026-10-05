@@ -16,6 +16,8 @@ recourse_dream.json
 recourse_goals.json
 .recourse.lock
 .recourse.pid
+# generated per-run caches (repo export index, lock files)
+.recourse/
 data/*
 # shipped config under data/ (needed by fresh clones, CI and Docker)
 !data/plans/
