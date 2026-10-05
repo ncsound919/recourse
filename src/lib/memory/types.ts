@@ -8,7 +8,17 @@ export type Outcome = 'win' | 'loss' | 'neutral'
 /** Episodic tier: append-only record of every run. */
 export interface Episode {
   id: string
+  /**
+   * Per-store monotonic sequence (1, 2, 3 ...), NOT wall-clock time. Kept this
+   * way so replays are deterministic and ids stay unique across restarts.
+   * Use `recordedAt` for "when did this actually happen".
+   */
   timestamp: number
+  /**
+   * Epoch ms when the episode was recorded, or undefined for rows written before
+   * this column existed. Absent is honest — those episodes have no known time.
+   */
+  recordedAt?: number
   problemFingerprint: string
   toolName?: string
   outcome: Outcome

@@ -5,7 +5,23 @@
 // an absent analyzer must never become a finding, an unscanned tree must never
 // read as clean, and a systemic rule must collapse to ONE signal rather than N.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+// Spawn-heavy suite: these tests drive the real isolate sandbox (and, for
+// promotedAudit / staticAuditSignal, a real external analyzer). Measured alone,
+// forgeQuality runs its 18 tests in ~15s. Run alongside the other sandbox suites
+// under full-suite parallel load the same file stretched past the 30s suite-wide
+// default and failed on TIMEOUT while every assertion held — so the suite's
+// verdict became a function of machine load rather than of correctness, which
+// makes it useless as a gate.
+//
+// This is the same remedy already applied in tests/codeSafetyOss.test.ts, whose
+// header records exactly this: "under full-suite load these spawns stretched past
+// 30s and failed on timeout even though every assertion held. The assertion, not
+// the clock, is the signal here." Raising it per-file keeps the global 30s
+// default tight for the other ~300 files, so a genuine hang is still caught
+// everywhere it matters.
+vi.setConfig({ testTimeout: 180000, hookTimeout: 180000 });
 
 import {
   runStaticAudit,
@@ -123,5 +139,10 @@ describe('runStaticAudit', () => {
     // An unscanned or empty result must project to no signals. This is the rule
     // that stops a missing analyzer from being laundered into a finding.
     expect(staticAuditSignals(result)).toEqual([]);
-  }, 60_000);
+    // This explicit timeout overrides the file-level `vi.setConfig`. It must stay
+    // above runStaticAudit's own `timeoutMs` (30s) plus process startup: under
+    // full-suite parallel load semgrep's spawn plus that internal budget overran
+    // the previous 60s ceiling and failed on the CLOCK while every assertion held.
+    // The assertion, not the clock, is the signal.
+  }, 180_000);
 });

@@ -41,12 +41,22 @@ export class EpisodicStore {
     this.sequence = Math.max(0, opts.startSequence ?? 0)
   }
 
-  record(episode: Omit<Episode, 'id' | 'timestamp'>): Episode {
+  /**
+ * Record one episode.
+ *
+ * `now` is injectable so a deterministic replay can pin the clock. The default
+ * is the real clock, recorded in `recordedAt` ALONGSIDE the deterministic
+ * `timestamp` sequence — never replacing it — so ids, ordering and replay
+ * equivalence are unchanged while the store can finally answer "when did this
+ * last happen".
+ */
+record(episode: Omit<Episode, 'id' | 'timestamp'>, now: number = Date.now()): Episode {
     this.sequence += 1
     const full: Episode = {
       ...episode,
       id: `${this.idPrefix}-${this.sequence}`,
       timestamp: this.sequence,
+      recordedAt: now,
     }
     this.driver.append(full)
     return full

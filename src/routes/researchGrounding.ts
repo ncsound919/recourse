@@ -11,7 +11,6 @@
  * threshold by reading the consequence rather than the configuration.
  */
 import { Router } from 'express';
-import type { Request, Response } from 'express';
 
 import { gatherGrounding, groundingQuery, describeGrounding } from '../lib/researchGrounding/gather.js';
 import { groundingSection } from '../lib/researchGrounding/prompt.js';
@@ -25,12 +24,32 @@ import {
 import { filterByRelevance } from '../lib/researchGrounding/relevance.js';
 import {
   latestGroundingFor,
-  readGroundingLedger,
+  readGroundingLedgerWithTail,
+  type LedgerRead,
   verifyGroundingRecords,
 } from '../lib/researchGrounding/ledger.js';
 
+/**
+ * The band a caller may ask for.
+ *
+ * The ceiling is the default. Below it, coverage widens for a genuinely
+ * narrow query; above it, the filter stops meaning anything.
+ */
+const MIN_RELEVANCE_FLOOR = 0.1;
+const MAX_RELEVANCE_CEILING = 0.34;
+
 export interface GroundingRouterDeps {
-  requireMutationAuth: (req: Request, res: Response) => boolean;
+  /**
+   * Deliberately NOT injected.
+   *
+   * An earlier version declared this and never called it, which read as
+   * "these routes are guarded" while `/preview` and `/threshold` fanned out to
+   * third-party services unauthenticated. Rather than keep a guard that does
+   * nothing, the property is absent: no route here mutates Recourse, so there is
+   * no secret to present. What the routes do cost is upstream egress, which is
+   * why `/threshold` — the only one that widens the relevance filter — is
+   * reachable but bounded by `MAX_RELEVANCE_CEILING` above.
+   */
   /** Injectable for tests; defaults to the real gatherer. */
   gather?: typeof gatherGrounding;
   /** Injectable for tests; defaults to the on-disk ledger. */
@@ -84,11 +103,32 @@ export function createGroundingRouter(deps: GroundingRouterDeps): Router {
       return res.status(400).json({ success: false, error: 'title or prompt is required' });
     }
     const domain = typeof req.body?.domain === 'string' ? req.body.domain : undefined;
-    const minRelevance = typeof req.body?.minRelevance === 'number' ? req.body.minRelevance : undefined;
+
+    // Clamp `minRelevance`. Unclamped, `0` — or any negative number — put an
+    // off-topic astrophysics paper into the returned `promptSection`, reproducing
+    // the exact failure `relevance.ts` exists to prevent, from a request that
+    // looks completely ordinary. A caller may loosen the threshold within a
+    // narrow band to widen coverage; it may not switch the filter off from
+    // outside, so the band is enforced rather than clamped silently.
+    const requested = typeof req.body?.minRelevance === 'number' ? req.body.minRelevance : undefined;
+    if (requested !== undefined && (!Number.isFinite(requested) || requested < MIN_RELEVANCE_FLOOR || requested > MAX_RELEVANCE_CEILING)) {
+      return res.status(400).json({
+        success: false,
+        error: `minRelevance must be between ${MIN_RELEVANCE_FLOOR} and ${MAX_RELEVANCE_CEILING} (got ${requested})`,
+      });
+    }
+    const minRelevance = requested;
+
+    // Cap an operator-supplied query: it goes straight to third-party services,
+    // and the derived query is bounded to 8 words for a reason.
+    const rawQuery = typeof req.body?.query === 'string' ? req.body.query.trim() : '';
+    const query = rawQuery ? rawQuery.split(/\s+/).slice(0, 12).join(' ') : '';
+
     const bundle = await gather(
       { id, title, prompt, ...(domain ? { domain } : {}) },
-      { ...(minRelevance !== undefined ? { minRelevance } : {}), ...(req.body?.query ? { query: String(req.body.query) } : {}) },
+      { ...(minRelevance !== undefined ? { minRelevance } : {}), ...(query ? { query } : {}) },
     );
+    const quotableIds = new Set(bundle.quotable.map((s) => s.id));
     return res.json({
       success: true,
       query: bundle.query,
@@ -98,7 +138,11 @@ export function createGroundingRouter(deps: GroundingRouterDeps): Router {
       degradedReasons: bundle.degradedReasons,
       providers: bundle.providers,
       quotable: bundle.quotable,
-      leads: bundle.sources.filter((s) => s !== undefined),
+      // Leads are the results that are NOT quoted. The previous predicate was a
+      // tautology, so this field returned the quotable items too — a consumer
+      // treating "leads" as "unquoted" was reading the very thing it meant to
+      // distinguish.
+      leads: bundle.sources.filter((s) => !quotableIds.has(s.id)),
       hash: bundle.hash,
       // The actual text injected into the generation prompt.
       promptSection: groundingSection(bundle),
@@ -145,14 +189,33 @@ export function createGroundingRouter(deps: GroundingRouterDeps): Router {
   // --- the record ----------------------------------------------------------
 
   router.get('/ledger', (_req, res) => {
-    const records = readGroundingLedger(deps.ledgerFile);
-    const chain = verifyGroundingRecords(records);
+    // Use the tail-aware reader directly. `readGroundingLedger` swallows BOTH a
+    // torn tail and mid-file corruption and returns `[]`, so this route used to
+    // answer `{count: 0, chain: {valid: true}}` for a ledger that had been
+    // silently dropped — an empty ledger and a corrupted one looked identical,
+    // and "valid" on an empty chain is trivially true.
+    let read: LedgerRead;
+    try {
+      read = readGroundingLedgerWithTail(deps.ledgerFile);
+    } catch (error) {
+      // Corruption is a real, reportable condition: 500, with the reason. Do not
+      // present it as an empty ledger.
+      return res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+        corrupt: true,
+      });
+    }
+    const chain = verifyGroundingRecords(read.records);
     res.json({
       success: true,
-      count: records.length,
+      count: read.records.length,
       chain,
-      degradedCount: records.filter((r) => r.degraded).length,
-      recent: records.slice(-25).reverse(),
+      // A torn final line means the last append never completed. It is dropped
+      // rather than fatal, but it is not "nothing to report" either.
+      truncatedTail: read.truncatedTail,
+      degradedCount: read.records.filter((r) => r.degraded).length,
+      recent: read.records.slice(-25).reverse(),
     });
   });
 

@@ -31,6 +31,40 @@ export const PLUGIN_ID_RE = /^[a-z][a-z0-9-]*$/;
 export const TOOL_NAME_RE = /^[A-Za-z0-9_-]{1,64}$/;
 export const SEMVER_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 
+/**
+ * An environment variable NAME: uppercase, underscore-separated.
+ *
+ * Not pedantry. The name is spliced verbatim into generated TypeScript as a
+ * single-quoted string literal *and* into a block comment. Without a charset
+ * rule a value like `X' + (sideEffect()) + '` closes the literal and injects
+ * arbitrary code into a file that is then compiled and loaded by the harness.
+ * Constraining the shape makes that unrepresentable, rather than something the
+ * emitter has to escape and hope it escapes correctly.
+ */
+export const ENV_VAR_NAME_RE = /^[A-Z_][A-Z0-9_]*$/;
+
+/**
+ * Collapse free text to a single, comment-safe line.
+ *
+ * Free text reaches generated source in three places: a block-comment header, a
+ * README table, and a YAML scalar. A newline there either starts a fresh line
+ * that reads as structure rather than prose, or folds a YAML scalar into
+ * garbage; a comment terminator closes a block comment outright. Applied at the
+ * validation boundary so no emitter has to remember.
+ */
+export function sanitizeFreeText(value: string, max = 400): string {
+  return value
+    .replace(/\r\n?/g, '\n')
+    .replace(/\n+/g, ' ')
+    // Insert a space rather than a backslash: the lexer only recognises the
+    // exact two-character sequence, and `*\/` would then leak into the
+    // generated package.json description where it is just noise.
+    .replace(/\*\//g, '* /')
+    .replace(/[^\S\n]+/g, ' ')
+    .trim()
+    .slice(0, max);
+}
+
 /** One tool the model can call, bound to a Recourse route. */
 export interface DshToolSpec {
   /** Model-facing function name, `[A-Za-z0-9_-]`, <= 64 chars. */
@@ -144,9 +178,14 @@ export function validateDshPluginSpec(raw: unknown): SpecValidation {
   const packageName = typeof s.packageName === 'string' ? s.packageName.trim() : '';
   if (!PACKAGE_NAME_RE.test(packageName)) {
     errors.push(`packageName must be a valid npm package name (got ${JSON.stringify(s.packageName)})`);
+  } else if (packageName.includes('/')) {
+    // A scoped name is a legal npm name but not a legal DIRECTORY name, and the
+    // bundle directory is derived from it. Failing here names the real cause
+    // instead of surfacing later as `invalid-name` from the resolver.
+    errors.push('packageName must be unscoped: the bundle directory name is derived from it');
   }
 
-  const description = typeof s.description === 'string' ? s.description.trim() : '';
+  const description = typeof s.description === 'string' ? sanitizeFreeText(s.description) : '';
   if (!description) errors.push('description is required');
 
   const version = s.version === undefined ? '1.0.0' : String(s.version);
@@ -154,11 +193,21 @@ export function validateDshPluginSpec(raw: unknown): SpecValidation {
 
   if (s.license !== undefined && typeof s.license !== 'string') errors.push('license must be a string');
   if (s.author !== undefined && typeof s.author !== 'string') errors.push('author must be a string');
-  if (s.apiBaseUrl !== undefined && typeof s.apiBaseUrl !== 'string') {
-    errors.push('apiBaseUrl must be a string');
+  if (s.apiBaseUrl !== undefined) {
+    if (typeof s.apiBaseUrl !== 'string') errors.push('apiBaseUrl must be a string');
+    // Reaches a YAML scalar, where a newline folds the value into nonsense.
+    else if (/[\r\n]/.test(s.apiBaseUrl)) errors.push('apiBaseUrl must not contain newlines');
   }
-  if (s.apiSecretEnvVar !== undefined && typeof s.apiSecretEnvVar !== 'string') {
-    errors.push('apiSecretEnvVar must be a string');
+  if (s.apiSecretEnvVar !== undefined) {
+    if (typeof s.apiSecretEnvVar !== 'string') {
+      errors.push('apiSecretEnvVar must be a string');
+    } else if (!ENV_VAR_NAME_RE.test(s.apiSecretEnvVar.trim())) {
+      // Reaches generated TypeScript as a single-quoted literal and a block
+      // comment. A loose charset here is arbitrary code execution.
+      errors.push(
+        `apiSecretEnvVar must be an environment variable NAME matching ${ENV_VAR_NAME_RE} (got ${JSON.stringify(s.apiSecretEnvVar)})`,
+      );
+    }
   }
   if (
     s.promptSectionOrder !== undefined &&
@@ -199,21 +248,41 @@ export function validateDshPluginSpec(raw: unknown): SpecValidation {
       }
       const p = typeof t.path === 'string' ? t.path : '';
       if (!p.startsWith('/')) errors.push(`${label}.path must start with "/"`);
+      // A `|` would add a row to the generated README table, and a newline would
+      // end the table cell. Both are silent corruption of a shipped file.
       else if (p.includes('..')) errors.push(`${label}.path must not contain traversal`);
-      if (t.query !== undefined && (typeof t.query !== 'object' || t.query === null || Array.isArray(t.query))) {
-        errors.push(`${label}.query must be an object of string values`);
+      else if (/[\r\n|]/.test(p)) errors.push(`${label}.path must not contain newlines or "|"`);
+
+      // Query values land inside `pathWith(base, { ... })` in the generated
+      // catalog, typed `Record<string, string>`. A non-string compiles as a TS
+      // error and `noEmitOnError` means the harness never gets a lib/ to load —
+      // so it is checked here rather than discovered at build time.
+      let query: Record<string, string> | undefined;
+      if (t.query !== undefined) {
+        if (typeof t.query !== 'object' || t.query === null || Array.isArray(t.query)) {
+          errors.push(`${label}.query must be an object of string values`);
+        } else {
+          query = {};
+          for (const [k, v] of Object.entries(t.query as Record<string, unknown>)) {
+            if (typeof v !== 'string') {
+              errors.push(`${label}.query.${k} must be a string (got ${typeof v})`);
+              continue;
+            }
+            if (!/^[A-Za-z0-9_.-]+$/.test(k)) errors.push(`${label}.query key "${k}" must be an identifier`);
+            query[k] = sanitizeFreeText(v, 200);
+          }
+        }
       }
+
       tools.push({
         name,
-        title: String(t.title ?? ''),
-        description: String(t.description ?? ''),
+        title: typeof t.title === 'string' ? sanitizeFreeText(t.title, 120) : '',
+        description: typeof t.description === 'string' ? sanitizeFreeText(t.description, 600) : '',
         method: (t.method === 'POST' ? 'POST' : 'GET') as 'GET' | 'POST',
         path: p,
         ...(t.mutating === true ? { mutating: true } : {}),
         ...(t.long === true ? { long: true } : {}),
-        ...(t.query && typeof t.query === 'object' && !Array.isArray(t.query)
-          ? { query: t.query as Record<string, string> }
-          : {}),
+        ...(query ? { query } : {}),
       });
     });
   }

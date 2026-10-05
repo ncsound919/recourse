@@ -8,17 +8,37 @@
 import { Router } from 'express';
 import type { PromotionPolicy } from '../types.js';
 
-export interface PolicyRouterDeps {
-  autonomySnapshot(): {
-    safeBoot: boolean;
-    autoEvolving: boolean;
-    dreamActive: boolean;
-    swarmAutopilot: boolean;
-    intakeAutopilot: boolean;
-    forgeAutopilot: boolean;
-    devAutopilot: boolean;
-    serverTickAutopilot: boolean;
+export interface AutonomySnapshot {
+  safeBoot: boolean;
+  autoEvolving: boolean;
+  dreamActive: boolean;
+  swarmAutopilot: boolean;
+  intakeAutopilot: boolean;
+  forgeAutopilot: boolean;
+  devAutopilot: boolean;
+  serverTickAutopilot: boolean;
+  /**
+   * Whether each loop is actually permitted to run. A flag can read true while
+   * safe-boot still gates it, so the raw snapshot above is not sufficient to
+   * answer "is anything running".
+   */
+  effectiveGates?: Record<string, boolean>;
+  /** Names of the loops whose gate is closed. */
+  closedGates?: string[];
+  /** Fleet rollup: how many scheduler jobs are actually doing work. */
+  scheduler?: {
+    total: number;
+    armedJobs: number;
+    workingJobs: number;
+    noOpJobs: number;
+    failingJobs: number;
   };
+  /** One-line honest summary, e.g. "NOT AUTONOMOUS: 0 of 24 jobs doing work". */
+  headline?: string;
+}
+
+export interface PolicyRouterDeps {
+  autonomySnapshot(): AutonomySnapshot;
   setSafeBoot(safeBoot: boolean): boolean;
   setAutoEvolving(enabled: boolean): boolean;
   applyPromotionPolicy(raw: unknown): { ok: true; policy: PromotionPolicy; note?: string } | { ok: false; error: string };

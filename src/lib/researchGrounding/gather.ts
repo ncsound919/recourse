@@ -82,7 +82,14 @@ export function groundingQuery(target: GroundingTarget): string {
   return words.join(' ').trim();
 }
 
-/** Dedupe on a stable key, keeping the most trustworthy copy of each. */
+/**
+ * Dedupe on a stable key, keeping the most trustworthy copy of each.
+ *
+ * Trust and prose travel together. An earlier version kept the stronger *label*
+ * but spread the weaker *body*, so a real abstract arrived tagged `metadata` and
+ * was then excluded from the prompt — the deduplication silently threw away the
+ * best evidence it had been handed. Whichever copy is stronger wins whole.
+ */
 function dedupe(items: readonly GroundingSource[]): GroundingSource[] {
   const byKey = new Map<string, GroundingSource>();
   for (const item of items) {
@@ -94,15 +101,59 @@ function dedupe(items: readonly GroundingSource[]): GroundingSource[] {
     }
     // Same work found twice: keep whichever carries real prose, and never let a
     // templated copy displace a retrieved one.
-    const preferred = strongerTrust(existing.trust, item.trust);
-    if (preferred === existing.trust) byKey.set(key, existing);
-    else byKey.set(key, { ...item, trust: existing.trust, trustReason: existing.trustReason });
+    if (strongerTrust(item.trust, existing.trust) === item.trust) byKey.set(key, item);
   }
   return [...byKey.values()];
 }
 
+/**
+ * Order strongest-trust first, stably.
+ *
+ * `sources` is documented as "strongest trust first", and the order matters
+ * downstream: `maxSources` truncates, so a provider-order list could push every
+ * retrieved hit past the cut while weaker copies stayed.
+ */
+function byTrustFirst(items: readonly GroundingSource[]): GroundingSource[] {
+  return items
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => {
+      const rank = trustRank(a.item.trust) - trustRank(b.item.trust);
+      return rank !== 0 ? rank : a.index - b.index;
+    })
+    .map((entry) => entry.item);
+}
+
+function trustRank(trust: GroundingSource['trust']): number {
+  return trust === 'retrieved' ? 0 : trust === 'metadata' ? 1 : 2;
+}
+
+/**
+ * Content hash of what the search actually found.
+ *
+ * Deliberately EXCLUDES `gatheredAt`. The hash's stated purpose is to detect
+ * drift when the same spec is forged again, and including the clock means two
+ * identical gathers never agree — so it can detect that time passed and nothing
+ * else. `hashRecord` in `ledger.ts` records `at` separately for that.
+ */
 function bundleHash(bundle: Omit<GroundingBundle, 'hash'>): string {
-  return sha256Hex(canonicalize(bundle));
+  // Timing is excluded along with the clock: `latencyMs` differs on every call
+  // and would defeat the hash's whole purpose, which is "did this spec's
+  // evidence change between two forges?".
+  const stable = {
+    specId: bundle.specId,
+    query: bundle.query,
+    degraded: bundle.degraded,
+    degradedReasons: bundle.degradedReasons,
+    sources: bundle.sources,
+    quotable: bundle.quotable.map((s) => s.id),
+    providers: bundle.providers.map((p) => ({
+      service: p.service,
+      provider: p.provider,
+      ok: p.ok,
+      count: p.count,
+    })),
+  };
+  return sha256Hex(canonicalize(stable));
 }
 
 export interface GatherOptions {
@@ -201,10 +252,17 @@ export async function gatherGrounding(target: GroundingTarget, opts: GatherOptio
   // Relevance before trust: an off-topic retrieved paper and an on-topic
   // templated one are both unusable, and dropping the off-topic one first keeps
   // the "nothing quotable" message honest about which was the real blocker.
-  const deduped = dedupe(items);
+  const deduped = byTrustFirst(dedupe(items));
   const { kept, dropped } = filterByRelevance(deduped, effectiveQuery, { minScore: minRelevance, ...(opts.keepAll === true ? { keepAll: true } : {}) });
+
+  // Quote first, then truncate. Slicing to `maxSources` before choosing what to
+  // quote meant that on a provider whose results arrived late, fifteen retrieved
+  // abstracts could be retrieved and returned HTTP 200 while the bundle carried
+  // none of them — the feature silently no-op'd on provider ordering.
+  const quotable = kept
+    .filter((s) => isQuotable(s.trust) && s.span.length > 0)
+    .slice(0, maxQuoted);
   const unique = kept.slice(0, maxSources);
-  const quotable = unique.filter((s) => isQuotable(s.trust) && s.span.length > 0).slice(0, maxQuoted);
 
   const failed = providers.filter((p) => !p.ok);
   const reasons: string[] = [];

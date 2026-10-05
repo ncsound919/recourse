@@ -85,15 +85,62 @@ function hashRecord(r: Omit<GroundingRecord, 'hash'>): string {
   );
 }
 
+/**
+ * Read the ledger, tolerating a torn final line.
+ *
+ * An interrupted `appendFileSync` can leave a partial line. Dropping the whole
+ * file was the previous behaviour, and it was the dangerous one: an empty ledger
+ * verifies as `{valid: true}`, the next append roots a fresh chain at GENESIS,
+ * and every record written before the tear becomes unreachable — while the
+ * status route still reported the record as intact and verifiable.
+ *
+ * So an unparseable FINAL line is skipped and reported by `truncatedTail`;
+ * an unparseable line anywhere earlier means corruption, and the whole read
+ * fails loudly rather than silently forking.
+ */
+export interface LedgerRead {
+  readonly records: GroundingRecord[];
+  /** A final line that did not parse, dropped because it is torn. */
+  readonly truncatedTail: boolean;
+}
+
+export function readGroundingLedgerWithTail(file = groundingLedgerFile()): LedgerRead {
+  let raw: string;
+  try {
+    if (!fs.existsSync(file)) return { records: [], truncatedTail: false };
+    raw = fs.readFileSync(file, 'utf-8');
+  } catch {
+    return { records: [], truncatedTail: false };
+  }
+  const lines = raw.split('\n');
+  // A trailing newline yields a final empty element; drop only that.
+  if (lines.length > 0 && lines[lines.length - 1].trim() === '') lines.pop();
+  if (lines.length === 0) return { records: [], truncatedTail: false };
+
+  const records: GroundingRecord[] = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (line.trim() === '') continue;
+    try {
+      records.push(JSON.parse(line) as GroundingRecord);
+    } catch (error) {
+      if (i === lines.length - 1) {
+        // Torn tail: the append never completed. Everything before it is intact.
+        return { records, truncatedTail: true };
+      }
+      // Corruption in the middle. Do not silently continue from a wrong tail.
+      throw new Error(
+        `grounding ledger ${file} is corrupt at line ${i + 1} of ${lines.length}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  return { records, truncatedTail: false };
+}
+
 export function readGroundingLedger(file = groundingLedgerFile()): GroundingRecord[] {
   try {
-    if (!fs.existsSync(file)) return [];
-    const raw = fs.readFileSync(file, 'utf-8').trim();
-    if (!raw) return [];
-    return raw.split('\n').map((l) => JSON.parse(l) as GroundingRecord);
+    return readGroundingLedgerWithTail(file).records;
   } catch {
-    // A truncated last line from an interrupted append must not make the whole
-    // history unreadable; the verifier reports the break explicitly instead.
     return [];
   }
 }
@@ -110,8 +157,18 @@ export function appendGroundingRecord(
   opts: { tool?: string; file?: string; at?: number } = {},
 ): GroundingRecord {
   const file = opts.file ?? groundingLedgerFile();
+  // Generous: the critical section reads the whole ledger and canonicalizes it,
+  // and the default 10s stale-reclaim would let a second process unlink a lock
+  // that is merely slow, producing two records with the same prevHash. This call
+  // blocks the event loop, so it happens once per forge cycle, not per request.
   return withSyncFileLock(`${file}.lock`, () => {
-    const ledger = readGroundingLedger(file);
+    const { records: ledger, truncatedTail } = readGroundingLedgerWithTail(file);
+    if (truncatedTail) {
+      // Forking here would silently re-root the chain. Surface it instead.
+      throw new Error(
+        `refusing to append to ${file}: its last record is torn. Repair or remove the partial line first.`,
+      );
+    }
     const prevHash = ledger.length > 0 ? ledger[ledger.length - 1].hash : GENESIS;
     const base: Omit<GroundingRecord, 'hash'> = {
       id: bundle.specId,
@@ -126,9 +183,18 @@ export function appendGroundingRecord(
     };
     const record: GroundingRecord = { ...base, hash: hashRecord(base) };
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.appendFileSync(file, JSON.stringify(record) + '\n', 'utf-8');
+    const fd = fs.openSync(file, 'a');
+    try {
+      fs.writeSync(fd, JSON.stringify(record) + '\n', null, 'utf-8');
+      // The ledger is described as durable, and it is the only thing that
+      // distinguishes a searched spec from an unsearched one. Without the fsync
+      // an OS-level crash loses the record with no trace.
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
     return record;
-  });
+  }, { timeoutMs: 30_000, staleMs: 120_000 });
 }
 
 export interface ChainVerification {
@@ -144,8 +210,15 @@ export interface ChainVerification {
  * Re-derive every hash. Pure — no filesystem — so it is safe to call from a
  * status route.
  *
- * Checks both linkage (`prevHash`) and content, because a record can be edited in
- * place while leaving its predecessor link intact.
+ * Checks three things, because each has been got wrong in a way that reported
+ * `valid: true`:
+ *
+ * - **Linkage** (`prevHash`) — a record edited in place can leave its
+ *   predecessor link intact.
+ * - **Content** — the hash is recomputed, not trusted from the row.
+ * - **Canonical coverage** — the hash covers a WHITELIST of fields, so an added
+ *   or edited key outside it would otherwise be undetectable while the record
+ *   read back as verified. `unattested` reports any such key.
  */
 export function verifyGroundingRecords(records: readonly GroundingRecord[]): ChainVerification {
   let prev = GENESIS;
@@ -157,10 +230,19 @@ export function verifyGroundingRecords(records: readonly GroundingRecord[]): Cha
     if (hashRecord(content as Omit<GroundingRecord, 'hash'>) !== hash) {
       return { valid: false, length: records.length, lastHash: records[records.length - 1]?.hash ?? GENESIS, brokenAt: i, reason: 'content' };
     }
+    const extra = Object.keys(content).filter((k) => !ATTESTED_FIELDS.has(k));
+    if (extra.length > 0) {
+      return { valid: false, length: records.length, lastHash: records[records.length - 1]?.hash ?? GENESIS, brokenAt: i, reason: `unattested field(s): ${extra.join(', ')}` };
+    }
     prev = hash;
   }
   return { valid: true, length: records.length, lastHash: prev };
 }
+
+/** The fields {@link hashRecord} actually attests to. */
+const ATTESTED_FIELDS = new Set([
+  'id', 'at', 'query', 'bundleHash', 'sources', 'degraded', 'degradedReasons', 'tool', 'prevHash',
+]);
 
 /** The most recent record for one spec id, or null. */
 export function latestGroundingFor(id: string, file = groundingLedgerFile()): GroundingRecord | null {

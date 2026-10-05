@@ -68,7 +68,12 @@ export function createIntakeRouter(deps: IntakeRouterDeps): Router {
       const queries = Array.isArray(b.queries) && (b.queries as unknown[]).length
         ? (b.queries as string[]).map(String).slice(0, maxPoll)
         : (brainKaggleQueries.length ? brainKaggleQueries : DEFAULT_TOPIC_QUERIES);
-      const news = typeof b.news === 'boolean' ? b.news : deps.brainNews() || true;
+      // `deps.brainNews()` is already a strict boolean gate (RECOURSE_INTAKE_BRAIN_NEWS === '1').
+      // `deps.brainNews() || true` collapsed that to a constant `true`, because
+      // `false || true === true` — so an operator who left the opt-in unset still
+      // paid for /news traffic on every poll. Same gate is honoured correctly at
+      // server.ts:5949. Honour it here too.
+      const news = typeof b.news === 'boolean' ? b.news : deps.brainNews();
       const newsLimit = Number(b.newsLimit) || deps.brainNewsLimit();
 
       const { signals, results } = await pollAllSources({

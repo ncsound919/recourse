@@ -4,6 +4,7 @@ import {
   auditorsForDepth,
   deepestAudit,
   depthFromSignals,
+  openHubPresetForDepth,
   planAuditDepth,
 } from '../src/autopilot/auditDepth';
 import type { GeneBelief } from '../src/dream/learner-types';
@@ -37,17 +38,38 @@ describe('depthFromSignals', () => {
 
 describe('auditorsForDepth', () => {
   it('returns the tier in stable auditor order', () => {
-    expect(auditorsForDepth(1)).toEqual(['grader']);
-    expect(auditorsForDepth(2)).toEqual(['grader', 'reporank']);
+    // `olympics` is in EVERY tier: it is OpenHub's aggregator suite, so it is the
+    // one auditor with a reachable backend at any depth. Depth picks how hard it
+    // looks (see openHubPresetForDepth), not whether it looks at all.
+    expect(auditorsForDepth(1)).toEqual(['grader', 'olympics']);
+    expect(auditorsForDepth(2)).toEqual(['grader', 'reporank', 'olympics']);
+    expect(auditorsForDepth(3)).toEqual(['grader', 'reporank', 'deep', 'olympics']);
     // Depth 4 is the full team.
     expect(auditorsForDepth(4)).toEqual(['grader', 'reporank', 'codegang', 'deep', 'olympics']);
   });
 
+  it('never returns an empty team, so a shallow audit is still an audit', () => {
+    // The regression this guards: olympics used to be depth-4-only, and the other
+    // four slots had no reachable backend, so a depth-1..3 run ended with zero
+    // auditors and threw.
+    for (const d of [1, 2, 3, 4] as const) {
+      expect(auditorsForDepth(d).length, `depth ${d} has no auditors`).toBeGreaterThan(0);
+      expect(auditorsForDepth(d, ['olympics'])).toEqual(['olympics']);
+    }
+  });
+
   it('intersects with the auditors the caller can actually run', () => {
     expect(auditorsForDepth(3, ['grader', 'deep'])).toEqual(['grader', 'deep']);
-    // olympics is only in the full (depth-4) team.
-    expect(auditorsForDepth(3, ['olympics'])).toEqual([]);
     expect(auditorsForDepth(4, ['olympics'])).toEqual(['olympics']);
+  });
+
+  it('maps depth onto how hard OpenHub looks, not onto whether', () => {
+    expect(openHubPresetForDepth(1)).toBe('quick');
+    expect(openHubPresetForDepth(2)).toBe('standard');
+    expect(openHubPresetForDepth(3)).toBe('deep');
+    expect(openHubPresetForDepth(4)).toBe('release');
+    // An unconstrained caller still gets the full sweep.
+    expect(openHubPresetForDepth(undefined)).toBe('release');
   });
 
   it('tiers are additive (each contains the previous)', () => {

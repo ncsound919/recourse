@@ -22,9 +22,11 @@ export interface ProviderChatRouterDeps {
     baseUrl: string;
     model: string;
     online: boolean;
+    /** Proof level for `online`: 'deep' | 'reachability' | 'none'. */
+    verified: 'deep' | 'reachability' | 'none';
     lastError?: string;
   };
-  refreshModelStatus(force?: boolean): Promise<void>;
+  refreshModelStatus(force?: boolean, deep?: boolean): Promise<void>;
   providerModeRef(): ProviderProfileId;
   setProviderMode(mode: ProviderProfileId): void;
   saveState(): void;
@@ -40,12 +42,25 @@ export function createProviderChatRouter(deps: ProviderChatRouterDeps): Router {
   const router = Router();
 
   async function providerSettingsView() {
-    await deps.refreshModelStatus(true);
+    // Force AND deep. This is the explicit status read the modelProvider probe
+    // was designed for, so it must spend the one token: `force` alone still only
+    // runs the reachability check, which reports `online: true` for a provider
+    // that serves /models and rejects /chat/completions — the exact 58-forge-failure
+    // regression the probe's own docstring describes.
+    await deps.refreshModelStatus(true, true);
     const ps = deps.currentProviderStatus();
     return {
       mode: deps.providerModeRef(),
       profiles: providerProfiles(),
-      current: { baseUrl: ps.baseUrl, model: ps.model, online: ps.online, lastError: ps.lastError },
+      current: {
+        baseUrl: ps.baseUrl,
+        model: ps.model,
+        online: ps.online,
+        // Proof level for `online`, so the UI cannot render a bare reachability
+        // probe as a health verdict.
+        verified: ps.verified,
+        lastError: ps.lastError,
+      },
     };
   }
 

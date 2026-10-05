@@ -25,7 +25,7 @@ function makeTmpRepo(): string {
 const GITIGNORE_GAP =
   'Add a .gitignore with protected-path patterns so secrets and tokens never get committed';
 
-function makeProfile(opts: { repoPath?: string; autoMerge?: boolean } = {}): BusinessProfileT {
+function makeProfile(opts: { repoPath?: string; autoMerge?: boolean; proposeEnabled?: boolean } = {}): BusinessProfileT {
   const profile: BusinessProfileT = {
     business: {
       name: 'TestBiz',
@@ -52,6 +52,7 @@ function makeProfile(opts: { repoPath?: string; autoMerge?: boolean } = {}): Bus
     profile.repo = RepoBinding.parse({
       localPath: opts.repoPath,
       autoMergeEnabled: opts.autoMerge ?? true,
+      ...(opts.proposeEnabled === undefined ? {} : { proposeEnabled: opts.proposeEnabled }),
     });
   }
   return profile;
@@ -103,12 +104,30 @@ describe('runLoop kill switch and gates', () => {
     }
   });
 
-  it('returns idle when auto-merge is disabled and this is not a dry run', async () => {
+  it('still audits when auto-merge is disabled, then stops before proposing', async () => {
+    // `autoMerge: false` used to return `idle` before any analysis ran, which
+    // meant a profile could not measure itself unless it was allowed to merge.
+    // Read-only work (audit -> scorecard -> gaps) is safe, so it now runs; only
+    // the irreversible remote write is gated.
     const repo = makeTmpRepo();
     const out = await runLoop({
-      profile: makeProfile({ repoPath: repo, autoMerge: false }),
+      profile: makeProfile({ repoPath: repo, autoMerge: false, proposeEnabled: false }),
+      adapters: { grader: graderFixture },
     });
-    expect(out.state).toMatchObject({ status: 'idle' });
+    expect(out.state).toMatchObject({ status: 'pr_open', prNumber: -1, reason: 'propose_disabled' });
+    // The analysis really happened.
+    expect(out.context.scorecard).not.toBeNull();
+    expect(out.context.queue).not.toBeNull();
+  });
+
+  it('reports the caller-imposed restriction as dry_run, not as a profile fault', async () => {
+    const repo = makeTmpRepo();
+    const out = await runLoop({
+      profile: makeProfile({ repoPath: repo, autoMerge: false, proposeEnabled: true }),
+      dryRun: true,
+      adapters: { grader: graderFixture },
+    });
+    expect(out.state).toMatchObject({ status: 'pr_open', prNumber: -1, reason: 'dry_run' });
   });
 
   it('returns error no_repo_binding when the profile has no repo binding', async () => {

@@ -1,5 +1,5 @@
 /**
- * Recourse MCP server — exposes the live Recourse system to any MCP host
+ * Recourse MCP server â€” exposes the live Recourse system to any MCP host
  * (Claude, Cursor, opencode, DSH...) over stdio.
  *
  * Read tools reflect live state; write tools (skills export/import) drive the
@@ -39,7 +39,7 @@ async function apiGet(path: string): Promise<any> {
  *  and the Express guard). A missing secret => honest failure, never a fake. */
 async function apiPost(path: string, body: unknown): Promise<{ ok: boolean; status: number; data: any }> {
   if (!SECRET) {
-    return { ok: false, status: 503, data: { success: false, error: `RECOURSE_API_SECRET is not set in the MCP environment — cannot authenticate a write (server is fail-closed)` } };
+    return { ok: false, status: 503, data: { success: false, error: `RECOURSE_API_SECRET is not set in the MCP environment â€” cannot authenticate a write (server is fail-closed)` } };
   }
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 15000);
@@ -67,7 +67,84 @@ function text(content: string): { content: Array<{ type: 'text'; text: string }>
 
 const server = new McpServer({ name: 'recourse', version: VERSION });
 
-server.registerTool('recourse.status', {
+/**
+ * Tool registry.
+ *
+ * Every tool is DEFINED through `defineTool`, which records it here. Two things
+ * consume this map:
+ *
+ *  - `NATIVE_TOOLS`: a small curated subset registered as first-class MCP tools,
+ *    so an MCP host sees the handful of tools it reaches constantly without
+ *    paying a schema for the rest.
+ *  - `recourse_call`: one dispatcher whose `name` enum is EVERY registered tool.
+ *    The long tail stays reachable through it.
+ *
+ * That split is the point. Registering all 59 tools natively costs the host 59
+ * schemas on every turn, most of which a given session never calls; registering
+ * only the subset would make the other 54 unreachable. The dispatcher gives both.
+ */
+type ToolConfig = {
+  title: string;
+  description: string;
+  inputSchema?: Record<string, z.ZodTypeAny>;
+};
+type ToolHandler = (args: any) => Promise<{ content: Array<{ type: 'text'; text: string }> }> | { content: Array<{ type: 'text'; text: string }> };
+
+const TOOL_DEFS = new Map<string, { config: ToolConfig; handler: ToolHandler }>();
+
+/**
+ * The tools registered as first-class MCP tools.
+ *
+ * Read-only, cheap, and asked for constantly — status, the gene registry, the
+ * capability catalogue, the tool inventory and the two ledgers an operator
+ * checks. Everything else is reached through `recourse_call`.
+ */
+const NATIVE_TOOLS = [
+  'recourse.status',
+  'recourse.registry',
+  'recourse.selfhosted',
+  'recourse.inspect_gene',
+  'recourse.recall_memory',
+  'recourse.problems',
+  'recourse.research_ground',
+  'recourse.grounding_status',
+  'recourse.dsh_plugins',
+  'recourse.evolve',
+  'recourse.run_forge',
+  'recourse.promote',
+  'recourse.benchmark',
+  'recourse.coding_pipelines',
+] as const;
+
+/** Build the zod object the SDK wants from a raw shape, or an empty object. */
+function inputSchemaFor(config: ToolConfig) {
+  return config.inputSchema ? z.object(config.inputSchema) : z.object({});
+}
+
+/** Register a tool definition. Does NOT register it with the MCP server. */
+function defineTool(name: string, config: ToolConfig, handler: ToolHandler): void {
+  if (TOOL_DEFS.has(name)) {
+    // A duplicate would make the dispatcher's enum ambiguous.
+    throw new Error(`duplicate tool definition: ${name}`);
+  }
+  TOOL_DEFS.set(name, { config, handler });
+}
+
+function registerNativeTool(name: string): void {
+  const def = TOOL_DEFS.get(name);
+  if (!def) throw new Error(`native tool not defined: ${name}`);
+  server.registerTool(
+    name,
+    {
+      title: def.config.title,
+      description: def.config.description,
+      inputSchema: inputSchemaFor(def.config),
+    },
+    def.handler as never,
+  );
+}
+
+defineTool('recourse.status', {
   title: 'Recourse status',
   description: 'Live system status, model, tool counts, readiness.',
 }, async () => {
@@ -83,7 +160,7 @@ server.registerTool('recourse.status', {
   } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
 });
 
-server.registerTool('recourse.registry', {
+defineTool('recourse.registry', {
   title: 'Recourse gene registry',
   description: 'List registered tools/genes and their current promoted state.',
 }, async () => {
@@ -97,7 +174,7 @@ server.registerTool('recourse.registry', {
   } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
 });
 
-server.registerTool('recourse.upgrade_report', {
+defineTool('recourse.upgrade_report', {
   title: 'Recourse upgrade delta',
   description: 'How the upgraded system differs from the boot baseline.',
 }, async () => {
@@ -113,7 +190,7 @@ server.registerTool('recourse.upgrade_report', {
   } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
 });
 
-server.registerTool('recourse.nightly_report', {
+defineTool('recourse.nightly_report', {
   title: 'Recourse nightly self-improvement report',
   description: 'The latest self-attested nightly upgrade report (dream -> forge -> benchmark delta). Empty until the first nightly cycle runs.',
 }, async () => {
@@ -125,7 +202,7 @@ server.registerTool('recourse.nightly_report', {
   } catch (e: any) { return text(`No nightly report yet (${e.message})`); }
 });
 
-server.registerTool('recourse.self_mod_status', {
+defineTool('recourse.self_mod_status', {
   title: 'Recourse self-modification status',
   description: 'Harness self-modification status: last nightly run, pending approvals, applied/reverted patches, and the protected-path policy.',
 }, async () => {
@@ -140,7 +217,7 @@ server.registerTool('recourse.self_mod_status', {
   } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
 });
 
-server.registerTool('recourse.capabilities', {
+defineTool('recourse.capabilities', {
   title: 'Recourse capability adoption',
   description: 'Which self-hosted tools Recourse adopted to back its own internal operations (dogfood).',
 }, async () => {
@@ -150,7 +227,7 @@ server.registerTool('recourse.capabilities', {
   } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
 });
 
-server.registerTool('recourse.selfhosted', {
+defineTool('recourse.selfhosted', {
   title: 'Recourse self-hosted artifacts',
   description: 'List live self-hosted tools/artifacts and their kinds (function/cli/api/mcp/a2a/loop).',
 }, async () => {
@@ -165,7 +242,7 @@ server.registerTool('recourse.selfhosted', {
 // Distribution write tools (Phase 4). All hit GUARDED server mutation routes.
 // ---------------------------------------------------------------------------
 
-server.registerTool('recourse.exportable', {
+defineTool('recourse.exportable', {
   title: 'Recourse tools that can be exported as skills',
   description: 'List verified registry tools that carry real source + suite and can therefore be exported as SKILL.md folders.',
 }, async () => {
@@ -175,7 +252,7 @@ server.registerTool('recourse.exportable', {
   } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
 });
 
-server.registerTool('recourse.export_skill', {
+defineTool('recourse.export_skill', {
   title: 'Export a verified tool as a SKILL.md folder',
   description: 'Write a verified registry tool into the configured export root as an open SKILL.md folder (source + test suite embedded). Mutating: requires RECOURSE_API_SECRET.',
   inputSchema: { toolName: z.string().describe('Name of the verified registry tool to export'), outRoot: z.string().optional().describe('Optional override directory for the export') },
@@ -186,7 +263,7 @@ server.registerTool('recourse.export_skill', {
   return text(JSON.stringify({ ok: true, toolName: r.data.toolName, version: r.data.version, dir: r.data.dir, files: r.data.files }, null, 2));
 });
 
-server.registerTool('recourse.import_skill', {
+defineTool('recourse.import_skill', {
   title: 'Ingest a foreign SKILL.md as an UNVERIFIED candidate',
   description: 'Import a skill from a configured skill library (rootId + rel) through the promotion gate. If it embeds code + suite in a code domain it is verified for real; prose-only skills are recorded as pending and never fabricated into the registry. Mutating: requires RECOURSE_API_SECRET.',
   inputSchema: {
@@ -201,7 +278,7 @@ server.registerTool('recourse.import_skill', {
   return text(JSON.stringify({ outcome: r.data.outcome, candidate: r.data.candidate, reason: r.data.reason, registeredTool: r.data.registeredTool }, null, 2));
 });
 
-server.registerTool('recourse.inspect_gene', {
+defineTool('recourse.inspect_gene', {
   title: 'Inspect one registry gene/tool in detail',
   description: 'Read the full record for a named registry tool: domain, health, current version, score, pass state, verifier notes.',
   inputSchema: { name: z.string().describe('Exact registry tool/gene name') },
@@ -230,7 +307,7 @@ server.registerTool('recourse.inspect_gene', {
 
 const VALID_DOMAINS = ['coding', 'math', 'biotech', 'systemic', 'neuro_symbolic', 'cyber_defense', 'quantum_sim'];
 
-server.registerTool('recourse.evolve', {
+defineTool('recourse.evolve', {
   title: 'Evolve a new tool/gene',
   description: 'Ask the mutator to propose a new capability for a domain. Promotions only land if the produced code passes the real sandbox + lint gate. Mutating: requires RECOURSE_API_SECRET.',
   inputSchema: {
@@ -256,7 +333,7 @@ server.registerTool('recourse.evolve', {
   }, null, 2));
 });
 
-server.registerTool('recourse.promote', {
+defineTool('recourse.promote', {
   title: 'Approve / promote a pending gene',
   description: 'Promote a pending gene by its id through the approval gate. Mutating: requires RECOURSE_API_SECRET.',
   inputSchema: { geneId: z.string().describe('Id of the pending gene to promote') },
@@ -268,7 +345,7 @@ server.registerTool('recourse.promote', {
   return text(JSON.stringify({ ok: r.data?.success, name: g.name, domain: g.domain, status: g.status, version: g.version }, null, 2));
 });
 
-server.registerTool('recourse.compose', {
+defineTool('recourse.compose', {
   title: 'Compose an original track in a studied style',
   description: 'Generate an original "in the vein of" track (steely-dan | jasper-ballad | dangelo-glasper | airplane). Loop mode (default): a deterministic 4/8/16-bar loop -> .mid + a SoundLab .seq pocket. Mode "arr": a non-looping written-out arc (intro/A/bridge/final/outro, jasper final key-lift) -> .mid only. Mutating: requires RECOURSE_API_SECRET.',
   inputSchema: {
@@ -290,7 +367,7 @@ server.registerTool('recourse.compose', {
   }, null, 2));
 });
 
-server.registerTool('recourse.rate_track', {
+defineTool('recourse.rate_track', {
   title: 'Rate a composed track (feeds the learner loop)',
   description: 'Record your 1-5 rating for a reproducible composition so the composer learns to steer toward what you like. Same style+seed+rating updates the episode. Mutating: requires RECOURSE_API_SECRET.',
   inputSchema: {
@@ -308,7 +385,7 @@ server.registerTool('recourse.rate_track', {
   return text(JSON.stringify({ ok: true, id: ep.id, style: ep.style, seed: ep.brief?.seed, rating: ep.rating, chords: ep.chords, rootMoves: ep.rootMoves }, null, 2));
 });
 
-server.registerTool('recourse.learned', {
+defineTool('recourse.learned', {
   title: 'Show the composer learner state',
   description: 'Read per-style learned quality biases, episodes, and leaderboard so you can see how ratings are shaping composition.',
 }, async () => {
@@ -318,9 +395,9 @@ server.registerTool('recourse.learned', {
   } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
 });
 
-server.registerTool('recourse.benchmark', {
+defineTool('recourse.benchmark', {
   title: 'Run the objective composer benchmark',
-  description: 'Grade the composer on computed metrics (integrity, harmony, loop closure, style root-motion adherence, voice-leading, richness, nuance) across all styles. Does NOT grade taste/timbre — that needs your ears + recourse.rate_track.',
+  description: 'Grade the composer on computed metrics (integrity, harmony, loop closure, style root-motion adherence, voice-leading, richness, nuance) across all styles. Does NOT grade taste/timbre â€” that needs your ears + recourse.rate_track.',
 }, async () => {
   try {
     const j = await apiGet('/api/recourse/compose/benchmark');
@@ -328,7 +405,7 @@ server.registerTool('recourse.benchmark', {
   } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
 });
 
-server.registerTool('recourse.benchmark_leaderboard', {
+defineTool('recourse.benchmark_leaderboard', {
   title: 'Self-attested benchmark leaderboard',
   description: 'The hash-chained record of every external benchmark run, ranked by solved count, with per-run deltas and registry attestations. Read-only.',
 }, async () => {
@@ -338,7 +415,7 @@ server.registerTool('recourse.benchmark_leaderboard', {
   } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
 });
 
-server.registerTool('recourse.benchmark_ledger', {
+defineTool('recourse.benchmark_ledger', {
   title: 'Benchmark ledger (chain validity)',
   description: 'Recent self-attested benchmark records and whether the hash chain is intact. Read-only.',
 }, async () => {
@@ -348,7 +425,7 @@ server.registerTool('recourse.benchmark_ledger', {
   } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
 });
 
-server.registerTool('recourse.wallet', {
+defineTool('recourse.wallet', {
   title: 'Budgeted action wallet status',
   description: 'Per-token spend budgets, remaining balances, and whether the hash-chained ledger is intact. Read-only.',
 }, async () => {
@@ -358,7 +435,7 @@ server.registerTool('recourse.wallet', {
   } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
 });
 
-server.registerTool('recourse.telemetry', {
+defineTool('recourse.telemetry', {
   title: 'Environment telemetry',
   description: 'Machine load/memory and git state, plus the work-window decision used to schedule heavy jobs. Read-only.',
 }, async () => {
@@ -368,7 +445,7 @@ server.registerTool('recourse.telemetry', {
   } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
 });
 
-server.registerTool('recourse.audio_status', {
+defineTool('recourse.audio_status', {
   title: 'Transcription sidecar status',
   description: 'Whether the audio/video transcription sidecar is reachable and its ASR backend is available. Read-only.',
 }, async () => {
@@ -378,7 +455,7 @@ server.registerTool('recourse.audio_status', {
   } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
 });
 
-server.registerTool('recourse.compose_soundlab', {
+defineTool('recourse.compose_soundlab', {
   title: 'Emit a piece for SoundLab playback',
   description: 'Compose a style-driven piece and emit the SoundLab bridge contract. Feed the returned JSON to a running SoundLab via window.__recourse.load(piece), then __recourse.play(). Mutating: requires RECOURSE_API_SECRET.',
   inputSchema: {
@@ -403,7 +480,7 @@ server.registerTool('recourse.compose_soundlab', {
   }, null, 2));
 });
 
-server.registerTool('recourse.axiom_status', {
+defineTool('recourse.axiom_status', {
   title: 'Check Axiom Agent harness status',
   description: 'Probe Axiom harness reachability and capability grid from Recourse.',
 }, async () => {
@@ -413,7 +490,7 @@ server.registerTool('recourse.axiom_status', {
   } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
 });
 
-server.registerTool('recourse.kg_live_status', {
+defineTool('recourse.kg_live_status', {
   title: 'Live evidence provider status',
   description: 'Probe Open Targets Platform and PubTator 3.0 availability for the live oncology evidence layer.',
 }, async () => {
@@ -423,7 +500,7 @@ server.registerTool('recourse.kg_live_status', {
   } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
 });
 
-server.registerTool('recourse.kg_live_graph', {
+defineTool('recourse.kg_live_graph', {
   title: 'Build the live oncology knowledge graph',
   description: 'Query Open Targets + PubTator 3.0 and merge with the canonical curated KG into a grounded, provenance-tagged graph. Providers that are down are reported ok:false and simply contribute nothing.',
   inputSchema: {
@@ -445,7 +522,7 @@ server.registerTool('recourse.kg_live_graph', {
   } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
 });
 
-server.registerTool('recourse.ode_synthesize', {
+defineTool('recourse.ode_synthesize', {
   title: 'Synthesize evidence-to-ODE kinetic parameters',
   description: 'Build the live graph and map Open Targets + PubTator evidence into a concrete OdeSimulationParams bundle (Overlay Oncology solveOdeTumorImmuneSystem contract) with per-parameter provenance. Parameters are labeled evidence-derived / literature-prior / canonical / calibrated.',
   inputSchema: {
@@ -465,9 +542,9 @@ server.registerTool('recourse.ode_synthesize', {
   } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
 });
 
-server.registerTool('recourse.dosing_optimize', {
+defineTool('recourse.dosing_optimize', {
   title: 'Run the combinatorial adaptive dosing optimizer',
-  description: 'Synthesize evidence-to-ODE params then sweep therapy modes × dose levels, computing per-arm cure-reachability and a seeded subclone-extinction probability. Arms are real deterministic ODE runs; extinctionProbability is an ensemble fraction, not a fitted clinical statistic.',
+  description: 'Synthesize evidence-to-ODE params then sweep therapy modes Ã— dose levels, computing per-arm cure-reachability and a seeded subclone-extinction probability. Arms are real deterministic ODE runs; extinctionProbability is an ensemble fraction, not a fitted clinical statistic.',
   inputSchema: {
     diseaseId: z.string().optional().describe('MONDO/EFO disease id to anchor target evidence to'),
     doses: z.array(z.number().positive()).optional().describe('Dose levels to sweep (uM)'),
@@ -498,9 +575,9 @@ server.registerTool('recourse.dosing_optimize', {
   } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
 });
 
-server.registerTool('recourse.pipeline_dossier', {
+defineTool('recourse.pipeline_dossier', {
   title: 'Run the full evidence pipeline and produce a cryptographic dossier',
-  description: 'One call: live graph → ODE params → dosing optimization → SBML Level 3 + PhysiCell XML exports, then hash-chain every stage into a verifiable evidence dossier. Reads the real providers; a down provider contributes nothing.',
+  description: 'One call: live graph â†’ ODE params â†’ dosing optimization â†’ SBML Level 3 + PhysiCell XML exports, then hash-chain every stage into a verifiable evidence dossier. Reads the real providers; a down provider contributes nothing.',
   inputSchema: {
     diseaseId: z.string().optional().describe('MONDO/EFO disease id to anchor target evidence to'),
   },
@@ -522,7 +599,7 @@ server.registerTool('recourse.pipeline_dossier', {
   } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
 });
 
-server.registerTool('recourse.axiom_build', {
+defineTool('recourse.axiom_build', {
   title: 'Build and self-host a tool via Axiom Agent',
   description: 'Delegate tool synthesis to Axiom Agent harness, verify with Recourse executionSandbox, and materialize into .selfhosted/ manifest. Mutating: requires RECOURSE_API_SECRET.',
   inputSchema: {
@@ -542,7 +619,7 @@ server.registerTool('recourse.axiom_build', {
 // write tools hit the guarded REST routes and require RECOURSE_API_SECRET.
 // ---------------------------------------------------------------------------
 
-server.registerTool('recourse.sandbox_status', {
+defineTool('recourse.sandbox_status', {
   title: 'Capability sandbox status',
   description: 'Whether the WASM capability sandbox runtime (QuickJS) is live, the warm guest-context count, and the effective default execution path.',
 }, async () => {
@@ -552,7 +629,7 @@ server.registerTool('recourse.sandbox_status', {
   } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
 });
 
-server.registerTool('recourse.memory_tiered', {
+defineTool('recourse.memory_tiered', {
   title: 'Tiered memory status',
   description: 'Durable episodic + semantic memory backend (SQLite/memory), DB path, episode count, fact count.',
 }, async () => {
@@ -562,7 +639,7 @@ server.registerTool('recourse.memory_tiered', {
   } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
 });
 
-server.registerTool('recourse.recall_memory', {
+defineTool('recourse.recall_memory', {
   title: 'Recall from Recourse memory',
   description: 'Semantic recall over Recourse vector memory for a query. Read-only.',
   inputSchema: {
@@ -580,7 +657,7 @@ server.registerTool('recourse.recall_memory', {
   } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
 });
 
-server.registerTool('recourse.inspect_learner', {
+defineTool('recourse.inspect_learner', {
   title: 'Inspect the recursive learner',
   description: 'Learner status: episodes, gene beliefs, directives, and last report.',
 }, async () => {
@@ -590,7 +667,7 @@ server.registerTool('recourse.inspect_learner', {
   } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
 });
 
-server.registerTool('recourse.problems', {
+defineTool('recourse.problems', {
   title: 'List hard/unsolved problems',
   description: 'The curated hard-math problem bank with acceptance tests and tier.',
 }, async () => {
@@ -600,7 +677,7 @@ server.registerTool('recourse.problems', {
   } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
 });
 
-server.registerTool('recourse.run_forge', {
+defineTool('recourse.run_forge', {
   title: 'Run the capability forge',
   description: 'Run the honest self-improvement forge loop (agenda -> model implementation -> sandbox verify -> promote). Promotions only land on a real green suite. Mutating: requires RECOURSE_API_SECRET.',
   inputSchema: { count: z.number().int().min(1).max(3).optional().describe('Forge cycles to run (default 1)') },
@@ -610,7 +687,7 @@ server.registerTool('recourse.run_forge', {
   return text(JSON.stringify({ ok: r.data?.success, results: r.data?.results, forge: r.data?.forge }, null, 2));
 });
 
-server.registerTool('recourse.execute_selfhosted', {
+defineTool('recourse.execute_selfhosted', {
   title: 'Execute a self-hosted tool (through the sandbox)',
   description: 'Call a self-hosted tool method. Execution goes through the WASM capability sandbox by default (default-deny grants); the response reports which mode actually ran. Mutating: requires RECOURSE_API_SECRET.',
   inputSchema: {
@@ -626,7 +703,7 @@ server.registerTool('recourse.execute_selfhosted', {
   return text(JSON.stringify({ ok: true, tool: r.data?.tool, method: r.data?.method, mode: r.data?.mode, grantUse: r.data?.grantUse, result: r.data?.result, executionTimeMs: r.data?.executionTimeMs }, null, 2));
 });
 
-server.registerTool('recourse.consolidate_memory', {
+defineTool('recourse.consolidate_memory', {
   title: 'Consolidate tiered memory',
   description: 'Fold episode clusters into durable semantic facts (idempotent). Mutating: requires RECOURSE_API_SECRET.',
   inputSchema: { minClusterSize: z.number().int().min(1).max(50).optional().describe('Minimum loss episodes per cluster (default 2)') },
@@ -636,7 +713,7 @@ server.registerTool('recourse.consolidate_memory', {
   return text(JSON.stringify({ ok: true, created: r.data?.created, episodes: r.data?.episodes, facts: r.data?.facts, factsCreated: r.data?.facts_created ?? undefined, driver: r.data?.kind }, null, 2));
 });
 
-server.registerTool('recourse.promote_skills', {
+defineTool('recourse.promote_skills', {
   title: 'Promote generalist genes to exportable skills',
   description: 'Run the skill auto-promotion pass: generalist genes -> backing tool re-verified in the sandbox -> lint gate -> SKILL.md export. Rejected/skipped outcomes are reported honestly. Mutating: requires RECOURSE_API_SECRET.',
   inputSchema: {
@@ -649,7 +726,7 @@ server.registerTool('recourse.promote_skills', {
   return text(JSON.stringify({ ok: true, candidates: r.data?.candidates, outRoot: r.data?.outRoot, outcomes: r.data?.outcomes }, null, 2));
 });
 
-server.registerTool('recourse.revert', {
+defineTool('recourse.revert', {
   title: 'Revert an applied fleet patch',
   description: 'Revert an applied patch by its revert token (as recorded in provenance). Mutating: requires RECOURSE_API_SECRET.',
   inputSchema: { token: z.string().describe('Revert token of the applied patch') },
@@ -660,7 +737,7 @@ server.registerTool('recourse.revert', {
   return text(JSON.stringify({ ok: true, file: r.data?.file, token }, null, 2));
 });
 
-server.registerTool('recourse.skills', {
+defineTool('recourse.skills', {
   title: 'List published skills',
   description: 'The signed, versioned skill registry (id, version, license, author, signature presence). Read-only.',
 }, async () => {
@@ -670,7 +747,7 @@ server.registerTool('recourse.skills', {
   } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
 });
 
-server.registerTool('recourse.publish_skill', {
+defineTool('recourse.publish_skill', {
   title: 'Publish a signed skill',
   description: 'Publish a versioned skill to the registry (signed with the local skill secret when configured). Mutating: requires RECOURSE_API_SECRET.',
   inputSchema: {
@@ -684,7 +761,7 @@ server.registerTool('recourse.publish_skill', {
   return text(JSON.stringify({ ok: true, signed: r.data?.signed, skill: r.data?.skill }, null, 2));
 });
 
-server.registerTool('recourse.connectors', {
+defineTool('recourse.connectors', {
   title: 'List connectors + health',
   description: 'Registered external connectors and their live health probes. Read-only.',
 }, async () => {
@@ -694,7 +771,7 @@ server.registerTool('recourse.connectors', {
   } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
 });
 
-server.registerTool('recourse.validate_plugin', {
+defineTool('recourse.validate_plugin', {
   title: 'Validate a plugin manifest',
   description: 'Validate a plugin manifest (schema + default-deny capabilities) and report its signature status. Read-only.',
   inputSchema: { manifest: z.record(z.string(), z.any()).describe('The plugin manifest object') },
@@ -704,7 +781,7 @@ server.registerTool('recourse.validate_plugin', {
   return text(JSON.stringify(r.data, null, 2));
 });
 
-server.registerTool('recourse.dsh_plugins', {
+defineTool('recourse.dsh_plugins', {
   title: 'Scaffolded DSH bundles',
   description: 'DeepSeek Harness cordis bundles generated by Recourse, with each manifest\'s signature state, plus the profiles the harness has. Read-only.',
 }, async () => {
@@ -721,7 +798,7 @@ server.registerTool('recourse.dsh_plugins', {
 });
 
 /** POST to a route that does not mutate. Render-only endpoints answer to POST
- *  because they take a request body, but they are guarded by no secret — so this
+ *  because they take a request body, but they are guarded by no secret â€” so this
  *  must not go through `apiPost`, which fails 503 without one. */
 async function apiReadPost(path: string, body: unknown): Promise<{ ok: boolean; status: number; data: any }> {
   const ctrl = new AbortController();
@@ -742,7 +819,7 @@ async function apiReadPost(path: string, body: unknown): Promise<{ ok: boolean; 
   }
 }
 
-server.registerTool('recourse.dsh_scaffold', {
+defineTool('recourse.dsh_scaffold', {
   title: 'Render or write a DSH harness plugin bundle',
   description: 'Generate a DeepSeek Harness cordis bundle from a declarative spec (id, packageName, description, tools[]). dryRun renders the file list and signed manifest without touching disk. Mutating unless dryRun: requires RECOURSE_API_SECRET.',
   inputSchema: {
@@ -779,7 +856,55 @@ server.registerTool('recourse.dsh_scaffold', {
   return text(JSON.stringify(r.data, null, 2));
 });
 
-server.registerTool('recourse.research_ground', {
+defineTool('recourse.grounding_status', {
+  title: 'Research grounding configuration and trust registry',
+  description: 'Grounding config, the trust registry (which providers may be quoted and why), and live reachability of both research services. Read-only.',
+}, async () => {
+  try {
+    const [config, health] = await Promise.all([
+      apiGet('/api/recourse/grounding'),
+      apiGet('/api/recourse/grounding/health'),
+    ]);
+    return text(JSON.stringify({ enabled: config?.enabled, services: config?.services, trustRegistry: config?.trustRegistry, health }, null, 2));
+  } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
+});
+
+defineTool('recourse.grounding_ledger', {
+  title: 'Research grounding record',
+  description: 'The hash-chained record of what grounded a build: query, source ids with trust levels, and chain integrity. Answers "what was this tool actually built from?". Read-only.',
+}, async () => {
+  try {
+    const j = await apiGet('/api/recourse/grounding/ledger');
+    return text(JSON.stringify({ count: j?.count, chain: j?.chain, degradedCount: j?.degradedCount, recent: j?.recent }, null, 2));
+  } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
+});
+
+defineTool('recourse.dsh_scaffold_render', {
+  title: 'Render a DSH plugin bundle',
+  description: 'Generate a DeepSeek Harness cordis bundle from a declarative spec and return the file list plus the signed manifest WITHOUT writing to disk. Read-only.',
+  inputSchema: {
+    spec: z.object({
+      id: z.string(),
+      packageName: z.string(),
+      description: z.string(),
+      tools: z.array(z.object({
+        name: z.string(),
+        title: z.string(),
+        description: z.string(),
+        method: z.enum(['GET', 'POST']),
+        path: z.string(),
+        mutating: z.boolean().optional(),
+        long: z.boolean().optional(),
+      })).min(1),
+    }),
+  },
+}, async ({ spec }) => {
+  const r = await apiReadPost('/api/recourse/dsh-plugins/render', { spec });
+  if (!r.ok) return text(`dsh_scaffold_render failed (HTTP ${r.status}): ${JSON.stringify(r.data)}`);
+  return text(JSON.stringify(r.data, null, 2));
+});
+
+defineTool('recourse.research_ground', {
   title: 'Ground a capability in external research',
   description: 'Gather real external literature for a tool idea before writing it, and return exactly what would be injected into the forge prompt. Only "retrieved" sources are quotable; others are returned as leads with their trust level and reason. Reports honestly when a research service is down.',
   inputSchema: {
@@ -810,7 +935,7 @@ server.registerTool('recourse.research_ground', {
   ].join('\n'));
 });
 
-server.registerTool('recourse.traces', {
+defineTool('recourse.traces', {
   title: 'Recent distributed traces',
   description: 'Recently finished spans with W3C trace context (name, ids, status, duration). Read-only.',
   inputSchema: { limit: z.number().int().min(1).max(500).optional().describe('Max spans (default 100)') },
@@ -822,7 +947,7 @@ server.registerTool('recourse.traces', {
   } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
 });
 
-server.registerTool('recourse.tracing_status', {
+defineTool('recourse.tracing_status', {
   title: 'Tracing / OTLP status',
   description: 'Whether an OTLP exporter is configured, the service name, and the buffered span count. Read-only.',
 }, async () => {
@@ -832,7 +957,7 @@ server.registerTool('recourse.tracing_status', {
   } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
 });
 
-server.registerTool('recourse.slopbench_status', {
+defineTool('recourse.slopbench_status', {
   title: 'SlopCodeBench status',
   description: 'Probe SlopCodeBench availability: CLI on PATH, Docker daemon, uv, and configured agent/model. Read-only.',
 }, async () => {
@@ -842,7 +967,7 @@ server.registerTool('recourse.slopbench_status', {
   } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
 });
 
-server.registerTool('recourse.slopbench_run', {
+defineTool('recourse.slopbench_run', {
   title: 'Run SlopCodeBench benchmark',
   description: 'Run a SlopCodeBench iterative specification refinement benchmark. Measures code erosion, verbosity, and structural degradation across checkpoints. Requires Docker and an API key.',
   inputSchema: {
@@ -857,7 +982,7 @@ server.registerTool('recourse.slopbench_run', {
   return text(JSON.stringify(r.data, null, 2));
 });
 
-server.registerTool('recourse.slopbench_eval', {
+defineTool('recourse.slopbench_eval', {
   title: 'Evaluate a SlopCodeBench run',
   description: 'Evaluate a completed SlopCodeBench run directory: per-checkpoint pass rates, verbosity, structural erosion, and quality metrics. Read-only.',
   inputSchema: {
@@ -869,7 +994,7 @@ server.registerTool('recourse.slopbench_eval', {
   return text(JSON.stringify(r.data, null, 2));
 });
 
-server.registerTool('recourse.slopbench_metrics', {
+defineTool('recourse.slopbench_metrics', {
   title: 'SlopCodeBench quality metrics',
   description: 'Compute quality metrics (verbosity, erosion, LOC, cyclomatic complexity, maintainability) for a run directory or code snapshot. Read-only.',
   inputSchema: {
@@ -881,7 +1006,7 @@ server.registerTool('recourse.slopbench_metrics', {
   return text(JSON.stringify(r.data, null, 2));
 });
 
-server.registerTool('recourse.slopbench_list_runs', {
+defineTool('recourse.slopbench_list_runs', {
   title: 'List SlopCodeBench runs',
   description: 'List completed SlopCodeBench run directories with their problem sets, agents, and timestamps. Read-only.',
 }, async () => {
@@ -891,7 +1016,7 @@ server.registerTool('recourse.slopbench_list_runs', {
   } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
 });
 
-server.registerTool('recourse.coding_pipelines', {
+defineTool('recourse.coding_pipelines', {
   title: 'List coding pipelines',
   description: 'Discover all registered coding pipelines (opencode, deepseek, axiom, settlement, slopcodebench) with live availability and standings. Read-only.',
 }, async () => {
@@ -901,7 +1026,7 @@ server.registerTool('recourse.coding_pipelines', {
   } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
 });
 
-server.registerTool('recourse.coding_pipelines_ledger', {
+defineTool('recourse.coding_pipelines_ledger', {
   title: 'Coding pipeline benchmark ledger',
   description: 'Hash-chained history of pipeline benchmark runs with per-pipeline standings. Read-only.',
 }, async () => {
@@ -910,6 +1035,60 @@ server.registerTool('recourse.coding_pipelines_ledger', {
     return text(JSON.stringify(j, null, 2));
   } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
 });
+
+/**
+ * Register the curated native subset, then the single dispatcher that reaches
+ * every tool. Order matters: the dispatcher's enum is built from the full
+ * definition map, so it must be assembled AFTER all `defineTool` calls above.
+ */
+for (const name of NATIVE_TOOLS) registerNativeTool(name);
+
+server.registerTool(
+  'recourse_call',
+  {
+    title: 'Call any Recourse tool',
+    description:
+      'Invoke any Recourse tool by name. Use this for tools that are not registered as ' +
+      'first-class tools on this server. Mutating tools require RECOURSE_API_SECRET.',
+    inputSchema: {
+      name: z
+        .enum([...TOOL_DEFS.keys()] as [string, ...string[]])
+        .describe('The Recourse tool to call'),
+      args: z.record(z.string(), z.unknown()).optional().describe('Arguments for the tool'),
+    },
+  },
+  (async ({ name, args }: { name: string; args?: Record<string, unknown> }) => {
+    const def = TOOL_DEFS.get(name);
+    if (!def) {
+      // Unreachable via the enum, but a hand-written call could still name a
+      // tool that was removed; say so rather than throwing.
+      return text(`unknown tool: ${name}`);
+    }
+    // Validate the arguments against the TARGET tool's own schema, exactly as
+    // the native path does.
+    //
+    // Note what is deliberately NOT done here: `args ?? {}`. The native MCP
+    // path validates the raw `arguments` value, so an OMITTED argument object
+    // fails against an object schema. Substituting `{}` for it made this
+    // dispatcher fail OPEN — a dispatched `run_forge` with no arguments ran the
+    // forge, where the native path refused it. A mutating route must never be
+    // more permissive through the dispatcher than it is natively.
+    const schema = inputSchemaFor(def.config);
+    const parsed = schema.safeParse(args);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      const where = issue?.path?.length ? issue.path.join('.') : 'arguments';
+      throw new Error(
+        `${name}: invalid arguments (${where}: ${issue?.message ?? 'schema mismatch'})`,
+      );
+    }
+    try {
+      return await def.handler(parsed.data);
+    } catch (e: any) {
+      return text(`${name} failed: ${e?.message ?? e}`);
+    }
+  }) as never,
+);
 
 const transport = new StdioServerTransport();
 await server.connect(transport);

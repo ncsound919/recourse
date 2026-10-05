@@ -17,7 +17,14 @@ is reported with ok:false and a reason — never a made-up number.
 
 Run:
     pip install -r requirements.txt
-    uvicorn main:app --host 127.0.0.1 --port 8800
+    uvicorn main:app --host 127.0.0.1 --port 8810
+
+Port 8810, not 8800: three services claimed 8800 — this one,
+`KAG_SIDECAR_DEFAULT_URL` in src/lib/kagSidecarClient.ts, and an external
+`sympy_service.py` that actually holds it. Only one can bind, so this sidecar
+could never start, and `trendHealth` reported the trend engine ONLINE because
+the process answering on 8800 returned a valid 200 for an unrelated service.
+Keep this port in sync with `TREND_SIDECAR_DEFAULT_URL`.
 """
 
 from __future__ import annotations
@@ -377,4 +384,4 @@ def trend_scan(req: ScanRequest) -> dict[str, Any]:
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="127.0.0.1", port=8800)
+    uvicorn.run(app, host="127.0.0.1", port=8810)

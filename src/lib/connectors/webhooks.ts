@@ -9,6 +9,7 @@
  */
 import crypto from 'node:crypto';
 import type { WebhookDeliveryResult } from './types';
+import { adoptedTool } from '../adoptionSites';
 
 /** Sign `timestamp.body` with HMAC-SHA256. */
 export function signWebhookPayload(secret: string, body: string, timestamp: number): string {
@@ -105,6 +106,32 @@ export interface DeliverOptions {
  * Deliver a JSON webhook with signing, retry, and (optional) circuit breaking.
  * Returns the outcome honestly — a non-2xx after all retries is `ok:false`.
  */
+/**
+ * Retry backoff, preferring the forge-built `exponentialBackoffMs` when it has
+ * been proven equal to the reference below.
+ *
+ * HAND-WRITTEN call site, deliberately. Nothing rewrites this file at runtime. If
+ * the forge tool is absent, unverified, or rejected by its equivalence proof,
+ * `adoptedTool` returns null and the reference is used — so adoption can change
+ * how the delay is COMPUTED but never whether the result is CORRECT.
+ *
+ * The reference stays here permanently as the fallback and as the thing the proof
+ * compares against. Deleting it would remove the only anchor for this tool.
+ */
+const referenceBackoff = (baseMs: number, attempt: number): number => Math.max(0, baseMs) * Math.pow(2, Math.max(0, attempt - 1));
+
+function resolveBackoff(baseMs: number, attempt: number): number {
+  const impl = adoptedTool<(baseMs: number, attempt: number) => number>('exponentialBackoffMs');
+  if (!impl) return referenceBackoff(baseMs, attempt);
+  try {
+    const out = impl(baseMs, attempt);
+    return typeof out === 'number' && Number.isFinite(out) ? out : referenceBackoff(baseMs, attempt);
+  } catch {
+    // A thrown or non-numeric result must not change delivery behaviour.
+    return referenceBackoff(baseMs, attempt);
+  }
+}
+
 export async function deliverWebhook(
   url: string,
   payload: unknown,
@@ -145,7 +172,7 @@ export async function deliverWebhook(
     } finally {
       clearTimeout(timer);
     }
-    if (attempt <= retries) await sleep(backoffMs * Math.pow(2, attempt - 1));
+    if (attempt <= retries) await sleep(resolveBackoff(backoffMs, attempt));
   }
 
   opts.breaker?.recordFailure();

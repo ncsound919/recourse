@@ -4,10 +4,12 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import express from 'express';
 import * as http from 'node:http';
+import { execFileSync } from 'node:child_process';
 import type { Request, Response } from 'express';
 
 import { validateDshPluginSpec } from '../src/lib/dshPlugins/spec';
 import { renderDshBundle } from '../src/lib/dshPlugins/template';
+import { canonicalManifest, signManifest, verifyManifestSignature } from '../src/lib/pluginSdk';
 import {
   listScaffoldedBundles,
   removeScaffoldedBundle,
@@ -369,6 +371,156 @@ describe('dsh-plugins routes', () => {
     expect(listing.success).toBe(true);
     expect(listing.bundles.map((b: { name: string }) => b.name)).toContain('dsh-openhub');
     expect(listing.signatureFailures).toEqual([]);
+  });
+
+  // --- Regressions from the security audit ---
+
+  it('refuses to overwrite a real project that merely has a package.json', async () => {
+    const root = freshDir();
+    const stranger = path.join(root, 'dsh-openhub');
+    fs.mkdirSync(path.join(stranger, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(stranger, 'package.json'), '{"name":"dsh-openhub"}', 'utf-8');
+    fs.writeFileSync(path.join(stranger, '.env'), 'SECRET=keep-me', 'utf-8');
+    fs.writeFileSync(path.join(stranger, 'src', 'handlers.ts'), 'export const real = 1;', 'utf-8');
+
+    const result = scaffoldDshPlugin(baseSpec, { root, overwrite: true });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    // A package.json is what a real project has; that must not be enough to authorise
+    // deleting it.
+    expect(result.errors.join(' ')).toMatch(/plugin\.manifest\.json/);
+    expect(fs.existsSync(path.join(stranger, '.env'))).toBe(true);
+    expect(fs.existsSync(path.join(stranger, 'src', 'handlers.ts'))).toBe(true);
+  });
+
+  it('refuses to remove a real project for the same reason', () => {
+    const root = freshDir();
+    const stranger = path.join(root, 'dsh-openhub');
+    fs.mkdirSync(stranger, { recursive: true });
+    fs.writeFileSync(path.join(stranger, 'package.json'), '{"name":"dsh-openhub"}', 'utf-8');
+    const res = removeScaffoldedBundle('dsh-openhub', root);
+    expect(res.ok).toBe(false);
+    expect(fs.existsSync(path.join(stranger, 'package.json'))).toBe(true);
+  });
+
+  it('allows overwriting a bundle it generated itself', () => {
+    const root = freshDir();
+    expect(scaffoldDshPlugin(baseSpec, { root }).ok).toBe(true);
+    expect(scaffoldDshPlugin(baseSpec, { root, overwrite: true }).ok).toBe(true);
+  });
+
+  // Two verified arbitrary-code-execution paths: both fields were spliced raw
+  // into generated TypeScript, so a payload could close a comment or a string
+  // literal and inject code that then got compiled and loaded by the harness.
+  it('cannot inject code through spec.description', () => {
+    const v = validateDshPluginSpec({
+      ...baseSpec,
+      description: '*/\nimport { execSync } from "node:child_process";\nexecSync("x");\n/*',
+    });
+    expect(v.ok).toBe(true);
+    if (!v.ok) return;
+    const index = renderDshBundle(v.spec!).get('src/index.ts')!;
+    // The payload is defanged and confined to one line inside the JSDoc block.
+    expect(index).toContain('* / import { execSync }');
+    // No line of the file may be a bare comment terminator followed by code, which
+    // is what an escape would look like. The payload's own `execSync` call must
+    // therefore live on a comment line, not as a statement.
+    for (const line of index.split('\n')) {
+      expect(line.trim().startsWith('execSync('), `payload escaped the comment: ${JSON.stringify(line)}`).toBe(false);
+    }
+    // Every executable statement comes after the header comment closes.
+    const headerEnd = index.indexOf('*/');
+    const firstStatement = index.indexOf('import type { Context }');
+    expect(headerEnd).toBeGreaterThan(-1);
+    expect(firstStatement).toBeGreaterThan(headerEnd);
+  });
+
+  it('cannot inject code through spec.apiSecretEnvVar', () => {
+    const v = validateDshPluginSpec({
+      ...baseSpec,
+      apiSecretEnvVar: "X' + (globalThis.__PWNED=1) + '",
+    });
+    expect(v.ok).toBe(false);
+    if (v.ok) return;
+    expect(v.errors.join(' ')).toMatch(/apiSecretEnvVar/);
+  });
+
+  it('rejects a newline in apiBaseUrl, which would fold the YAML scalar', () => {
+    const v = validateDshPluginSpec({ ...baseSpec, apiBaseUrl: 'http://x\n        apiSecret: LEAKED' });
+    expect(v.ok).toBe(false);
+  });
+
+  it('rejects a scoped package name, whose directory name is not a legal dir', () => {
+    const v = validateDshPluginSpec({ ...baseSpec, packageName: '@acme/dsh-openhub' });
+    expect(v.ok).toBe(false);
+    if (v.ok) return;
+    expect(v.errors.join(' ')).toMatch(/unscoped/);
+  });
+
+  it('rejects a non-string query value, which would fail the generated build', () => {
+    const v = validateDshPluginSpec({
+      ...baseSpec,
+      tools: [{ ...baseSpec.tools[0], query: { k: { nested: [1] } } }],
+    });
+    expect(v.ok).toBe(false);
+  });
+
+  it('rejects a pipe or newline in a tool path, which would corrupt the README table', () => {
+    const v = validateDshPluginSpec({
+      ...baseSpec,
+      tools: [{ ...baseSpec.tools[0], path: '/api/x\n| sneaky | row' }],
+    });
+    expect(v.ok).toBe(false);
+  });
+
+  it('signs a manifest that covers its capability grants', () => {
+    // `canonicalManifest` used a JSON.stringify replacer array, which filters keys
+    // at EVERY nesting level — so capabilities hashed as an empty object and
+    // three very different grant sets produced identical signature bytes.
+    const manifest = {
+      id: 'probe', name: 'dsh-probe', version: '1.0.0', author: 'Recourse',
+      license: 'MIT', description: 'd', entry: 'src/index.ts', sourceHash: 'ab',
+    };
+    const narrow = { ...manifest, capabilities: { fs: { paths: ['**'], mode: 'read' as const } } };
+    const wide = { ...manifest, capabilities: { fs: { paths: ['**'], mode: 'write' as const }, net: { domains: ['*'], methods: ['POST' as const] } } };
+    expect(canonicalManifest(narrow)).not.toBe(canonicalManifest(wide));
+
+    const signed = signManifest(narrow, 'test-secret');
+    expect(signed.ok).toBe(true);
+    if (!signed.ok) return;
+    expect(verifyManifestSignature({ ...signed.manifest, capabilities: wide.capabilities }, 'test-secret').valid).toBe(false);
+  });
+
+  it('refuses a profile name that escapes DSH_HOME', () => {
+    const home = freshDir();
+    for (const bad of ['..', '../../etc', 'a/b']) {
+      const add = addBundleToProfile({ profile: bad, packageName: 'dsh-x', bundleDir: 'C:/b', home });
+      expect(add.ok, `profile "${bad}" was accepted`).toBe(false);
+      if (!add.ok) expect(add.reason).toBe('invalid-name');
+      expect(readProfile(bad, home).exists).toBe(false);
+    }
+  });
+
+  it('refuses a profile whose real path leaves DSH_HOME (a junction)', () => {
+    // `profiles/web` on this machine really is a link, and writeFileSync follows
+    // one — so containment has to be checked on the resolved path, not the joined
+    // one.
+    const root = freshDir();
+    const home = path.join(root, 'dsh');
+    const victim = path.join(root, 'someone-elses-project');
+    fs.mkdirSync(path.join(home, 'profiles'), { recursive: true });
+    fs.mkdirSync(victim, { recursive: true });
+    fs.writeFileSync(path.join(victim, 'package.json'), '{"name":"victim"}', 'utf-8');
+    try {
+      execFileSync('cmd', ['/c', 'mklink', '/J', path.join(home, 'profiles', 'web'), victim], { stdio: 'pipe' });
+    } catch {
+      return; // junction creation unavailable; the name-pattern check is covered above
+    }
+    const add = addBundleToProfile({ profile: 'web', packageName: 'dsh-evil', bundleDir: 'C:/b/dsh-evil', home });
+    expect(add.ok).toBe(false);
+    if (add.ok) return;
+    expect(add.reason).toBe('outside-dsh-home');
+    expect(fs.readFileSync(path.join(victim, 'package.json'), 'utf-8')).toBe('{"name":"victim"}');
   });
 
   it('reports an invalid spec as 400 with the specific reasons', async () => {

@@ -52,4 +52,23 @@ voiceAndBrand:
     - "Every COA entry is signed, chained, and independently verifiable."
     - "Built for labs and operators who need to prove their work to a regulator, not a marketing team."
 
+# Repo binding — PLACEHOLDER, NOT YET A REAL REPO.
+# HempForge has no checkout anywhere under C:/Users/User/Downloads/BUSINESS, so
+# there is no real code to audit. The path below does not exist; the loop now
+# checks for it and reports `repo_path_missing` rather than pretending to audit.
+#
+# proposeEnabled is FALSE so this profile is read-only even once the path is
+# corrected. Point localPath at the real repo, then flip proposeEnabled when you
+# want it drafting changes.
+repo:
+  localPath: "C:/Users/User/Downloads/BUSINESS/SCIENCE/HempForge"
+  githubUrl: ""
+  defaultBranch: main
+  auditScheduleCron: "0 6 * * *"
+  proposeEnabled: false
+  autoMergeEnabled: false
+  autoMergeVetoHours: 24
+  minSandboxScore: 0.7
+  requireCheckpoint: true
+
 lastReviewedAt: 2026-09-04T00:00:00.000Z

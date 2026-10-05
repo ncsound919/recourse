@@ -28,6 +28,9 @@
 
 import { executeTestSuite, prepareExecutableCode } from './executionSandbox';
 import { executeTestSuiteInIsolate, isIsolateAvailable } from './isolatedSandbox';
+import { runOracleProbe, oracleSuiteSource } from './referenceOracles';
+import { summarizeKills, type KillSummary } from './killClassification';
+import { lawSuiteSource, lawsFor } from './lawCatalogue';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -50,6 +53,40 @@ export interface ForgeQualityReport {
   gate: { ok: boolean; reasons: string[] };
   differential: { available: boolean; checked: number; agreed: number; mismatches: string[] } | null;
   robustness: { checked: number; deterministic: boolean; mutatesInput: boolean; notes: string[] } | null;
+  /**
+   * Non-LLM differential oracle verdict (BigInt / stdlib / different-algorithm
+   * reference). The only evidence here whose authority is outside the generating
+   * model, so a mismatch is a hard gate failure rather than a scored deduction.
+   * Null when no oracle covers this tool.
+   */
+  oracle?: {
+    tool: string;
+    checked: number;
+    mismatches: string[];
+    /**
+     * How the failures broke down (A5). A candidate that merely THREW is weaker
+     * evidence than one that returned a wrong value, and the difference is
+     * measured rather than assumed.
+     */
+    killSummary?: KillSummary;
+  } | null;
+  /** Large-magnitude probe. See `scaleProbe` for why this exists. */
+  /**
+   * Hand-authored law results (A6). `checked: 0` means the catalogue holds no
+   * laws for this tool, which is an honest state — not a pass.
+   */
+  laws?: { checked: number; failures: Array<{ law: string; statement: string; why: string }> } | null;
+  scale: {
+    checked: number;
+    /** Tool looks like exact integer arithmetic. */
+    integerDomain: boolean;
+    /** Produced NaN / Infinity where an integer was required. */
+    nonFinite: string[];
+    /** Produced a fractional value where the tool returns integers. */
+    nonInteger: string[];
+    /** Disagreed with a reference oracle at large magnitudes. */
+    mismatches: string[];
+  } | null;
   static: {
     jsdoc: boolean;
     nondeterministicApis: string[];
@@ -186,6 +223,9 @@ function variantsOf(v: unknown, allowNegative: boolean): unknown[] {
     if (Number.isInteger(v)) {
       out.push(v + 1, v - 1, 0, 1);
       if (Math.abs(v) <= 32) out.push(v * 2);
+      // Large magnitudes belong to the scale probe, not here: perturbations are
+      // transported as JSON source, so this is about nearby inputs, and mixing
+      // in scale values would duplicate work the probe does properly.
     } else {
       out.push(v * 2, v / 2, 0);
     }
@@ -200,6 +240,9 @@ function variantsOf(v: unknown, allowNegative: boolean): unknown[] {
     const out: unknown[] = [[], v.slice(0, 1), [...v].reverse(), v.slice(0, -1)];
     if (v.length <= 100) out.push([...v, ...v]);
     if (v.every((x) => typeof x === 'number')) out.push([...(v as number[])].sort((a, b) => a - b));
+    // Two-element probe: an implementation that only handles length>=3 arrays,
+    // or that mishandles the first/last pair, passes the suite's larger inputs.
+    if (v.length > 1) out.push([v[0], v[v.length - 1]]);
     return out.filter((x) => JSON.stringify(x) !== JSON.stringify(v));
   }
   return [];
@@ -370,6 +413,24 @@ function __forge_json(v) {
     return x;
   }); } catch (e) { return '__unserializable__'; }
 }
+// Deep equality for non-LLM oracle assertions. Structural because oracle results
+// are arrays/objects as often as scalars, and NaN must equal NaN or a correct
+// numeric tool fails its own proof.
+function __forge_deepEq(a, b) {
+  if (typeof a === 'number' && typeof b === 'number') {
+    if (Number.isNaN(a) && Number.isNaN(b)) return true;
+    return Object.is(a, b);
+  }
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every(function (v, i) { return __forge_deepEq(v, b[i]); });
+  }
+  if (a && b && typeof a === 'object' && typeof b === 'object') {
+    var ka = Object.keys(a), kb = Object.keys(b);
+    if (ka.length !== kb.length) return false;
+    return ka.every(function (k) { return __forge_deepEq(a[k], b[k]); });
+  }
+  return Object.is(a, b);
+}
 function __forge_call(fn) {
   try { return { ok: true, out: __forge_json(fn()) }; } catch (e) { return { ok: false, out: 'throw' }; }
 }
@@ -391,6 +452,31 @@ function __forge_nomut(argsJson, fn) {
   var before = JSON.stringify(args);
   try { fn(args); } catch (e) { /* throwing is allowed; mutation is not */ }
   return JSON.stringify(args) === before;
+}
+function __forge_isInt(fn) {
+  var r = __forge_call(fn);
+  if (!r.ok) return false;
+  var v = fn();
+  return typeof v === 'number' && Number.isInteger(v);
+}
+// Used by the large-magnitude probe: a tool whose suite says it returns exact
+// integers must still return a FINITE integer at 2^53-ish magnitudes. NaN or
+// Infinity here means the arithmetic overflowed or divided by zero somewhere the
+// small-value suite never reached.
+function __forge_finiteInt(fn) {
+  var v = fn();
+  if (typeof v !== 'number') throw new Error('not a number at scale: ' + __forge_json(v));
+  if (!Number.isFinite(v)) throw new Error('not finite at scale: ' + String(v));
+  if (!Number.isInteger(v)) throw new Error('not an integer at scale: ' + String(v));
+  return true;
+}
+// Prints the observed value so the scale probe can tell a WRONG value from a
+// probe that simply never returned. The caller screens for this marker; a
+// missing marker means the probe timed out, which is not a defect.
+function __forge_report(fn) {
+  var v = fn();
+  console.log('__forge_value:' + __forge_json(v));
+  return true;
 }
 `;
 
@@ -414,7 +500,7 @@ function wrapReference(reference: string, name: string, alias: string): string {
   return `const ${alias} = (function () {\n${body}\nreturn ${name};\n})();`;
 }
 
-function differential(
+export function differential(
   input: ForgeQualityInput,
   candidate: string,
   seeds: unknown[][],
@@ -436,7 +522,13 @@ function differential(
       return r.passed;
     });
   }
-  if (!usable.length) return { available: true, checked: 0, agreed: 0, mismatches: [] };
+  // The reference timed out or hung on EVERY probe, so no differential comparison
+  // was actually performed. Reporting `available: true` here claimed full
+  // reference agreement for a check that never ran — and because the quality gate
+  // gates on `checked > 0`, a zero-checked report was treated as substantively
+  // clean and stopped sampling. The genuine-error path already uses
+  // `available: false` (see the catch below), so `available` means "it ran".
+  if (!usable.length) return { available: false, checked: 0, agreed: 0, mismatches: ['differential harness error: reference implementation did not terminate on any probe'] };
 
   // 2. Side-by-side run.
   const combined = `${candidate}\n${refWrapped}\n${HELPERS}`;
@@ -454,6 +546,158 @@ function differential(
   });
   // An aborted run (timeout / uncaught) counts every unreported probe as disagreement.
   return { available: true, checked: usable.length, agreed: Math.min(pass, usable.length), mismatches };
+}
+
+/**
+ * Magnitudes chosen because IEEE-754 doubles provably diverge from exact
+ * integer arithmetic here:
+ *   - 2^31: still exact, but products of two such values exceed 2^53.
+ *   - 2^53 (MAX_SAFE_INTEGER): the boundary past which integers are not
+ *     representable at all.
+ *   - 1e9+7: the classic competitive-programming prime; squaring it exceeds
+ *     2^53, which is exactly how a double-based modular exponentiation silently
+ *     returns a plausible wrong answer.
+ *   - 9007199254740993 (2^53+1): not representable, so any implementation that
+ *     echoes or accumulates it in doubles is provably lossy.
+ */
+const SCALE_VALUES = [
+  2147483647, // 2^31 - 1
+  4294967296, // 2^32
+  1000000007, // 1e9+7
+  Number.MAX_SAFE_INTEGER, // 2^53 - 1: the largest exactly-representable integer
+  // 2^53 + 1 is NOT representable as a double — writing it as a literal silently
+  // rounds it to 2^53, which would just duplicate the value above. It is
+  // therefore computed, not written, and kept only because an implementation
+  // that ACCUMULATES to it has already lost precision by definition.
+  Number.MAX_SAFE_INTEGER + 2,
+];
+
+const SCALE_STRING_VALUES = [
+  'x'.repeat(256),
+  'aaaa',
+  'The quick brown fox jumps over the lazy dog',
+];
+
+/**
+ * Large-magnitude probe.
+ *
+ * WHY THIS EXISTS
+ * The forge promoted `powerMod` (modular exponentiation) on a 4-assertion
+ * suite whose largest modulus was 1000. A double-based implementation is
+ * exactly right there and silently wrong at scale: `factor * factor` exceeds
+ * 2^53 and loses precision, so `powerMod(2, 100, 1e9+7)` returned 976371253
+ * where the true value is 976371285. The suite could not have caught it — the
+ * perturbation generator only explores values NEAR the suite's own seeds
+ * (see `variantsOf`), so every probe inherited small magnitudes.
+ *
+ * This probe is deliberately independent of whether a reference oracle exists.
+ * Most specs have none, and for those it still catches the objectively
+ * checkable failure — an integer-returning tool that yields NaN, Infinity, or a
+ * fractional value at scale. Where a reference DOES exist, the divergence
+ * between double and exact arithmetic is caught exactly.
+ */
+function scaleProbe(
+  input: ForgeQualityInput,
+  candidate: string,
+  seeds: unknown[][],
+): NonNullable<ForgeQualityReport['scale']> {
+  const empty = { checked: 0, integerDomain: false, nonFinite: [], nonInteger: [], mismatches: [] };
+  if (input.kind === 'class') return empty;
+  if (!seeds.length) return empty;
+
+  // Only probe tools whose observed behaviour is exact-integer. Probing a tool
+  // that legitimately returns fractions (levenshtein returns a number, prisma
+  // ratios, etc.) at huge magnitudes would produce noise, not signal.
+  const hasNumericArg = seeds.some((a) => a.some((x) => typeof x === 'number' && Number.isFinite(x)));
+  if (!hasNumericArg) return empty;
+
+  const src = `${candidate}\n${HELPERS}`;
+
+  // 1. Does the tool return integers on its own suite inputs?
+  const integerSuite = seeds
+    .filter((a) => a.every((x) => typeof x === 'number' || typeof x === 'string' || typeof x === 'boolean'))
+    .map((a) => `assert __forge_isInt(() => ${input.name}(...${JSON.stringify(a)}));`)
+    .join('\n');
+  if (!integerSuite) return empty;
+  const intRun = runSuite(src, integerSuite, 3000);
+  if (!intRun.passed) return empty; // returns non-integers by design — not our domain
+  const integerDomain = true;
+
+  // 2. Probe at magnitudes where doubles diverge from exact integers.
+  const probes: unknown[][] = [];
+  for (const seed of seeds) {
+    for (const big of SCALE_VALUES) {
+      // Substitute one numeric position at a time, preserving the other args.
+      const next = [...seed];
+      for (let i = 0; i < next.length; i++) {
+        if (typeof next[i] === 'number' && Number.isFinite(next[i])) {
+          const scaled = [...next];
+          scaled[i] = big;
+          probes.push(scaled);
+        }
+      }
+    }
+    // String-heavy tools: long inputs catch off-by-one/quadratic blowups.
+    if (seed.some((x) => typeof x === 'string')) {
+      for (const s of SCALE_STRING_VALUES) {
+        const scaled = seed.map((x) => (typeof x === 'string' ? s : x));
+        probes.push(scaled);
+      }
+    }
+  }
+  const unique = [...new Map(probes.map((p) => [JSON.stringify(p), p])).values()].slice(0, 32);
+  if (!unique.length) return { ...empty, integerDomain };
+
+  // 3a. The candidate must still return a finite integer at scale.
+  //
+  // Probes are screened INDIVIDUALLY and a timeout is explicitly NOT a defect.
+  // Substituting a huge value into an argument that drives a loop count (a
+  // recursive `fibonacciN(2^31)`, a sieve to 2^31) makes a perfectly correct
+  // implementation hang. Counting that as "not finite" would reject correct
+  // tools, so a probe that does not finish is skipped rather than failed.
+  const nonFinite: string[] = [];
+  const nonInteger: string[] = [];
+  let scaledChecked = 0;
+  for (const a of unique) {
+    const lit = JSON.stringify(a);
+    const call = `${input.name}(...${lit})`;
+    const single = runSuite(src, `assert __forge_finiteInt(() => ${call});`, 1200);
+    if (single.passed) {
+      scaledChecked++;
+      continue;
+    }
+    // Did it finish at all? Re-run reporting only the value, with a short
+    // budget: a clean numeric answer means a real defect; no answer means slow.
+    const observed = runSuite(src, `__forge_report(() => ${call});`, 1200);
+    const value = observed.stdout.find((l) => l.startsWith('__forge_value:'));
+    if (!value) continue; // timed out / aborted — not evidence of imprecision
+    scaledChecked++;
+    if (/NaN|Infinity|-Infinity/.test(value)) nonFinite.push(`${input.name}(...${lit})`);
+    else nonInteger.push(`${input.name}(...${lit})`);
+  }
+
+    // With a reference oracle, require exact agreement at scale too.
+    const mismatches: string[] = [];
+  if (input.reference && input.reference.trim()) {
+    const alias = `__forge_scale_ref_${input.name}`;
+    const refWrapped = wrapReference(input.reference, input.name, alias);
+    for (const a of unique) {
+      const lit = JSON.stringify(a);
+      const probe = `${input.name}(...${lit})`;
+      // Screen the REFERENCE first: an oracle that hangs on a scale probe says
+      // nothing about the candidate, exactly as in the differential.
+      const refOk = runSuite(`${refWrapped}\n${HELPERS}`, `assert __forge_terminates(() => ${alias}(...${lit}));`, 1200);
+      if (!refOk.passed) continue;
+      const candOk = runSuite(`${candidate}\n${HELPERS}`, `assert __forge_terminates(() => ${probe});`, 1200);
+      if (!candOk.passed) continue; // candidate too slow to compare — not a mismatch
+      const same = runSuite(`${candidate}\n${refWrapped}\n${HELPERS}`, `assert __forge_same(() => ${probe}, () => ${alias}(...${lit}));`, 1500);
+      if (!same.passed && mismatches.length < 5) {
+        mismatches.push(`${input.name}(...${lit}) diverges from the reference at scale (float precision)`);
+      }
+    }
+  }
+
+  return { checked: scaledChecked || unique.length, integerDomain, nonFinite, nonInteger, mismatches };
 }
 
 function robustness(input: ForgeQualityInput, candidate: string, seeds: unknown[][]): NonNullable<ForgeQualityReport['robustness']> {
@@ -503,6 +747,7 @@ export function assessForgeCandidate(
 
   let diff: ForgeQualityReport['differential'] = null;
   let rob: ForgeQualityReport['robustness'] = null;
+  let scl: ForgeQualityReport['scale'] = null;
   if (IDENT.test(input.name)) {
     const seedSet = new Map<string, unknown[]>();
     for (const v of suiteVectors(input.refSuite, input.name)) seedSet.set(JSON.stringify(v), v);
@@ -516,11 +761,100 @@ export function assessForgeCandidate(
       } catch (e) {
         diff = { available: false, checked: 0, agreed: 0, mismatches: [`differential harness error: ${(e as Error).message}`] };
       }
+      try {
+        scl = scaleProbe(input, candidate, seeds);
+      } catch (e) {
+        scl = { checked: 0, integerDomain: false, nonFinite: [], nonInteger: [], mismatches: [`scale probe error: ${(e as Error).message}`] };
+      }
     }
     try {
       rob = robustness(input, candidate, seeds);
     } catch (e) {
       rob = { checked: 0, deterministic: true, mutatesInput: false, notes: [`robustness harness error: ${(e as Error).message}`] };
+    }
+  }
+
+  // ---- non-LLM differential oracle (A4) ----------------------------------
+  // The strongest anchor available: a reference built from BigInt, the standard
+  // library, or a deliberately different algorithm — none of which this model
+  // wrote. It is the only check here whose authority is structurally outside the
+  // generating pass, and it is what catches a double-precision implementation
+  // above 2^53 (the `powerMod` failure) where a suite of small asserts cannot.
+  //
+  // Run through the SAME sandbox as every other probe, so isolation and timeouts
+  // are not re-implemented and a second execution route is not introduced.
+  // A mismatch is a HARD reason: unlike the scored probes below, an oracle
+  // disagreement is not something a candidate can average away.
+  let oracle: { tool: string; checked: number; mismatches: string[]; killSummary?: KillSummary } | null = null;
+  try {
+    const built = oracleSuiteSource(input.name);
+    if (built) {
+      const run = runSuite(`${candidate}\n${HELPERS}`, built.source, 5000);
+      // A5: a crash-kill is weaker evidence than an assertion failure (ISSTA 2023
+      // measured up to 43.8% of kills as crashes). Classifying the failures keeps
+      // a candidate that merely THREW from being reported with the same confidence
+      // as one that returned a wrong value. A3: the failing details are retained
+      // verbatim as the discriminating inputs a later differential pass can reuse.
+      const kills = summarizeKills(run);
+      oracle = {
+        tool: input.name,
+        checked: built.vectors,
+        mismatches: run.passed
+          ? []
+          : (run.testDetails.length ? run.testDetails : run.stderr.slice(0, 3)).slice(0, 5),
+        killSummary: kills,
+      };
+      if (!run.passed) {
+        reasons.push(
+          `non-LLM differential oracle: disagrees with a BigInt/stdlib/different-algorithm reference on ${built.vectors} probe vector(s) ` +
+            `(${kills.assertions} assertion, ${kills.crashes} crash, ${kills.timeouts} timeout)`,
+        );
+      }
+    }
+  } catch (e) {
+    // A probe that cannot run must not be read as a pass, but it also must not
+    // block on a tool the oracle simply does not cover.
+    oracle = { tool: input.name, checked: 0, mismatches: [`oracle probe error: ${(e as Error).message}`] };
+  }
+
+  // ---- hand-authored laws (A6) --------------------------------------------
+  // Relations stated from each function's DEFINITION rather than from its
+  // implementation, so the authority is external to the generating pass. These
+  // cover the tools an exact-value oracle cannot judge, because a law constrains
+  // the ANSWER'S SHAPE (sorted, idempotent, in-range) rather than its value.
+  //
+  // A failing law is a hard reason. False alarms are the real risk here, so the
+  // catalogue uses multiset equality wherever the spec permits ties — strict
+  // equality on tie-permitting functions produces noise that trains operators to
+  // ignore the channel.
+  let laws: { checked: number; failures: Array<{ law: string; statement: string; why: string }> } | null = null;
+  try {
+    const lawSrc = lawSuiteSource(input.name);
+    if (lawSrc) {
+      const run = runSuite(`${candidate}\n${HELPERS}`, lawSrc, 5000);
+      const detail = (run.testDetails ?? []).filter((d) => /LAW FAILED/.test(d));
+      laws = {
+        checked: lawsFor(input.name).length,
+        failures: detail.map((d) => {
+          const m = /LAW FAILED:\s*([^—-]+?)\s*[—-]\s*(.*?)(?:\s*\(|$)/.exec(d);
+          return {
+            law: m?.[1]?.trim() ?? d.slice(0, 60),
+            statement: m?.[2]?.trim() ?? '',
+            why: d,
+          };
+        }),
+      };
+      if (laws.failures.length > 0) {
+        reasons.push(
+          `hand-authored law violated: ${laws.failures.map((f) => f.law).slice(0, 3).join(', ')}`,
+        );
+      }
+    }
+  } catch (e) {
+    laws = { checked: 0, failures: [] };
+    // A law harness that cannot run is recorded, never silently treated as a pass.
+    if (/law/i.test(String((e as Error)?.message ?? ''))) {
+      reasons.push(`law harness error: ${(e as Error).message}`);
     }
   }
 
@@ -545,10 +879,26 @@ export function assessForgeCandidate(
     reasons.push(`disagrees with the reference on ${diff!.checked - diff!.agreed}/${diff!.checked} inputs`);
   }
 
+  // ---- scale / precision gate ----------------------------------------------
+  // A tool that returns exact integers on its suite must still return finite
+  // integers at 2^53-ish magnitudes, and must match the reference there too.
+  // This is the check that should have caught `powerMod`: its suite topped out
+  // at modulus 1000, so a double-precision implementation passed it while
+  // returning a silently wrong answer at 1e9+7.
+  const scaleClean = !scl || (scl.nonFinite.length === 0 && scl.nonInteger.length === 0 && scl.mismatches.length === 0);
+  if (scl && !scaleClean) {
+    if (scl.nonFinite.length) reasons.push(`returns a non-finite value at large magnitudes (${scl.nonFinite.slice(0, 2).join(', ')})`);
+    if (scl.nonInteger.length) reasons.push(`stops returning integers at large magnitudes (${scl.nonInteger.slice(0, 2).join(', ')})`);
+    if (scl.mismatches.length) reasons.push(`precision: ${scl.mismatches.slice(0, 2).join('; ')}`);
+  }
+
   // ---- score ---------------------------------------------------------------
   const parts: Array<[number, number]> = []; // [weight, value]
   if (agreement !== null) parts.push([0.45, agreement]);
   if (rob && rob.checked > 0) parts.push([0.2, (rob.deterministic ? 0.6 : 0) + (rob.mutatesInput ? 0 : 0.4)]);
+  // Scale behaviour earns a slice when the tool is in the integer domain; a
+  // tool outside it is not penalised (the probe simply does not apply).
+  if (scl && scl.integerDomain && scl.checked > 0) parts.push([0.15, scaleClean ? 1 : 0]);
   parts.push([0.1, jsdoc ? 1 : 0]);
   parts.push([0.1, nondeterministicApis.length ? 0 : 1]);
   parts.push([0.1, hardcoded.length === 0 ? 1 : 0]);
@@ -562,6 +912,9 @@ export function assessForgeCandidate(
     gate: { ok: reasons.length === 0, reasons },
     differential: diff,
     robustness: rob,
+    scale: scl,
+    oracle,
+    laws,
     static: { jsdoc, nondeterministicApis, hardcodedSuiteLiterals: hardcoded, meaningfulLines: lines },
   };
 }
@@ -573,6 +926,11 @@ export function assessForgeCandidate(
  */
 export function isSubstantivelyClean(report: ForgeQualityReport): boolean {
   if (!report.gate.ok) return false;
+  // A differential that reports `available: false` never ran — the reference
+  // could not be exercised. That is an UNVERIFIED candidate, not a clean one, so
+  // it must not end sampling early. The old guard (`checked > 0 && ...`) let it
+  // pass, because a harness that ran zero probes also reports checked === 0.
+  if (report.differential && !report.differential.available) return false;
   if (report.differential && report.differential.checked > 0 && report.differential.agreed < report.differential.checked) return false;
   if (report.robustness && (report.robustness.mutatesInput || !report.robustness.deterministic)) return false;
   return report.static.hardcodedSuiteLiterals.length === 0;

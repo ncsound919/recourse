@@ -24,6 +24,15 @@ export interface AuditorServiceConfig {
   localPath: string;
   secret: string;
   targetUrl: string;
+  /**
+   * The audit depth this run resolved to, when one was chosen.
+   *
+   * Carried so a depth-aware adapter can scale its own work. The `olympics`
+   * slot uses it to pick an OpenHub audit preset: before this existed, depth
+   * only decided whether the aggregator ran at all, which meant a shallow audit
+   * silently dropped the one auditor with a working backend.
+   */
+  auditDepth?: 1 | 2 | 3 | 4;
 }
 
 export type AuditAdapter = (cfg: AuditorServiceConfig) => Promise<AuditorSectionT>;
@@ -133,7 +142,12 @@ export const AUDITOR_SERVICE_ENV: Record<AuditorIdT, () => AuditorServiceConfig 
   olympics: () => readServiceEnv('olympics', process.env),
 };
 
-function adapterConfig(name: AuditorIdT, repo: RepoBindingT, env: EnvLike): AuditorServiceConfig {
+function adapterConfig(
+  name: AuditorIdT,
+  repo: RepoBindingT,
+  env: EnvLike,
+  depth?: AuditDepth,
+): AuditorServiceConfig {
   const service = readServiceEnv(name, env);
   const repoUrl = repo.githubUrl || repo.localPath;
   const localPath = repo.localPath;
@@ -167,13 +181,19 @@ function adapterConfig(name: AuditorIdT, repo: RepoBindingT, env: EnvLike): Audi
         targetUrl: '',
       };
     case 'olympics':
+      // This slot is served by OpenHub's audit suite, which audits a LOCAL
+      // DIRECTORY (12 of its scorers are local tools: typecheck, lint,
+      // duplication, git_history...). Passing empty localPath/repoUrl here —
+      // as this case did — meant the OpenHub auditor had nothing to point at
+      // and could only ever report itself unavailable.
       return {
         url: '',
         apiKey: '',
-        repoUrl: '',
-        localPath: '',
+        repoUrl,
+        localPath,
         secret: '',
         targetUrl: service?.targetUrl ?? repoUrl,
+        ...(depth ? { auditDepth: depth } : {}),
       };
   }
 }
@@ -285,7 +305,7 @@ export async function runAudit(options: RunAuditOptions): Promise<AuditStatement
     if (!wantedSet.has(name)) continue;
     const adapter = adapters[name];
     if (typeof adapter === 'function') {
-      jobs.push({ name, adapter, config: adapterConfig(name, binding, env) });
+      jobs.push({ name, adapter, config: adapterConfig(name, binding, env, options.depth) });
     }
   }
 

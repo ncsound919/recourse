@@ -54,4 +54,20 @@ voiceAndBrand:
     - "A cab companion that handles BOL, detention, and inspections while you drive."
     - "Built for owner-operators who don't have a back office."
 
+# Repo binding. Without this the autopilot loop exits at stage 2 with
+# `no_repo_binding` and never audits anything.
+#
+# proposeEnabled: open draft PRs. requireCheckpoint: pause for approval.
+# autoMergeEnabled FALSE: never merge unattended — a human merges.
+repo:
+  localPath: "C:/Users/User/Downloads/BUSINESS/TRUCKING/Truck Buddy"
+  githubUrl: "https://github.com/ncsound919/truck-buddy"
+  defaultBranch: main
+  auditScheduleCron: "0 6 * * *"
+  proposeEnabled: true
+  autoMergeEnabled: false
+  autoMergeVetoHours: 24
+  minSandboxScore: 0.7
+  requireCheckpoint: true
+
 lastReviewedAt: 2026-09-04T00:00:00.000Z

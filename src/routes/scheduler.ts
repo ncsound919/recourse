@@ -7,7 +7,13 @@
  */
 import { Router } from 'express';
 import type { Request, Response } from 'express';
-import { getSchedulerStatus, setJobEnabled, triggerJob } from '../lib/jobScheduler.js';
+import {
+  getSchedulerStatus,
+  setJobEnabled,
+  triggerJob,
+  schedulerEffectiveness,
+  jobEffectiveState,
+} from '../lib/jobScheduler.js';
 
 export interface SchedulerRouterDeps {
   /** Called after a successful toggle (e.g. to mirror legacy flags + record provenance). */
@@ -23,7 +29,17 @@ export function createSchedulerRouter(deps: SchedulerRouterDeps = {}): Router {
   const router = Router();
 
   router.get('/', (_req, res) => {
-    res.json({ success: true, ...getSchedulerStatus() });
+    const status = getSchedulerStatus();
+    // Every job carries its effective state, and the response carries the
+    // rollup. `armedJobs` on its own is the number that reads best and means
+    // least: an enabled job whose guard is closed does nothing on every fire.
+    const jobs = status.jobs.map((j) => ({ ...j, effective: jobEffectiveState(j) }));
+    const effectiveness = schedulerEffectiveness(status);
+    const headline =
+      effectiveness.workingJobs === 0
+        ? `no jobs are doing work (${effectiveness.armedJobs}/${effectiveness.total} armed, ${effectiveness.noOpJobs} enabled but idle)`
+        : `${effectiveness.workingJobs}/${effectiveness.total} jobs working (${effectiveness.noOpJobs} enabled but idle, ${effectiveness.failingJobs} failing)`;
+    res.json({ success: true, ...status, jobs, effectiveness, headline });
   });
 
   router.post('/toggle', (req, res) => {

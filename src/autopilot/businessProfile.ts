@@ -71,9 +71,38 @@ export const RepoBinding = z.object({
     '*key*',
   ]),
   auditScheduleCron: z.string().default('0 6 * * *'),
+  /**
+   * May the loop MERGE on its own once a proposal's veto window expires?
+   *
+   * This used to gate the entire loop: with it false, runLoop returned `idle`
+   * before the audit stage, so a profile could not even analyse its own repo or
+   * open a draft PR. Analysis and merging are different permissions, so they
+   * are now separate: a bound repo is always auditable, and this flag only
+   * controls the irreversible step.
+   */
   autoMergeEnabled: z.boolean().default(false),
   autoMergeVetoHours: z.number().int().min(1).max(168).default(24),
   minSandboxScore: z.number().min(0).max(1).default(0.7),
+  /**
+   * Pause for a human checkpoint after opening a PR, instead of letting the
+   * veto window carry it to merge on its own.
+   *
+   * This field did not exist, and `recourseActivator` read
+   * `profile.repo.requireCheckpoint` anyway — so it was permanently `undefined`
+   * and checkpoint.ts never ran outside tests. Declared here so the flag is a
+   * real, validated profile setting. Defaults to false (veto window only).
+   */
+  requireCheckpoint: z.boolean().default(false),
+  /**
+   * May the loop push branches / open PRs at all?
+   *
+   * Defaults to true: once a profile is bound to a real repo, reading it and
+   * drafting a proposed change is the point. Set false for a repo the loop may
+   * only READ (audit + scorecard + gap analysis, no writes). Pausing a real run
+   * is done with `requireCheckpoint`, and blocking the irreversible step is
+   * done with `autoMergeEnabled`.
+   */
+  proposeEnabled: z.boolean().default(true),
 });
 export type RepoBindingT = z.infer<typeof RepoBinding>;
 
@@ -96,6 +125,18 @@ export function repoBinding(profile: BusinessProfileT): RepoBindingT | null {
 
 export function isAutoMergeEnabled(profile: BusinessProfileT): boolean {
   return profile.repo?.autoMergeEnabled ?? false;
+}
+
+/**
+ * May the loop push branches and open PRs for this profile?
+ *
+ * Distinct from `isAutoMergeEnabled`: that one gates the irreversible merge,
+ * this one gates writing to the remote at all. A read-only binding
+ * (`proposeEnabled: false`) still audits and scores, and still finds gaps — it
+ * just never opens a PR.
+ */
+export function isProposeEnabled(profile: BusinessProfileT): boolean {
+  return profile.repo?.proposeEnabled ?? true;
 }
 
 export function isKillSwitchActive(): boolean {

@@ -1,4 +1,4 @@
-/**
+ /**
  * capabilityRuntime.ts — capability dogfood + telemetry routes extracted from
  * `server.ts`: GET /capabilities/serve, POST /execute, GET /metrics (app-root),
  * GET /perf.
@@ -12,6 +12,8 @@ import { Router } from 'express';
 import type { CapabilityId, CapabilityBacking } from '../lib/capabilities.js';
 import { executeToolFunction } from '../lib/executionSandbox.js';
 import { isIsolateAvailable, executeToolInIsolate } from '../lib/isolatedSandbox.js';
+import { resolveExportedFunctionName } from '../lib/exportedSymbol.js';
+export { resolveExportedFunctionName };
 import { completionCacheSnapshot } from '../lib/modelProvider.js';
 import { sleepComputeSnapshot } from '../lib/sleepCompute.js';
 import { experienceSnapshot } from '../lib/experience.js';
@@ -77,12 +79,36 @@ export function createCapabilityRuntimeRouter(deps: CapabilityRuntimeRouterDeps)
 
       let codeToRun = sourceCode;
       let targetFunc = functionName;
+      let resolvedByNameLink = false;
 
       if (!codeToRun && toolName) {
         const tool = deps.registryRef().find(t => t.name === toolName);
         if (tool) {
           const latest = tool.versions[tool.versions.length - 1];
           codeToRun = latest?.source_code;
+          // NAME-LINK RESOLUTION, measured 2026-10-04.
+          //
+          // 1,193 of 1,289 registry entries export a function whose name differs
+          // from the registry entry name, so they could not be invoked by `toolName`
+          // at all: executionSandbox.ts resolves a callee only from an explicit
+          // `functionName` or a hardcoded 14-name allowlist, and a generated export
+          // like `projectUtilization` is on neither.
+          //
+          // Proof the code was fine and only the name was wrong â€” same tool, same
+          // args [50,5,100,3]:
+          //   {toolName}                      -> success:false "No callable entrypoint"
+          //   {toolName, functionName}        -> success:true
+          //
+          // So these are 1,193 latent tools, not 1,193 phantoms. Recover the real
+          // export from the source instead of demanding the caller already know it.
+          // This is the opposite of the deletion the inventory report invited.
+          if (!targetFunc && typeof codeToRun === 'string') {
+            const linked = resolveExportedFunctionName(codeToRun, tool.name);
+            if (linked) {
+              targetFunc = linked;
+              resolvedByNameLink = true;
+            }
+          }
         }
       }
 
@@ -111,7 +137,12 @@ export function createCapabilityRuntimeRouter(deps: CapabilityRuntimeRouterDeps)
         stdout: execResult.stdout,
         stderr: execResult.stderr,
         executionTimeMs: execResult.executionTimeMs,
-        error: execResult.error
+        error: execResult.error,
+        // Observable, so the name-link repair is auditable rather than magic: a
+        // caller can see which symbol was actually invoked and whether the
+        // registry's own name was wrong.
+        resolvedFunction: targetFunc ?? null,
+        resolvedByNameLink,
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'Execution failed' });

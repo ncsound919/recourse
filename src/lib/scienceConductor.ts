@@ -68,7 +68,7 @@ import { appendInsight, verifyLedgerChain, readLedger } from './trendLedger.js';
 import { trendHealth, trendScan, type ScanResult } from './trendSidecarClient.js';
 import { axiomReachable, integrateAxiomTool } from './axiomBridge.js';
 import { keywireHealth, keywireCallService, keywireBrainTask } from './keywireBridge.js';
-import { executeResearch, bindToClaims, claimSourceSimilarity, type RawSource } from './deterministicResearch.js';
+import { executeResearch, bindToClaims, claimSourceSimilarity, adoptForgeLevenshtein, type RawSource } from './deterministicResearch.js';
 import { geneLookup } from './scientificApiBridge.js';
 import { translationHealth, translateTerm, translateMetric, engineConfig, type TranslationEngineId } from './translationBridge.js';
 import { orchestrate, type PhaseId } from './subsystemOrchestrator.js';
@@ -78,6 +78,7 @@ import { buildBounty } from './pathosphereBridge.js';
 import type { ToolDomain } from '../types.js';
 import { crossValidateWithLiterature } from './biotechKnowledgeGraph.js';
 import { CANONICAL_ONCOLOGY_KG, type OncologyEntity } from './biotechKnowledgeGraph.js';
+import { recordStage } from './acceptance.js';
 
 // --- Persistence -------------------------------------------------------------
 
@@ -764,7 +765,7 @@ function runLocalFallbackExperiment(hypothesisId: string, problemId: string, cyc
  * Real findings are appended to the hash-chained discovery ledger.
  *
  * Analysis engine selection: the Python trend sidecar (statsmodels STL +
- * ruptures PELT, port 8800) is preferred when online — it is the blueprint's
+ * ruptures PELT, port 8810) is preferred when online — it is the blueprint's
  * real Analysis stack. When it is offline, the pure-TS deterministic engine
  * (`runTrendScan`) runs the same stage with equivalent math and reports
  * `engine: 'ts'`. The sidecar result is never fabricated; a scan that
@@ -1742,6 +1743,28 @@ export async function runScienceCycle(): Promise<ScienceCycle> {
   const services = await discoverServices();
   const skipped: string[] = [];
 
+  // Let the forge-built `levenshteinDistance` answer the evidence dedup sweep
+  // below, once it has proven itself equal to the reference implementation.
+  // Idempotent and cheap after the first call; a rejected or absent tool leaves
+  // the reference in place. This is what makes a generated tool load-bearing on
+  // a scheduled job rather than displayed on a dashboard.
+  const adoption = await adoptForgeLevenshtein();
+  // Acceptance evidence for the `consumed` stage: a forge-built tool is now
+  // answering a real call in the evidence dedup sweep, having proven itself
+  // equal to the reference. Recorded only on adoption, and only with the proof
+  // in the detail, so "the forge built something" can never stand in for
+  // "something calls what the forge built".
+  if (adoption.status === 'adopted') {
+    try {
+      recordStage(
+        'consumed',
+        `forge tool ${adoption.tool} (hash ${adoption.hash.slice(0, 12)}) proven on ${adoption.vectors} equivalence vectors and adopted into dedupSources`,
+      );
+    } catch {
+      /* recording must never fail the science cycle */
+    }
+  }
+
   const target = nextProblem(cycleNum);
 
   // TREND: real pageview series (or labeled seeded fallback) -> anomalies ->
@@ -1897,6 +1920,14 @@ export async function runScienceCycle(): Promise<ScienceCycle> {
   // grows by discoveries, not by reruns. Each novel finding is wrapped into a
   // ResearchArtifact (publishable-grade reproducibility: pinned seed, engine,
   // data version, evidence tier, and a reproducible SHA-256 artifact hash).
+  //
+  // The artifacts are ALSO returned on the cycle. They were previously only
+  // appended to the JSONL ledger and then dropped, which meant the scheduler's
+  // run classification could never see them: every science run looked like it
+  // produced nothing, because from the job's point of view it had. Surfacing
+  // them lets runOutcome hash-verify real work and lets the job end in a real
+  // artifact instead of a summary object.
+  const cycleArtifacts: ResearchArtifact[] = [];
   for (const f of novel) {
     // Real statistics where the finding supports it: dose-response arms get a
     // Welch's t-test (high vs low dose); everything else is honestly "no test".
@@ -1921,8 +1952,12 @@ export async function runScienceCycle(): Promise<ScienceCycle> {
         : null,
       provenance: f.provenance,
     });
+    cycleArtifacts.push(artifact);
     appendJsonl(FINDINGS_FILE, { ...f, artifact });
   }
+  // Novelty-gated: a cycle that rediscovered nothing has no artifact to offer,
+  // and reporting the empty array honestly says "nothing new this cycle".
+  (cycle as { artifacts?: ResearchArtifact[] }).artifacts = cycleArtifacts;
 
   conductor.cyclesRun = cycleNum;
   conductor.lastCycleAt = Date.now();

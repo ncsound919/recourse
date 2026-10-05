@@ -34,6 +34,8 @@ export type ProfileError =
   | 'malformed-package-json'
   | 'missing-dependency'
   | 'already-installed'
+  | 'invalid-name'
+  | 'outside-dsh-home'
   | 'write-failed';
 
 /** Where the profiles live unless `DSH_HOME` says otherwise. */
@@ -41,11 +43,52 @@ export function dshHome(): string {
   return path.resolve(process.env.DSH_HOME?.trim() || path.join(os.homedir(), '.dsh'));
 }
 
-export function profileDir(name: string, home = dshHome()): string {
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(name)) {
-    throw new Error(`invalid profile name: ${JSON.stringify(name)}`);
+/**
+ * Resolve a profile directory, refusing anything that leaves `$DSH_HOME`.
+ *
+ * Two independent checks because either alone has a hole. The name pattern stops
+ * separators and `..`; the realpath containment check stops a **junction** —
+ * `profiles/web` on this machine really is a link, and a link is followed by
+ * `writeFileSync`. Without the second check a profile symlinked at a real
+ * project would have that project's `package.json` rewritten.
+ */
+export function resolveProfileDir(
+  name: string,
+  home = dshHome(),
+): { ok: true; dir: string } | { ok: false; reason: 'invalid-name' | 'outside-dsh-home'; error: string } {
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(name) || name.includes('..')) {
+    return { ok: false, reason: 'invalid-name', error: `invalid profile name: ${JSON.stringify(name)}` };
   }
-  return path.join(home, 'profiles', name);
+  const profilesRoot = path.join(home, 'profiles');
+  const dir = path.join(profilesRoot, name);
+
+  // realpathSync on the deepest existing ancestor, so a not-yet-created profile
+  // is still checked against the real profiles root rather than skipped.
+  let realDir: string;
+  let realRoot: string;
+  try {
+    realDir = fs.realpathSync(dir);
+    realRoot = fs.realpathSync(profilesRoot);
+  } catch {
+    realDir = dir;
+    realRoot = profilesRoot;
+  }
+  const rel = path.relative(realRoot, realDir);
+  if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) {
+    return {
+      ok: false,
+      reason: 'outside-dsh-home',
+      error: `profile "${name}" resolves to ${realDir}, which is outside ${realRoot}`,
+    };
+  }
+  return { ok: true, dir };
+}
+
+/** @deprecated Prefer {@link resolveProfileDir}; this throws on an invalid name. */
+export function profileDir(name: string, home = dshHome()): string {
+  const resolved = resolveProfileDir(name, home);
+  if (!resolved.ok) throw new Error(resolved.error);
+  return resolved.dir;
 }
 
 export interface ProfileState {
@@ -56,17 +99,23 @@ export interface ProfileState {
   readonly dependencies: Readonly<Record<string, string>>;
 }
 
-/** Read a profile's bundle list and dependencies. */
+/**
+ * Read a profile's bundle list and dependencies.
+ *
+ * Returns a non-existent `exists: false` state rather than throwing on a bad
+ * name, so a route can answer 404 with the list of valid profiles instead of 500.
+ */
 export function readProfile(name: string, home = dshHome()): ProfileState {
-  const dir = profileDir(name, home);
-  const pkgPath = path.join(dir, 'package.json');
+  const resolved = resolveProfileDir(name, home);
   const base: ProfileState = {
     profile: name,
-    dir,
+    dir: resolved.ok ? resolved.dir : '',
     exists: false,
     bundles: [],
     dependencies: {},
   };
+  if (!resolved.ok) return base;
+  const pkgPath = path.join(resolved.dir, 'package.json');
   if (!fs.existsSync(pkgPath)) return base;
   let parsed: Record<string, unknown>;
   try {
@@ -78,7 +127,7 @@ export function readProfile(name: string, home = dshHome()): ProfileState {
   const profile = (dsh.profile ?? {}) as Record<string, unknown>;
   const bundles = Array.isArray(profile.bundles) ? (profile.bundles as unknown[]).filter((b): b is string => typeof b === 'string') : [];
   const dependencies = (parsed.dependencies ?? {}) as Record<string, string>;
-  return { profile: name, dir, exists: true, bundles, dependencies };
+  return { profile: name, dir: resolved.dir, exists: true, bundles, dependencies };
 }
 
 /** The profiles present under `$DSH_HOME/profiles`. */
@@ -123,7 +172,9 @@ export function addBundleToProfile(options: {
   force?: boolean;
 }): AddBundleOutcome {
   const home = options.home ?? dshHome();
-  const dir = profileDir(options.profile, home);
+  const resolvedDir = resolveProfileDir(options.profile, home);
+  if (!resolvedDir.ok) return { ok: false, reason: resolvedDir.reason, error: resolvedDir.error };
+  const dir = resolvedDir.dir;
   const pkgPath = path.join(dir, 'package.json');
 
   if (!fs.existsSync(pkgPath)) {
@@ -204,17 +255,19 @@ export function removeBundleFromProfile(options: {
   profile: string;
   packageName: string;
   home?: string;
-}): { ok: true; profile: string; removed: boolean } | { ok: false; error: string } {
+}): { ok: true; profile: string; removed: boolean } | { ok: false; reason: ProfileError; error: string } {
   const home = options.home ?? dshHome();
-  const dir = profileDir(options.profile, home);
+  const resolvedDir = resolveProfileDir(options.profile, home);
+  if (!resolvedDir.ok) return { ok: false, reason: resolvedDir.reason, error: resolvedDir.error };
+  const dir = resolvedDir.dir;
   const pkgPath = path.join(dir, 'package.json');
-  if (!fs.existsSync(pkgPath)) return { ok: false, error: `no profile at ${dir}` };
+  if (!fs.existsSync(pkgPath)) return { ok: false, reason: 'not-a-profile', error: `no profile at ${dir}` };
 
   let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(fs.readFileSync(pkgPath, 'utf-8')) as Record<string, unknown>;
   } catch (error) {
-    return { ok: false, error: `unparseable ${pkgPath}: ${error instanceof Error ? error.message : String(error)}` };
+    return { ok: false, reason: 'malformed-package-json', error: `unparseable ${pkgPath}: ${error instanceof Error ? error.message : String(error)}` };
   }
 
   const dependencies = { ...((parsed.dependencies ?? {}) as Record<string, string>) };
@@ -236,7 +289,7 @@ export function removeBundleFromProfile(options: {
       'utf-8',
     );
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    return { ok: false, reason: 'write-failed', error: error instanceof Error ? error.message : String(error) };
   }
   return { ok: true, profile: options.profile, removed };
 }

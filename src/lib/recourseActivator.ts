@@ -46,6 +46,7 @@ import { readWallet, computeBalances, canAutoMerge } from './wallet.js';
 import { runLoop as runAutopilotLoop } from '../autopilot/loopStateMachine.js';
 import type { LoopRunOptions } from '../autopilot/loopStateMachine.js';
 import { listBusinessSlugs, loadBusinessProfile } from '../autopilot/businessProfile.js';
+import { defaultAuditAdapters } from '../autopilot/auditAdapters.js';
 
 /* -------------------------------------------------------------------------- */
 /* Tiered memory stores — durable SQLite by default (survives restart), with a */
@@ -102,18 +103,36 @@ export const semanticStore = new SemanticStore(
   memoryDrivers.semanticDriver.count?.() ?? memoryDrivers.semanticDriver.list().length,
 );
 
-/** Honest status of the tiered-memory backend + row counts. */
+/**
+ * Honest status of the tiered-memory backend + row counts.
+ *
+ * Counts alone are not honest: a store holding only the 77 episodes a manual
+ * lab script wrote months ago reports the same `episodes: 77` as a loop that has
+ * been writing every cycle, and reads *healthier* than a genuinely empty store.
+ * `lastEpisodeAt` lets a reader tell a frozen tier from a live one.
+ */
 export function memoryStoreStatus(): {
   kind: 'sqlite' | 'memory';
   dbPath: string | null;
   episodes: number;
   facts: number;
+  /** Epoch ms of the most recent episode, or null when the tier is empty. */
+  lastEpisodeAt: number | null;
 } {
+  const episodes = memoryDrivers.episodeDriver.count?.() ?? episodicStore.all().length;
+  const all = memoryDrivers.episodeDriver.list?.() ?? episodicStore.all();
+  // `recordedAt` only. Episode.timestamp is a sequence counter, so using it here
+  // would report e.g. 77 as if it were epoch milliseconds.
+  const lastEpisodeAt = all.reduce<number | null>(
+    (max, e) => (typeof e.recordedAt === 'number' && (max === null || e.recordedAt > max) ? e.recordedAt : max),
+    null,
+  );
   return {
     kind: memoryDrivers.kind,
     dbPath: memoryDrivers.dbPath ?? null,
-    episodes: memoryDrivers.episodeDriver.count?.() ?? episodicStore.all().length,
+    episodes,
     facts: memoryDrivers.semanticDriver.count?.() ?? semanticStore.facts().length,
+    lastEpisodeAt,
   };
 }
 
@@ -301,7 +320,15 @@ export interface AutopilotProbeResult {
  *    - the profile has a repo binding
  * Dry-run only — no PR opens. Logs a single line per business. */
 export async function probeAutopilotOnce(
-  opts: { planner?: LoopRunOptions['planner'] } = {},
+  opts: {
+    planner?: LoopRunOptions['planner'];
+    /**
+     * The recursive learner. Supplied by the caller so the probe exercises the
+     * same learner the real loop uses — the probe previously read the learner's
+     * status but ran no episode, so it reported on learning without doing any.
+     */
+    learner?: LoopRunOptions['learner'];
+  } = {},
 ): Promise<AutopilotProbeResult[]> {
   if (String(process.env.RECOURSE_AUTOPILOT_DISABLED ?? '').trim().toLowerCase() === '1') {
     return [{ ran: false, reason: 'kill_switch' }];
@@ -319,17 +346,30 @@ export async function probeAutopilotOnce(
   for (const slug of slugs) {
     try {
       const profile = loadBusinessProfile(slug);
-      if (!profile.repo || !profile.repo.autoMergeEnabled) {
-        out.push({ ran: false, reason: 'autoMerge_disabled', business: slug, mergeGate });
+      // A BOUND repo is probeable. This used to require autoMergeEnabled,
+      // which conflated "may we analyse this repo" with "may we merge" — so a
+      // read-only profile could never be measured at all. The probe is a
+      // dryRun anyway: it writes nothing and merges nothing.
+      if (!profile.repo) {
+        out.push({ ran: false, reason: 'no_repo_binding', business: slug, mergeGate });
         continue;
       }
+      // `requireCheckpoint` is now a validated field on RepoBinding, so read it
+      // off the binding instead of casting through `any` for a key that did not
+      // exist. The env override still wins so an operator can force a pause
+      // without editing profiles.
       const requireCheckpoint =
         String(process.env.RECOURSE_REQUIRE_CHECKPOINT ?? '').trim() === '1' ||
-        (profile.repo as any).requireCheckpoint === true;
+        profile.repo.requireCheckpoint === true;
       const result = await runAutopilotLoop({
         profile,
         dryRun: true,
         requireCheckpoint,
+        // Without adapters runAudit throws ("no auditor produced an included
+        // section"), so this probe could only ever report a failure. The probe
+        // now exercises the real audit team.
+        adapters: defaultAuditAdapters(),
+        learner: opts.learner,
         ...(opts.planner ? { planner: opts.planner } : {}),
       });
       out.push({

@@ -17,6 +17,7 @@
  *     the chosen (gate-passing) proposal; idle outcomes carry the queue.
  */
 
+import fs from 'node:fs';
 import path from 'node:path';
 import {
   PRState,
@@ -34,6 +35,7 @@ import {
 import {
   isAutoMergeEnabled,
   isKillSwitchActive,
+  isProposeEnabled,
   repoBinding,
   type BusinessProfileT,
 } from './businessProfile';
@@ -50,6 +52,7 @@ import { fetchGitHubToken } from './keywireClient';
 import { createGitHubClient } from './gitHubClient';
 import { DEFAULT_LEDGER_ROOT, loadLedger, quarantinedGapIds, updateGeneFitness } from './fitnessLoop';
 import { recordMergedOutcome } from '../lib/outcomeFeedback';
+import { recordStage } from '../lib/acceptance';
 import { FileCheckpointStore, buildCheckpoint, evaluateCheckpointTimeout, resolveCheckpoint } from './checkpoint';
 
 export type LoopRunOptions = {
@@ -93,9 +96,69 @@ function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** Minimal learner surface the loop needs (satisfied by RecursiveLearner). */
+/**
+ * Feed a real outcome back into the learner as one episode.
+ *
+ * The scorecard delta is a signed value on the business score's own scale, not
+ * a 0..1 reward, so it is normalized before use. `runEpisode` documents its
+ * external score as 0..1 and modulates gene beliefs by it; passing a raw delta
+ * (which can exceed 1 on a large improvement, or go negative on a regression)
+ * would distort those beliefs rather than inform them.
+ *
+ * Returns what happened instead of throwing: learning must never be able to
+ * fail a merge that already succeeded.
+ */
+async function feedLearnerOutcome(
+  learner: LearnerLike | undefined,
+  scorecardDelta: number,
+  meta: { proposalId: string; gapId: string },
+): Promise<'episode' | 'no-learner' | 'no-runner' | 'failed'> {
+  if (!learner) return 'no-learner';
+  if (typeof learner.runEpisode !== 'function') return 'no-runner';
+  try {
+    // Map the delta onto 0..1 around a neutral midpoint: no change -> 0.5.
+    // CLAMP is honest here — an extreme delta should saturate the reward, not
+    // push the learner outside the range runEpisode documents.
+    const CLAMP = 1;
+    const reward = Math.max(0, Math.min(1, 0.5 + scorecardDelta / (2 * CLAMP)));
+    await learner.runEpisode(reward);
+    // Acceptance evidence: the system learned FROM an outcome it produced. The
+    // reward carries the real scorecard delta from a real proposal, so this
+    // cannot be satisfied by the learner merely existing or being constructed.
+    try {
+      recordStage(
+        'learned',
+        `learner ran an episode on the real outcome of ${meta.proposalId}/${meta.gapId}: scorecard delta ${scorecardDelta.toFixed(3)} -> reward ${reward.toFixed(3)}`,
+      );
+    } catch {
+      /* recording must never fail the loop */
+    }
+    return 'episode';
+  } catch (err) {
+    console.warn(
+      `[autopilot] learner episode failed after ${meta.proposalId}/${meta.gapId} (delta ${scorecardDelta.toFixed(3)}): ${errMsg(err)}`,
+    );
+    return 'failed';
+  }
+}
+
+/**
+ * Minimal learner surface the loop needs (satisfied by RecursiveLearner).
+ *
+ * `runEpisode` is what makes the loop a *learning* loop. The loop previously
+ * only read `status()`, so the learner's beliefs shaped audit depth but nothing
+ * ever fed an outcome back — the loop could read what the learner knew and never
+ * teach it anything. `runEpisode` is optional so a read-only learner (tests, a
+ * frozen learner) still works; when present the loop feeds it the real
+ * scorecard delta.
+ */
 export type LearnerLike = {
   status(): Promise<Pick<LearnerState, 'geneBeliefs' | 'directives'>> | Pick<LearnerState, 'geneBeliefs' | 'directives'>;
+  /**
+   * Run one learning episode with an external reward in 0..1 (the real outcome
+   * signal: scorecard delta, verifier pass rate). Omit for a no-signal episode.
+   */
+  runEpisode?(externalScore?: number): Promise<unknown>;
 };
 
 /**
@@ -162,7 +225,12 @@ export async function runLoop(options: LoopRunOptions): Promise<LoopOutcome> {
     return { state: { status: 'error', reason: 'kill_switch' }, context };
   }
 
-  // 2. Repo binding + auto-merge gate.
+  // 2. Repo binding. A bound repo is always auditable — analysis (audit,
+  // scorecard, gap analysis) is read-only and is the point of the loop.
+  // `autoMergeEnabled` gates only the irreversible merge, and `proposeEnabled`
+  // gates writing to the remote. Previously `autoMergeEnabled: false` returned
+  // `idle` HERE, before any analysis, which meant a profile could not even
+  // measure itself unless it was allowed to merge.
   const repo = repoBinding(profile);
   if (!repo) {
     return {
@@ -170,12 +238,15 @@ export async function runLoop(options: LoopRunOptions): Promise<LoopOutcome> {
       context,
     };
   }
-  if (!isAutoMergeEnabled(profile) && !options.dryRun) {
+  if (!fs.existsSync(repo.localPath)) {
     return {
-      state: { status: 'idle' },
+      state: { status: 'error', reason: `repo_path_missing: ${repo.localPath}` },
       context,
     };
   }
+  // Read-only binding: run the analysis, propose nothing. `dryRun` is the same
+  // permission held by the caller rather than the profile.
+  const mayPropose = isProposeEnabled(profile) && !options.dryRun;
 
   // Dry runs never touch the default on-disk profile dir; an explicit auditDir
   // is honored in both modes.
@@ -203,6 +274,19 @@ export async function runLoop(options: LoopRunOptions): Promise<LoopOutcome> {
       state: { status: 'error', reason: `audit failed: ${errMsg(err)}` },
       context,
     };
+  }
+
+  // 3b. Run an episode so the learner has a baseline belief state BEFORE any
+  // outcome is measured. Without a prior episode the post-merge reward below
+  // is the learner's first and only data point, so its beliefs are a function of
+  // a single merge rather than a trend. Cheap (no model call) and it makes the
+  // depth chosen above reflect a state the learner actually holds.
+  if (typeof options.learner?.runEpisode === 'function') {
+    try {
+      await options.learner.runEpisode();
+    } catch (err) {
+      console.warn(`[autopilot] pre-audit learner episode failed: ${errMsg(err)}`);
+    }
   }
 
   // 4. Scorecard.
@@ -268,9 +352,21 @@ export async function runLoop(options: LoopRunOptions): Promise<LoopOutcome> {
   }
   context.currentProposal = current;
 
-  // 7. PR phase (skipped in dryRun; nothing is written to disk or opened).
-  if (options.dryRun) {
-    return { state: { status: 'pr_open', prNumber: -1 }, context };
+  // 7. PR phase. Skipped in a dry run, and skipped entirely for a read-only
+  // binding — the analysis above still ran and its result is in `context`, so a
+  // read-only profile reports real gaps without touching the remote.
+  if (options.dryRun || !mayPropose) {
+    return {
+      state: {
+        status: 'pr_open',
+        // -1 means "no PR was opened"; no PR number is invented.
+        prNumber: -1,
+        // Say WHICH permission stopped it. "propose_disabled" on a dry run
+        // would blame the profile for a restriction the caller imposed.
+        ...(options.dryRun ? { reason: 'dry_run' } : { reason: 'propose_disabled' }),
+      },
+      context,
+    };
   }
 
   try {
@@ -419,6 +515,22 @@ export async function resumeAfterVeto(options: ResumeOptions): Promise<LoopOutco
 
   let updated: PRStateT;
   try {
+    // Auto-merge is opt-in per profile. Without it the PR is reported as still
+    // open in its veto window and left for a human — this path is reached from
+    // `resumeAfterVeto`, which advances EXISTING PRs, so honouring the flag
+    // here is what actually stops an unattended merge.
+    if (repo && !isAutoMergeEnabled(options.profile)) {
+      return {
+        state: {
+          status: 'veto_wait',
+          prNumber: prState.prNumber,
+          // The PR's own recorded deadline: it is still waiting out its window,
+          // just with no automatic merge at the end of it.
+          deadline: prState.vetoDeadline,
+        },
+        context: { ...context, prState },
+      };
+    }
     updated = await checkAndMerge(prState, github, {
       now: options.now,
       authorizedVetoUsers: options.authorizedVetoUsers,
@@ -478,6 +590,7 @@ export async function resumeAfterVeto(options: ResumeOptions): Promise<LoopOutco
         post,
         ledgerRoot: options.ledgerRoot ?? DEFAULT_LEDGER_ROOT,
       });
+      const scorecardDelta = post.overallScore - pre.overallScore;
       // Feed the real business outcome (scorecard delta) to the learner's
       // external reward ledger. This is the signal that was previously written
       // into the fitness ledger and never consumed.
@@ -486,12 +599,19 @@ export async function resumeAfterVeto(options: ResumeOptions): Promise<LoopOutco
           ledgerRoot: options.ledgerRoot ?? DEFAULT_LEDGER_ROOT,
           proposalId: updated.proposalId,
           gapId: updated.gapId,
-          scorecardDelta: post.overallScore - pre.overallScore,
+          scorecardDelta,
           notes: `scorecard ${pre.overallScore} -> ${post.overallScore}`,
         });
       } catch {
         // Outcome feedback must never fail the merge path.
       }
+      // And close the learning loop: the outcome is fed back as an episode so
+      // the learner updates its gene beliefs. Without this the loop only ever
+      // READ the learner (audit depth) and never trained it.
+      await feedLearnerOutcome(options.learner, scorecardDelta, {
+        proposalId: updated.proposalId,
+        gapId: updated.gapId ?? 'unknown',
+      });
       context.currentProposal = null;
       return {
         state: quarantined

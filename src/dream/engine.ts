@@ -29,6 +29,7 @@ import {
 import { executeTestSuite } from '../lib/executionSandbox';
 import { reconcileDreamRegistry, type ReconcileReport } from './reconcileRegistry';
 import { AsyncMutex } from '../lib/asyncMutex';
+import { recordStage } from '../lib/acceptance';
 import type { DreamStore } from './store';
 
 /** A request to the dream model generator. */
@@ -376,7 +377,20 @@ export class DreamingEngine {
 
     const idx = PHASE_ORDER.indexOf(s.currentPhase);
     s.currentPhase = PHASE_ORDER[(idx + 1) % PHASE_ORDER.length];
-    if (idx === PHASE_ORDER.length - 1) s.dreamCyclesCompleted += 1;
+    if (idx === PHASE_ORDER.length - 1) {
+      s.dreamCyclesCompleted += 1;
+      // Acceptance evidence: a full dream cycle genuinely completed and was
+      // persisted. A partial walk through the phases is not dreaming, so this is
+      // recorded only on the wrap that increments the cycle counter.
+      try {
+        recordStage(
+          'dream',
+          `dream cycle ${s.dreamCyclesCompleted} completed through ${PHASE_ORDER.length} phases; coherence ${(s.cognitiveCoherence ?? 0).toFixed(3)}`,
+        );
+      } catch {
+        /* recording must never fail a dream tick */
+      }
+    }
 
     this.recomputeCoherence(s);
     s.lastTickAt = new Date().toISOString();

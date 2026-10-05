@@ -95,22 +95,67 @@ describe('skipReason', () => {
   });
 });
 
+describe('maintenance jobs', () => {
+  it('a maintenance job that found nothing is MAINTAINED, not unproductive', () => {
+    // A health poll correctly produces no artifact. Calling that a failure
+    // makes a healthy idle system look broken.
+    const r = classifyRun('telemetry', { queued: 0, ok: true }, { maintenance: true });
+    expect(r.outcome).toBe('maintained');
+    expect(r.detail).toContain('maintained');
+  });
+
+  it('is still unproductive when NOT declared maintenance', () => {
+    // The same result from a job that is supposed to do work is a failure.
+    const r = classifyRun('forge', { queued: 0, ok: true });
+    expect(r.outcome).toBe('unproductive');
+  });
+
+  it('a skip outranks maintenance (it did not even run)', () => {
+    const r = classifyRun('telemetry', { skipped: 'autopilot disabled' }, { maintenance: true });
+    expect(r.outcome).toBe('skipped');
+  });
+
+  it('ARTIFACTS OUTRANK MAINTENANCE — maintenance cannot hide real work', () => {
+    // This is the guard against 'maintenance' becoming a loophole: a maintenance
+    // job that genuinely found something must be credited with it.
+    const a = buildArtifact({ kind: 'decision', claim: 'real work', engine: 'e', provenance: 'p' });
+    const r = classifyRun('telemetry', { artifact: a }, { maintenance: true });
+    expect(r.outcome).toBe('artifact');
+    expect(r.artifact?.id).toBe(a.id);
+  });
+
+  it('a tampered artifact outranks maintenance too — it must not be excused', () => {
+    const a = buildArtifact({ kind: 'decision', claim: 'real work', engine: 'e', provenance: 'p' });
+    const r = classifyRun('telemetry', { artifact: { ...a, claim: 'swapped' } }, { maintenance: true });
+    expect(r.outcome).toBe('unproductive');
+    expect(r.tampered).toBe(true);
+  });
+
+  it('includes the maintenance note when given', () => {
+    const r = classifyRun('memory_consolidation', {}, { maintenance: true, maintenanceNote: 'nothing to consolidate' });
+    expect(r.detail).toContain('nothing to consolidate');
+  });
+});
+
+const tally = () => ({ artifact: 0, skipped: 0, maintained: 0, unproductive: 0, failed: 0 });
+
 describe('tallyOutcome', () => {
   it('counts each terminal state separately and does not mutate', () => {
-    const start = { artifact: 0, skipped: 0, unproductive: 0, failed: 0 };
+    const start = tally();
     let t = tallyOutcome(start, 'artifact');
     t = tallyOutcome(t, 'unproductive');
     t = tallyOutcome(t, 'unproductive');
     t = tallyOutcome(t, 'skipped');
-    expect(t).toEqual({ artifact: 1, skipped: 1, unproductive: 2, failed: 0 });
+    t = tallyOutcome(t, 'maintained');
+    expect(t).toEqual({ artifact: 1, skipped: 1, maintained: 1, unproductive: 2, failed: 0 });
     // The original tally must be untouched.
     expect(start.unproductive).toBe(0);
   });
 
   it('covers every RunOutcome', () => {
-    const all: RunOutcome[] = ['artifact', 'skipped', 'unproductive'];
+    const all: RunOutcome[] = ['artifact', 'skipped', 'maintained', 'unproductive'];
     for (const o of all) {
-      const t = tallyOutcome({ artifact: 0, skipped: 0, unproductive: 0, failed: 0 }, o);
+      const t = tallyOutcome(tally(), o);
       expect(t[o]).toBe(1);
     }
   });

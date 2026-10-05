@@ -16,6 +16,7 @@
 
 import { modelSelection, rewardForOutcome } from './modelSelection.js';
 import { CompletionCache, type CacheMessage } from './completionCache.js';
+import { longFetch } from './httpClient.js';
 
 export interface ProviderConfig {
   kind: string;
@@ -69,6 +70,11 @@ export interface ChatCompleteOptions {
   cache?: boolean;
   /** Distinguishes caches that share a prompt shape (e.g. 'forge' vs 'dream'). */
   cacheNamespace?: string;
+  /**
+   * Explicit output cap for this call. Omit to use MODEL_MAX_TOKENS (default
+   * 4096). Never omit the cap entirely — see the note where the body is built.
+   */
+  maxTokens?: number;
 }
 
 export interface ChatCompleteResult {
@@ -221,6 +227,16 @@ export interface ProviderStatus {
   baseUrl: string;
   model: string;
   online: boolean;
+  /**
+   * How far `online` was actually verified.
+   *  - `deep`         — a completion was produced. `online` means usable.
+   *  - `reachability` — only `GET /models` answered 200. `online` means the
+   *                     endpoint is up, NOT that the key can generate.
+   *  - `none`         — never probed; `online` is false and says nothing.
+   * Reading `online` without this field is how a provider that answers /models
+   * and rejects /chat/completions gets reported as healthy.
+   */
+  verified: 'deep' | 'reachability' | 'none';
   lastError?: string;
   checkedAt?: number;
 }
@@ -232,9 +248,22 @@ export type ProviderProfileId = 'local' | 'api';
 
 let activeProvider: ProviderProfileId = 'api';
 
-const onlineCache: Record<ProviderProfileId, { online: boolean | null; at: number; error: string | undefined }> = {
-  local: { online: null, at: 0, error: undefined },
-  api: { online: null, at: 0, error: undefined },
+/**
+ * One slot per profile, but a `deep` discriminator alongside the value.
+ *
+ * Both probe tiers used to write the same `online` field with no record of which
+ * wrote it, so the two could not be told apart and either could win. Two
+ * consequences, both observed:
+ *  - A hot-path shallow probe (every completion consults it) overwrote a deep
+ *    `false` verdict within the TTL, re-reporting an unkeyed provider as online.
+ *  - `providerStatus().online` could not say whether it meant "reachable" or
+ *    "produced a completion", which is the exact ambiguity the module's own
+ *    docstring says caused 58 forge failures against a "healthy" provider.
+ * `deep: true` means the value came from a real completion attempt.
+ */
+const onlineCache: Record<ProviderProfileId, { online: boolean | null; at: number; error: string | undefined; deep: boolean }> = {
+  local: { online: null, at: 0, error: undefined, deep: false },
+  api: { online: null, at: 0, error: undefined, deep: false },
 };
 const STATUS_TTL_MS = 5000;
 
@@ -263,7 +292,7 @@ function profileFor(id: ProviderProfileId): { baseUrl: string; model: string; ap
 
 export function setActiveProviderProfile(id: ProviderProfileId): ProviderProfileId {
   activeProvider = id === 'local' ? 'local' : 'api';
-  onlineCache[activeProvider] = { online: null, at: 0, error: undefined };
+  onlineCache[activeProvider] = { online: null, at: 0, error: undefined, deep: false };
   return activeProvider;
 }
 
@@ -380,6 +409,16 @@ async function chatCompleteForRaw(
     model: cfg.model,
     messages,
     stream: false,
+    // Always send an explicit output cap.
+    //
+    // With no `max_tokens`, OpenAI-compatible gateways fall back to the model's
+    // maximum output, and deepseek-v4.1-flash advertises 131072. The provider
+    // then rejects the request before generating anything:
+    //   HTTP 402 "You requested up to 131072 tokens, but can only afford 239"
+    // A tool build needs on the order of 1-2k tokens, so the cap is both
+    // cheaper and what was actually wanted. An explicit per-call value still
+    // wins when a caller knows it needs more.
+    max_tokens: opts.maxTokens ?? (Number(process.env.MODEL_MAX_TOKENS) || 4096),
   };
   if (typeof opts.temperature === 'number') body.temperature = opts.temperature;
 
@@ -396,7 +435,11 @@ async function chatCompleteForRaw(
       endpoint,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${cfg.apiKey}`,
+          ...providerExtraHeaders(cfg.baseUrl),
+        },
         body: JSON.stringify(body),
       },
       cfg.requestTimeoutMs,
@@ -443,13 +486,29 @@ async function chatCompleteForRaw(
     // A turn that requests tools legitimately has empty content; only content-less
     // turns with no tool calls are an honest error.
     if ((content === null || content.trim().length === 0) && !(toolCalls && toolCalls.length)) {
-      onlineCache[profileId].error = 'model returned empty content';
+      // "model returned empty content" is not a diagnosis. The common cause is a
+      // reasoning model spending the ENTIRE output budget on reasoning and
+      // hitting the cap before writing an answer (space-bunny-free emits
+      // `reasoning_content` and returns `finish_reason: 'length'`), which looks
+      // identical to an empty response unless the reason is reported.
+      const reasoningTokens = (data?.usage as any)?.completion_tokens_details?.reasoning_tokens;
+      let error = 'model returned empty content';
+      if (finishReason === 'length' && reasoning) {
+        error =
+          `model used its entire output budget on reasoning and produced no answer ` +
+          `(finish_reason=length, reasoning ${reasoning.length} chars` +
+          (typeof reasoningTokens === 'number' ? `, ${reasoningTokens} reasoning tokens` : '') +
+          `). Raise MODEL_MAX_TOKENS.`;
+      } else if (reasoning) {
+        error = `model returned only reasoning and no answer (finish_reason=${finishReason ?? 'unknown'})`;
+      }
+      onlineCache[profileId].error = error;
       return {
         ok: false,
         content: null,
         status: 'error',
         model: cfg.model,
-        error: 'model returned empty content',
+        error,
         latencyMs: Date.now() - started,
       };
     }
@@ -523,27 +582,66 @@ async function chatCompleteFor(
   return result;
 }
 
+/**
+ * Extra headers a specific gateway requires.
+ *
+ * opencode.ai's Zen gateway refuses requests without `x-opencode-session`
+ * ("Request is missing x-opencode-session and cannot be routed efficiently"),
+ * which surfaced as HTTP 429 on the `zen/go` tier. The header is gateway
+ * policy, not a secret, so it is derived from the base URL rather than being
+ * smuggled through the API-key field.
+ *
+ * Set OPENCODE_SESSION_ID to name the session; the default identifies Recourse
+ * so the gateway can attribute usage.
+ */
+function providerExtraHeaders(baseUrl: string): Record<string, string> {
+  if (!/opencode\.ai/i.test(baseUrl)) return {};
+  const session = (process.env.OPENCODE_SESSION_ID || 'recourse').trim();
+  return session ? { 'x-opencode-session': session } : {};
+}
+
 async function rawFetch(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    // longFetch, not fetch: undici's own 300s headersTimeout fires before this
+    // AbortSignal on a slow local model, and the resulting bare "fetch failed"
+    // is indistinguishable from the server being offline.
+    return await longFetch(url, { ...init, signal: controller.signal }, timeoutMs);
   } finally {
     clearTimeout(timer);
   }
 }
 
-/** Probe GET {base}/models. Cached for STATUS_TTL_MS.
- *  `profileId` defaults to the active profile; pass 'local' or 'api' to probe
- *  a specific endpoint independently. */
+/** Probe whether a profile can actually GENERATE, not merely be reached.
+ *
+ *  WHY THIS IS NOT JUST `GET /models`
+ *  `GET /models` answers 200 on hosts whose chat endpoint rejects the
+ *  configured key — api.pgsgrove.com does exactly that. The old probe therefore
+ *  reported `online: true` while every real completion returned
+ *  `HTTP 401: plan tier does not include API access`, which is how 58 forge
+ *  attempts failed against a provider the dashboard called healthy. "Online"
+ *  has to mean "a completion can be produced", so the probe now spends one
+ *  token to find out.
+ *
+ *  Cached for STATUS_TTL_MS, so the cost is one token per profile per TTL.
+ *  Reachable-but-unusable is the state this exists to distinguish.
+ */
 export async function checkOnline(
   force = false,
   profileId: ProviderProfileId = activeProvider,
+  opts: { deep?: boolean } = {},
 ): Promise<boolean> {
   const slot = onlineCache[profileId];
   const now = Date.now();
   if (!force && slot.online !== null && now - slot.at < STATUS_TTL_MS) {
-    return slot.online;
+    // A cached DEEP verdict is strictly more informative than a reachability
+    // probe, so answer from it rather than letting the hot path downgrade it —
+    // that downgrade is how a provider that answers /models and rejects
+    // /chat/completions got re-reported as online minutes after being caught.
+    // The reverse does not hold: a cached reachability `true` cannot answer a
+    // deep question, so a deep request must re-probe, never inherit the weaker claim.
+    if (slot.deep || !opts.deep) return slot.online;
   }
   const p = profileFor(profileId);
   const baseUrl = p.baseUrl;
@@ -551,21 +649,108 @@ export async function checkOnline(
     slot.online = false;
     slot.at = now;
     slot.error = 'local model not configured';
+    slot.deep = false;
     return false;
   }
+  // Step 1: is the endpoint reachable at all? Cheap, and it distinguishes
+  // "server down" from "server up but refusing us".
   try {
     const res = await rawFetch(`${baseUrl}/models`, { method: 'GET' }, 2000);
-    const ok = res.ok;
-    slot.online = ok;
-    slot.at = now;
-    slot.error = ok ? undefined : `GET /models -> HTTP ${res.status}`;
-    return ok;
+    if (!res.ok) {
+      slot.online = false;
+      slot.at = now;
+      slot.error = `GET /models -> HTTP ${res.status}`;
+      // Step 1 failing is a definitive negative at any depth — nothing is
+      // reachable at all — so this answer is as strong as a deep one and may be
+      // reused by a later caller regardless of the depth it asked for.
+      slot.deep = true;
+      return false;
+    }
   } catch (err: any) {
     slot.online = false;
     slot.at = now;
     slot.error = err?.message || 'unreachable';
+    slot.deep = true;
     return false;
   }
+
+  // Step 2 (opt-in): can it actually complete?
+  //
+  // Only run for an explicit status READ. This costs a real model call, and
+  // `chatCompleteForRaw` consults this probe before every completion — running
+  // it there doubled the model's call count on the hot path and broke the
+  // completion-cache contract ("the second identical completion never hits the
+  // network"). A completion is its own proof of usability, so the hot path only
+  // needs the cheap reachability check; the honest "online" that dashboards
+  // show is produced by `checkOnline(..., { deep: true })`.
+  if (!opts.deep) {
+    slot.online = true;
+    slot.at = now;
+    slot.error = undefined;
+    // Explicitly NOT deep. /models answering 200 proves reachability only; this
+    // is the state that reads as "healthy" when the key cannot generate.
+    slot.deep = false;
+    return true;
+  }
+  try {
+    const res = await rawFetch(
+      `${baseUrl}/chat/completions`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(p.apiKey ? { Authorization: `Bearer ${p.apiKey}` } : {}),
+          ...providerExtraHeaders(baseUrl),
+        },
+        body: JSON.stringify({
+          model: p.model,
+          messages: [{ role: 'user', content: 'ok' }],
+          max_tokens: 1,
+          stream: false,
+        }),
+      },
+      // A CPU-streamed 2B model needs seconds of prefill before its first
+      // token; the old 2s ceiling was too tight and reported a healthy local
+      // llama-server as offline.
+      30_000,
+    );
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      slot.online = false;
+      slot.at = now;
+      // Keep the server's own words: "plan tier does not include API access"
+      // is the actionable part, and "HTTP 401" alone is not.
+      const detail = extractProviderError(text) ?? `HTTP ${res.status}`;
+      slot.error = `POST /chat/completions -> ${detail}`;
+      slot.deep = true;
+      return false;
+    }
+    slot.online = true;
+    slot.at = now;
+    slot.error = undefined;
+    slot.deep = true;
+    return true;
+  } catch (err: any) {
+    slot.online = false;
+    slot.at = now;
+    slot.error = `POST /chat/completions -> ${err?.message || 'failed'}`;
+    slot.deep = true;
+    return false;
+  }
+}
+
+/** Pull the provider's own error message out of an error body, when present. */
+function extractProviderError(text: string): string | null {
+  if (!text) return null;
+  try {
+    const parsed = JSON.parse(text);
+    const msg = parsed?.error?.message ?? parsed?.message;
+    if (typeof msg === 'string' && msg.trim()) return msg.trim().slice(0, 200);
+  } catch {
+    // not JSON — fall through to the raw text
+  }
+  const trimmed = text.trim().slice(0, 200);
+  return trimmed && !trimmed.startsWith('<') ? trimmed : null;
 }
 
 export function providerStatus(profileId?: ProviderProfileId): ProviderStatus {
@@ -577,6 +762,9 @@ export function providerStatus(profileId?: ProviderProfileId): ProviderStatus {
     baseUrl: p.baseUrl,
     model: p.model,
     online: slot.online === true,
+    // Surface how far `online` was proven, so a caller cannot read a bare
+    // reachability probe as a health verdict. See ProviderStatus.verified.
+    verified: slot.online === null ? 'none' : slot.deep ? 'deep' : 'reachability',
     lastError: slot.error,
     checkedAt: slot.online === null ? undefined : slot.at,
   };

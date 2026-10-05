@@ -10,6 +10,20 @@ export const INITIAL_STATUS: SystemStatus = {
   verifierPassRate: 0,
   hashChainIntegrity: true,
   registeredToolsCount: 0,
+  /**
+   * The honest registry pair (B2). Declared here rather than left optional-and-
+   * added-later because `loadStateFromDisk` REPLACES `status` wholesale from
+   * persisted data: a field absent from the initial shape and from the persisted
+   * payload simply never appears, no matter how many sites assign it.
+   */
+  registryExecutability: {
+    invocableByName: 0,
+    nameLinkActivated: 0,
+    notExecutable: 0,
+    executableTotal: 0,
+    total: 0,
+    selfHostedVerified: 0,
+  },
   pendingApprovalsCount: 0,
   lastTickTime: 0,
   aiStudioModel: '',

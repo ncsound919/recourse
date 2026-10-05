@@ -61,9 +61,21 @@ export function createSqliteMemoryDrivers(dbPath: string = defaultMemoryDbPath()
     CREATE INDEX IF NOT EXISTS idx_facts_fingerprint ON semantic_facts(problemFingerprint);
   `);
 
+  // Non-destructive migration: add the wall-clock column to an EXISTING episodes
+  // table. `CREATE TABLE IF NOT EXISTS` above is a no-op once the table exists,
+  // so without this an already-provisioned database would never gain the column
+  // and every insert would fail. Existing rows keep NULL, which is honest — those
+  // episodes predate the column and their wall-clock time is genuinely unknown.
+  // (The old `timestamp` column is a sequence counter, not a time, so it cannot
+  // be backfilled into one.)
+  const episodeCols = db.prepare(`PRAGMA table_info(episodes)`).all() as Array<{ name: string }>;
+  if (!episodeCols.some((c) => c.name === 'recordedAt')) {
+    db.exec(`ALTER TABLE episodes ADD COLUMN recordedAt INTEGER`);
+  }
+
   const insertEpisode = db.prepare(
-    `INSERT INTO episodes(id, timestamp, problemFingerprint, toolName, outcome, score, geneIds, summary, provenanceId)
-     VALUES (@id, @timestamp, @problemFingerprint, @toolName, @outcome, @score, @geneIds, @summary, @provenanceId)`,
+    `INSERT INTO episodes(id, timestamp, problemFingerprint, toolName, outcome, score, geneIds, summary, provenanceId, recordedAt)
+     VALUES (@id, @timestamp, @problemFingerprint, @toolName, @outcome, @score, @geneIds, @summary, @provenanceId, @recordedAt)`,
   );
   const selectEpisodes = db.prepare(`SELECT * FROM episodes ORDER BY seq ASC`);
   const countEpisodes = db.prepare(`SELECT COUNT(*) AS n FROM episodes`);
@@ -78,6 +90,7 @@ export function createSqliteMemoryDrivers(dbPath: string = defaultMemoryDbPath()
       geneIds: JSON.stringify(e.geneIds ?? []),
       summary: e.summary ?? '',
       provenanceId: e.provenanceId ?? null,
+      recordedAt: typeof e.recordedAt === 'number' ? e.recordedAt : null,
     });
   });
 
@@ -129,6 +142,7 @@ export function createSqliteMemoryDrivers(dbPath: string = defaultMemoryDbPath()
           geneIds: parseArray(row.geneIds),
           summary: String(row.summary ?? ''),
           provenanceId: row.provenanceId == null ? undefined : String(row.provenanceId),
+          recordedAt: row.recordedAt == null ? undefined : Number(row.recordedAt),
         }));
       },
     },

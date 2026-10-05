@@ -129,7 +129,11 @@ describe('ecosystem router', () => {
 
   it('registers a connector and probes health honestly', async () => {
     const { base, post, connectors } = await setup();
-    const reg = await post('/api/recourse/ecosystem/connectors', { id: 'kg', name: 'KG', version: '1.0.0', kind: 'sidecar', baseUrl: 'http://127.0.0.1:8500' });
+    // Port 1 is privileged and unbound, so the "unreachable" half of this test
+    // is deterministic. A real sidecar is listening on :8500 on this host, and
+    // when one was hardcoded here the probe correctly answered ok:true and the
+    // test failed by asserting a lie about the environment.
+    const reg = await post('/api/recourse/ecosystem/connectors', { id: 'kg', name: 'KG', version: '1.0.0', kind: 'sidecar', baseUrl: 'http://127.0.0.1:1' });
     expect(reg.status).toBe(200);
 
     // Healthy probe via the injected fetch (no global stub, so the test's own

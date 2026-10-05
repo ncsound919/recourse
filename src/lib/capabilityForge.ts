@@ -146,6 +146,16 @@ export const FORGE_AGENDA: ForgeSpec[] = [
       'assert dedupeStable(["a","b","a","c","b"]).length === 3;\n' +
       'assert dedupeStable([]).length === 0;\n' +
       'assert JSON.stringify(dedupeStable([5,5,5])) === JSON.stringify([5]);',
+    // NO reference oracle here, deliberately.
+    //
+    // An earlier version shipped one that handled NaN and -0 (where a plain
+    // `new Set` is wrong). It was removed because the probes that reach an
+    // oracle travel as JSON source, in which NaN and -0 are unrepresentable —
+    // so on every input the forge can actually generate, the oracle and the Set
+    // implementation agree. An oracle that cannot discriminate is worse than
+    // none: it looks like verification while proving nothing, and
+    // tests/forgeAgendaReferences.test.ts now fails any such oracle. The
+    // verification for this spec is its suite plus the behavioral checks.
   },
   {
     id: 'forge_chunk_array',
@@ -159,6 +169,17 @@ export const FORGE_AGENDA: ForgeSpec[] = [
       'assert JSON.stringify(chunkArray([1,2,3],5)) === JSON.stringify([[1,2,3]]);\n' +
       'assert chunkArray([],2).length === 0;\n' +
       'assert JSON.stringify(chunkArray([1,2,3,4],2)) === JSON.stringify([[1,2],[3,4]]);',
+    // Exact oracle: last chunk may be shorter. Off-by-one on the size guard
+    // (returning [] for size<=0, or dropping the tail) is invisible to the suite.
+    reference:
+      'export function chunkArray(arr, size) {\n' +
+      '  const n = Number(size);\n' +
+      '  if (!Number.isFinite(n) || n <= 0) throw new Error("size must be positive");\n' +
+      '  const step = Math.floor(n);\n' +
+      '  const out = [];\n' +
+      '  for (let i = 0; i < arr.length; i += step) out.push(arr.slice(i, i + step));\n' +
+      '  return out;\n' +
+      '}',
   },
   {
     id: 'forge_run_length_encode',
@@ -172,6 +193,23 @@ export const FORGE_AGENDA: ForgeSpec[] = [
       'assert runLengthEncode("") === "";\n' +
       'assert runLengthEncode("abc") === "a1b1c1";\n' +
       'assert runLengthEncode("aaaa") === "a4";',
+    // Exact oracle: empty input yields "", and multi-code-unit characters are
+    // counted per code point (Array.from) rather than per UTF-16 unit.
+    reference:
+      'export function runLengthEncode(s) {\n' +
+      '  const chars = Array.from(String(s));\n' +
+      '  if (chars.length === 0) return "";\n' +
+      '  let out = "";\n' +
+      '  let run = chars[0];\n' +
+      '  let count = 1;\n' +
+      '  for (let i = 1; i < chars.length; i++) {\n' +
+      '    if (chars[i] === run) { count++; continue; }\n' +
+      '    out += run + count;\n' +
+      '    run = chars[i];\n' +
+      '    count = 1;\n' +
+      '  }\n' +
+      '  return out + run + count;\n' +
+      '}',
   },
   {
     id: 'forge_fibonacci_n',
@@ -185,6 +223,15 @@ export const FORGE_AGENDA: ForgeSpec[] = [
       'assert fibonacciN(1) === 1;\n' +
       'assert fibonacciN(10) === 55;\n' +
       'assert fibonacciN(20) === 6765;',
+    // Exact oracle. The suite stops at n=20; a naive double loop is exact there
+    // but silently rounds past n~78. BigInt keeps it exact for any n.
+    reference:
+      'export function fibonacciN(n) {\n' +
+      '  if (n < 0) throw new Error("n must be non-negative");\n' +
+      '  let a = 0n, b = 1n;\n' +
+      '  for (let i = 0; i < n; i++) { const t = a + b; a = b; b = t; }\n' +
+      '  return Number(a);\n' +
+      '}',
   },
   {
     id: 'forge_gcd_pair',
@@ -198,6 +245,16 @@ export const FORGE_AGENDA: ForgeSpec[] = [
       'assert gcdPair(17,5) === 1;\n' +
       'assert gcdPair(0,12) === 12;\n' +
       'assert gcdPair(100,0) === 100;',
+    // Exact oracle: Euclidean algorithm on BigInt. The suite's inputs are tiny;
+    // a `%`-based gcd on doubles is wrong once the operands exceed 2^53.
+    reference:
+      'export function gcdPair(a, b) {\n' +
+      '  let x = BigInt(a), y = BigInt(b);\n' +
+      '  if (x < 0n) x = -x;\n' +
+      '  if (y < 0n) y = -y;\n' +
+      '  while (y) { const t = x % y; x = y; y = t; }\n' +
+      '  return Number(x);\n' +
+      '}',
   },
   {
     id: 'forge_levenshtein',
@@ -259,6 +316,20 @@ export const FORGE_AGENDA: ForgeSpec[] = [
       'assert isBalanced("([)]") === false;\n' +
       'assert isBalanced("(") === false;\n' +
       'assert isBalanced("{[]}") === true;',
+    // Exact oracle: a stack, so nesting order is respected — "([)]" is false
+    // even though the counts match, which a counter-only implementation misses.
+    reference:
+      'export function isBalanced(s) {\n' +
+      '  const open = { "(": ")", "[": "]", "{": "}" };\n' +
+      '  const close = { ")": true, "]": true, "}": true };\n' +
+      '  const stack = [];\n' +
+      '  for (const ch of Array.from(String(s))) {\n' +
+      '    if (open[ch]) { stack.push(open[ch]); continue; }\n' +
+      '    if (!close[ch]) continue;\n' +
+      '    if (stack.pop() !== ch) return false;\n' +
+      '  }\n' +
+      '  return stack.length === 0;\n' +
+      '}',
   },
   {
     id: 'forge_merge_sorted',
@@ -345,6 +416,27 @@ export const FORGE_AGENDA: ForgeSpec[] = [
       'assert JSON.stringify(quickSort([])) === "[]";\n' +
       'assert JSON.stringify(quickSort([5, 5, 1])) === "[1,5,5]";\n' +
       'assert JSON.stringify(quickSort([9, 7, 8, 7])) === "[7,7,8,9]";',
+    // Exact oracle: non-mutating and median-pivot, so the worst case is
+    // O(n log n). A naive last-element pivot degrades to O(n^2) — invisible to
+    // the suite's tiny inputs but a real defect on real data.
+    reference:
+      'export function quickSort(arr) {\n' +
+      '  const a = arr.slice();\n' +
+      '  const swap = (i, j) => { const t = a[i]; a[i] = a[j]; a[j] = t; };\n' +
+      '  const sort = (lo, hi) => {\n' +
+      '    if (lo >= hi) return;\n' +
+      '    const mid = lo + ((hi - lo) >> 1);\n' +
+      '    swap(mid, hi);\n' +
+      '    const pivot = a[hi];\n' +
+      '    let store = lo;\n' +
+      '    for (let i = lo; i < hi; i++) if (a[i] < pivot) { swap(i, store); store++; }\n' +
+      '    swap(store, hi);\n' +
+      '    sort(lo, store - 1);\n' +
+      '    sort(store + 1, hi);\n' +
+      '  };\n' +
+      '  sort(0, a.length - 1);\n' +
+      '  return a;\n' +
+      '}',
   },
   {
     id: 'forge_flatten_deep',
@@ -357,6 +449,19 @@ export const FORGE_AGENDA: ForgeSpec[] = [
       'assert JSON.stringify(flattenDeep([1, [2, [3, [4]], 5]])) === "[1,2,3,4,5]";\n' +
       'assert JSON.stringify(flattenDeep([[], [[]]])) === "[]";\n' +
       'assert JSON.stringify(flattenDeep([1, 2, 3])) === "[1,2,3]";',
+    // Exact oracle: recurses into ARRAYS only. An implementation that also
+    // flattens strings or plain objects passes this suite and then silently
+    // corrupts data — the classic JS spread-on-string bug.
+    reference:
+      'export function flattenDeep(arr) {\n' +
+      '  const out = [];\n' +
+      '  const walk = (v) => {\n' +
+      '    if (Array.isArray(v)) { for (const x of v) walk(x); return; }\n' +
+      '    out.push(v);\n' +
+      '  };\n' +
+      '  walk(arr);\n' +
+      '  return out;\n' +
+      '}',
   },
   {
     id: 'forge_sieve_primes',
@@ -370,6 +475,21 @@ export const FORGE_AGENDA: ForgeSpec[] = [
       'assert JSON.stringify(sievePrimes(2)) === "[2]";\n' +
       'assert JSON.stringify(sievePrimes(1)) === "[]";\n' +
       'assert JSON.stringify(sievePrimes(20)) === "[2,3,5,7,11,13,17,19]";',
+    // Exact oracle: primes are integers with no float representation concern,
+    // but the sieve BOUNDS are — a float bound check misclassifies large n.
+    reference:
+      'export function sievePrimes(n) {\n' +
+      '  const limit = Number(n);\n' +
+      '  const out = [];\n' +
+      '  if (limit < 2) return out;\n' +
+      '  const sieve = new Uint8Array(limit + 1);\n' +
+      '  for (let i = 2; i <= limit; i++) {\n' +
+      '    if (sieve[i]) continue;\n' +
+      '    out.push(i);\n' +
+      '    for (let j = i * i; j <= limit; j += i) sieve[j] = 1;\n' +
+      '  }\n' +
+      '  return out;\n' +
+      '}',
   },
   {
     id: 'forge_power_mod',
@@ -383,6 +503,25 @@ export const FORGE_AGENDA: ForgeSpec[] = [
       'assert powerMod(3, 0, 5) === 1;\n' +
       'assert powerMod(5, 3, 13) === 8;\n' +
       'assert powerMod(10, 5, 7) === 5;',
+    // Exact oracle. The hidden suite's largest modulus is 1000, so a
+    // double-precision implementation passes it while returning a silently
+    // WRONG answer at 1e9+7 (factor*factor exceeds 2^53). That implementation
+    // was promoted once already. With this reference the differential and the
+    // large-magnitude scale probe both run, and the float version is rejected.
+    reference:
+      'export function powerMod(base, exp, mod) {\n' +
+      '  const m = BigInt(mod);\n' +
+      '  if (m <= 0n) throw new Error("mod must be positive");\n' +
+      '  let result = 1n % m;\n' +
+      '  let factor = ((BigInt(base) % m) + m) % m;\n' +
+      '  let e = BigInt(exp);\n' +
+      '  while (e > 0n) {\n' +
+      '    if (e % 2n === 1n) result = (result * factor) % m;\n' +
+      '    factor = (factor * factor) % m;\n' +
+      '    e = e / 2n;\n' +
+      '  }\n' +
+      '  return Number(result);\n' +
+      '}',
   },
   {
     id: 'forge_backoff',
@@ -514,6 +653,12 @@ export function forgeSpecById(id: string): ForgeSpec | undefined {
 // MODEL_* -> the API default. When FORGE_MODEL_BASE_URL points at a loopback
 // endpoint it uses the local profile (the MiniCPM5 model via llama-server),
 // reporting offline honestly unless LOCAL_MODEL_BASE_URL is configured.
+//
+// The chain deliberately does NOT consult LOCAL_MODEL_*: the forge pins its own
+// endpoint, and falling through to the API profile is what produced 58
+// consecutive `HTTP 401: plan tier does not include API access` ledger entries
+// while a working llama-server sat unused on :11434. To use the local model,
+// set FORGE_MODEL_BASE_URL to its /v1 URL explicitly.
 export function forgeConfig() {
   const base = (
     process.env.FORGE_MODEL_BASE_URL ||
@@ -537,6 +682,22 @@ export function forgeConfig() {
   };
 }
 
+/**
+ * Is the forge's pinned endpoint REACHABLE?
+ *
+ * This is a cheap `GET /models` reachability check, deliberately NOT a
+ * generation probe. It runs at the top of every forge attempt, so a probe that
+ * spends a real completion here would (a) double the model's calls on the hot
+ * path and (b) — as the forge-quality tests caught — consume a stubbed reply
+ * before the real candidate is generated.
+ *
+ * Reachable-but-unusable (a gateway that answers /models but rejects the key on
+ * chat) is a real state and it used to be invisible. It is now reported, just
+ * not from here: a generation that fails carries the server's own message into
+ * the ledger ("HTTP 401: plan tier does not include API access"), and the
+ * operator readout runs the deep usability probe explicitly. Both paths report
+ * the truth; neither pays for it on every attempt.
+ */
 async function forgeOnline(_force = false): Promise<boolean> {
   const cfg = forgeConfig();
   const controller = new AbortController();
@@ -570,6 +731,12 @@ async function forgeChat(
   content: string | null;
   offline?: boolean;
   error?: string;
+  /**
+   * Set when a pinned FORGE_MODEL_BASE_URL was unusable and the shared
+   * generation policy answered instead. Recorded in the ledger so a tool built
+   * by a different model than the pin intended is never invisible.
+   */
+  fellBackFrom?: string;
 }> {
   const cfg = forgeConfig();
   // Explicit FORGE_MODEL_BASE_URL wins (profile matched by base URL). Otherwise
@@ -588,6 +755,29 @@ async function forgeChat(
     ? await chatCompleteProfile(forgeTargetsLocal ? 'local' : 'api', messages, chatOpts)
     : await skillAwareChat(messages, chatOpts, user);
   if (!res.ok || res.content === null) {
+    // A pinned forge endpoint that is quota-blocked or down must not stall the
+    // whole loop. Falling back is recorded, never silent: `fellBackFrom` names
+    // the endpoint that was skipped and why, and the caller writes it into the
+    // ledger so a run built by a different model than intended is visible.
+    const recoverable =
+      res.status === 'offline' ||
+      /402|429|insufficient|quota|credit|rate.?limit|too many requests/i.test(res.error ?? '');
+    if (explicitForge && recoverable) {
+      const fallback = await skillAwareChat(messages, { ...chatOpts, cache: false as const }, user);
+      if (fallback.ok && fallback.content !== null) {
+        return {
+          ok: true,
+          content: fallback.content,
+          fellBackFrom: `${cfg.baseUrl} (${res.error ?? res.status})`,
+        };
+      }
+      return {
+        ok: false,
+        content: null,
+        offline: fallback.status === 'offline',
+        error: `pinned endpoint ${cfg.baseUrl} unusable (${res.error ?? res.status}); fallback also failed: ${fallback.error ?? fallback.status}`,
+      };
+    }
     return {
       ok: false,
       content: null,
@@ -670,10 +860,28 @@ export async function generateForgeSource(spec: ForgeSpec, builder?: ForgeBuilde
   source?: string;
   offline?: boolean;
   error?: string;
+  /** Set when the pinned forge endpoint was skipped in favour of the shared
+   *  generation policy (quota-blocked or down). Recorded in the ledger. */
+  fellBackFrom?: string;
 }> {
   const online = await forgeOnline();
   if (!online) {
     return { ok: false, offline: true, error: `forge model endpoint unreachable (${forgeConfig().baseUrl})` };
+  }
+
+  // A loopback FORGE_MODEL_BASE_URL routes to the LOCAL llama.cpp profile. If
+  // the local profile has no endpoint configured, generation cannot succeed
+  // there — report offline rather than issuing a doomed call. (Distinct from
+  // an endpoint that is merely down: this is a configuration that cannot work.)
+  const forgeTargetsLocal = /:\/\/(127\.0\.0\.1|localhost|\[::1\]|0\.0\.0\.0|host\.docker\.internal)(:|\/)/i.test(
+    forgeConfig().baseUrl,
+  );
+  if (forgeTargetsLocal && !(process.env.LOCAL_MODEL_BASE_URL || '').trim()) {
+    return {
+      ok: false,
+      offline: true,
+      error: `forge targets the local llama.cpp profile (${forgeConfig().baseUrl}) but LOCAL_MODEL_BASE_URL is not configured`,
+    };
   }
   const isClass = spec.kind === 'class';
   // The Builder Brain can override the code-writing instructions + temperature so
@@ -714,7 +922,7 @@ export async function generateForgeSource(spec: ForgeSpec, builder?: ForgeBuilde
   if (source.length < 10) {
     return { ok: false, error: 'model returned unusable (near-empty) source' };
   }
-  return { ok: true, source };
+  return { ok: true, source, fellBackFrom: res.fellBackFrom };
 }
 
 /** Real verification of a source against a reference suite (sandbox). */
@@ -857,6 +1065,12 @@ export async function attemptForgeSpec(
     // identical re-rolls (and remain cache-distinct when caching is on).
     const attemptBuilder = lastFailure ? { ...builder, feedback: lastFailure } : builder;
     const gen = await generateForgeSource(spec, attemptBuilder);
+    // A build answered by the fallback rather than the pinned endpoint is
+    // recorded in the ledger, so "which model actually wrote this" is always
+    // answerable from the ledger instead of guessed at.
+    if (gen.ok && gen.fellBackFrom) {
+      failures.push({ attempt, note: `model fallback: ${gen.fellBackFrom}` });
+    }
     if (!gen.ok) {
       lastFailure = gen.error || 'generate returned no source';
       failures.push({ attempt, note: gen.offline ? `offline: ${gen.error}` : `generate error: ${gen.error}` });

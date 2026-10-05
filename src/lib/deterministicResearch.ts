@@ -197,7 +197,15 @@ function normalizeDoi(doi: string | undefined): string {
 // STRING SIMILARITY (Levenshtein ratio)
 // ============================================================================
 
-export function levenshteinDistance(a: string, b: string): number {
+/**
+ * Reference implementation — the contract, and the fallback.
+ *
+ * Kept as the definition of correct behaviour rather than deleted, because
+ * `adoptForgeLevenshtein` below proves the generated tool equals THIS before the
+ * tool is allowed to answer a single query. A consumer with no proof to check
+ * against has no way to adopt generated code at all.
+ */
+export function referenceLevenshteinDistance(a: string, b: string): number {
   if (a === b) return 0;
   if (a.length === 0) return b.length;
   if (b.length === 0) return a.length;
@@ -219,6 +227,141 @@ export function levenshteinDistance(a: string, b: string): number {
     for (let j = 0; j <= b.length; j++) prev[j] = curr[j];
   }
   return prev[b.length];
+}
+
+// The implementation actually used. Swapped for the forge-built tool only after
+// an equivalence proof; see `adoptForgeLevenshtein`.
+let levenshteinImpl: (a: string, b: string) => number = referenceLevenshteinDistance;
+
+/** The forge tool this module is willing to adopt. */
+export const LEVENSHTEIN_TOOL = 'levenshteinDistance';
+
+export type LevenshteinAdoption =
+  | { status: 'adopted'; tool: string; hash: string; vectors: number; verifiedByManifest: boolean; detail: string }
+  | { status: 'rejected'; tool: string; reason: string; vectors: number }
+  | { status: 'unavailable'; tool: string; reason: string }
+  | { status: 'pending'; tool: string; detail: string };
+
+let adoption: LevenshteinAdoption = { status: 'pending', tool: LEVENSHTEIN_TOOL, detail: 'not attempted yet' };
+
+export function levenshteinAdoption(): LevenshteinAdoption {
+  return adoption;
+}
+
+/** Public state for the health readout: which implementation is answering. */
+export function levenshteinImplementation(): { source: 'forge_tool' | 'local_reference'; detail: string } {
+  return levenshteinImpl === referenceLevenshteinDistance
+    ? { source: 'local_reference', detail: adoption.status === 'pending' ? 'forge tool not loaded' : JSON.stringify(adoption) }
+    : { source: 'forge_tool', detail: JSON.stringify(adoption) };
+}
+
+export function levenshteinDistance(a: string, b: string): number {
+  return levenshteinImpl(a, b);
+}
+
+/**
+ * Equivalence vectors: the forge suite's own assertions plus the edge cases a
+ * research title actually contains (empty sides, unicode, case, length
+ * asymmetry, repeated characters). A tool that matches on all of these is
+ * treated as the same function; one that does not is refused, not averaged.
+ */
+const LEVENSHTEIN_EQUIVALENCE_VECTORS: Array<[string, string]> = [
+  ['kitten', 'sitting'],
+  ['flaw', 'lawn'],
+  ['', 'abc'],
+  ['same', 'same'],
+  ['a', 'b'],
+  ['', ''],
+  ['abc', ''],
+  ['Deterministic Web Research', 'deterministic web research'],
+  ['A study of CRISPR-Cas9 mediated editing', 'A study of CRISPR-Cas9 mediated editing in wheat'],
+  ['mémoire', 'memoire'],
+  ['日本語のタイトル', '日本語タイトル'],
+  ['aaaaaaaa', 'aaaa'],
+  ['x', 'x'.repeat(200)],
+  ['The quick brown fox', 'The quick brown fx'],
+  ['-', '—'],
+];
+
+/**
+ * The adoption gate itself, as a pure function so it can be tested against a
+ * deliberately wrong implementation: returns a description of the first
+ * disagreement, or null when the candidate matches the reference everywhere.
+ */
+export function checkLevenshteinEquivalence(
+  candidate: (a: string, b: string) => number,
+  vectors: Array<[string, string]> = LEVENSHTEIN_EQUIVALENCE_VECTORS,
+): string | null {
+  for (const [a, b] of vectors) {
+    let got: number;
+    try {
+      got = Number(candidate(a, b));
+    } catch (err: any) {
+      return `threw on (${JSON.stringify(a)}, ${JSON.stringify(b)}): ${err?.message || String(err)}`;
+    }
+    const want = referenceLevenshteinDistance(a, b);
+    if (got !== want) return `(${JSON.stringify(a)}, ${JSON.stringify(b)}) -> ${got}, expected ${want}`;
+  }
+  return null;
+}
+
+/**
+ * Make the forge-built `levenshteinDistance` the implementation this module
+ * uses, but only after proving it agrees with the reference on every
+ * equivalence vector.
+ *
+ * WHY ADOPT A GENERATED TOOL HERE AT ALL
+ * This function was a second hand-rolled copy of an algorithm the capability
+ * forge already generates and verifies, and it is on a live path: the science
+ * conductor's evidence phase runs `dedupSources` every cycle, where a wrong
+ * distance silently merges two different papers (one evidence source vanishes
+ * from the findings) or fails to merge the same paper twice. So this is the
+ * first place where a forge-built tool is load-bearing rather than displayed —
+ * and the equivalence gate is what makes that safe rather than brave.
+ *
+ * Idempotent: repeated calls reuse the first outcome unless `force` is set.
+ * A tool that cannot be imported (absent, quarantined, hash mismatch, unsafe
+ * in-process) leaves the reference implementation in place and says so.
+ */
+export async function adoptForgeLevenshtein(opts: { force?: boolean } = {}): Promise<LevenshteinAdoption> {
+  const tool = LEVENSHTEIN_TOOL;
+  if (!opts.force && adoption.status === 'adopted') return adoption;
+  const { loadSelfHostedEntrypoint } = await import('./selfHosting.js');
+  const loaded = await loadSelfHostedEntrypoint(tool);
+  if (!loaded) {
+    adoption = { status: 'unavailable', tool, reason: 'no importable self-hosted module (missing, quarantined, or refused by the in-process safety screen)' };
+    return adoption;
+  }
+  const disagree = checkLevenshteinEquivalence(loaded.fn as (a: string, b: string) => number);
+  if (disagree) {
+    adoption = { status: 'rejected', tool, reason: `disagrees with the reference implementation: ${disagree}`, vectors: LEVENSHTEIN_EQUIVALENCE_VECTORS.length };
+    return adoption;
+  }
+    levenshteinImpl = loaded.fn as (a: string, b: string) => number;
+  // Record this as a real consumption in the tool-value ledger: the science loop
+  // adopted and is about to depend on a forge-built tool. Without this, the
+  // usefulness signal scores the only genuinely load-bearing tool as 0 and the
+  // saturation gate classifies the best asset as dead weight (D2).
+      try {
+        const { toolValueLedger } = await import('./toolValueLedger.js');
+        toolValueLedger().noteInvocation(LEVENSHTEIN_TOOL, { consumerKind: 'internal' });
+        toolValueLedger().noteConsumption(LEVENSHTEIN_TOOL, 'scienceConductor.runScienceCycle', { consumerKind: 'internal' });
+      } catch { /* ledger must never block adoption */ }
+      adoption = {
+    status: 'adopted',
+    tool,
+    hash: loaded.hash,
+    vectors: LEVENSHTEIN_EQUIVALENCE_VECTORS.length,
+    verifiedByManifest: loaded.verified,
+    detail: `${loaded.detail}; agreed with the reference on all ${LEVENSHTEIN_EQUIVALENCE_VECTORS.length} equivalence vectors`,
+  };
+  return adoption;
+}
+
+/** Test seam: restore the reference implementation. */
+export function resetForgeLevenshtein(): void {
+  levenshteinImpl = referenceLevenshteinDistance;
+  adoption = { status: 'pending', tool: LEVENSHTEIN_TOOL, detail: 'not attempted yet' };
 }
 
 /** Levenshtein similarity ratio in [0,1]. */

@@ -502,6 +502,51 @@ async function importSelfHostedModule(
 }
 
 /**
+ * Load a self-hosted tool's ENTRYPOINT as a plain callable, once.
+ *
+ * WHY THIS EXISTS
+ * `executeSelfHostedTool` pays a sandbox round-trip per call, which is right for
+ * occasional invocation and wrong for a hot inner loop: the research dedup stage
+ * compares every candidate source against every kept source, so hundreds to
+ * thousands of comparisons per cycle. Calling the tool through the sandbox there
+ * would be a straight performance regression dressed up as dogfooding.
+ *
+ * This loader imports the module once (behind the same in-process safety screen
+ * and manifest-hash check `verifySelfHostedEntry` uses) and hands back the bare
+ * function, so the loop pays one import, not one sandbox per comparison.
+ *
+ * It deliberately does NOT vouch for correctness. A caller that adopts the
+ * returned function is responsible for an equivalence check against its own
+ * reference (see `adoptForgeLevenshtein` in deterministicResearch.ts) — an
+ * imported tool is unverified code until proven equal to what it replaces.
+ */
+export async function loadSelfHostedEntrypoint(
+  name: string,
+  root: string = defaultSelfHostRoot()
+): Promise<{ fn: (...args: any[]) => any; hash: string; source: string; verified: boolean; detail: string } | null> {
+  const entry = getSelfHostedEntry(name, root);
+  if (!entry) return null;
+  if (selfHostSafetyError(entry.sourceCode ?? '')) return null;
+  const absFile = path.join(root, entry.file);
+  if (!fs.existsSync(absFile)) return null;
+  let mod: any;
+  try {
+    mod = await importSelfHostedModule(entry, root);
+  } catch {
+    return null;
+  }
+  const fn = mod?.[entry.entrypointName];
+  if (typeof fn !== 'function') return null;
+  return {
+    fn: fn as (...args: any[]) => any,
+    hash: entry.hash,
+    source: entry.sourceCode ?? '',
+    verified: entry.lastVerified?.passed === true,
+    detail: `imported ${entry.file} (manifest hash matched, in-process safety screen passed)`,
+  };
+}
+
+/**
  * Verifies one entry honestly: module file exists, module dynamically imports
  * and exposes the adapter, and the stored test suite passes against the stored
  * source.

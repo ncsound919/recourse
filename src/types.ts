@@ -20,8 +20,27 @@ export interface ToolVersion {
   promoted: boolean;
   verifier_notes: string;
   source_code?: string;
-  test_suite_code?: string;
+test_suite_code?: string;
   isRepaired?: boolean;
+  /**
+   * Verdict from the promoted-tool quality audit (src/lib/promotedAudit.ts).
+   *
+   * Its presence is the difference between "this tool passed its suite" and
+   * "this tool passed its suite AND the forge quality gate" â€” the gap that let
+   * a wrong `powerMod` report healthy indefinitely. Keyed by source hash, so a
+   * stale verdict is never trusted for changed code.
+   */
+  quality_audit?: {
+    sourceHash: string;
+    gateOk: boolean;
+    score: number;
+    reasons: string[];
+    /** Strongest evidence actually gathered; `suite` = asserts only. */
+    evidence: 'differential' | 'scale' | 'probes' | 'suite' | 'none';
+    /** False when the version could not be judged at all (cached to avoid re-running). */
+    audited: boolean;
+    at: number;
+  };
 }
 
 export interface ToolEntry {
@@ -362,21 +381,21 @@ export interface SelfRepairStatus {
   totalHealedCount: number;
   activeAnomaliesCount: number;
   meanTimeToRepairMs: number;
-  /** verified / (verified + regressed) — verified outcomes only, not heal claims. */
+  /** verified / (verified + regressed) â€” verified outcomes only, not heal claims. */
   repairSuccessRate: number;
   /** Heals confirmed by a later re-verify. */
   verifiedRepairs?: number;
   /** Heals awaiting re-verify. */
   pendingRepairs?: number;
-  /** Heals that passed once and failed a later re-verify — counted as failures. */
+  /** Heals that passed once and failed a later re-verify â€” counted as failures. */
   regressedRepairs?: number;
-  /** Smoke-only heals (no regression suite) — excluded from the rate. */
+  /** Smoke-only heals (no regression suite) â€” excluded from the rate. */
   unverifiableRepairs?: number;
   /** Every repair attempt: healed, verifier-failed, or smoke-only. Persisted
    *  with the rest of status, so a restart cannot silently reset the
    *  denominator behind "we healed N tools". */
   repairAttempts?: number;
-  /** Attempts that never earned a verified heal — the verifier rejected the
+  /** Attempts that never earned a verified heal â€” the verifier rejected the
    *  patch, or it only passed a smoke check with no regression suite. */
   unverifiedRepairAttempts?: number;
   lastHealedTool?: string;
@@ -584,7 +603,26 @@ export interface SystemStatus {
   totalUpgrades: number;
   verifierPassRate: number;
   hashChainIntegrity: boolean;
+  /**
+   * True when the provenance chain holds zero events, so `hashChainIntegrity`
+   * reflects "nothing to verify" rather than a passed check.
+   */
+  hashChainUnverified?: boolean;
   registeredToolsCount: number;
+  /**
+   * Three-tier registry executability. A binary reading is dangerous here:
+   * it labelled 1,199 working tools as inert because the registry name did not
+   * match the exported symbol. 
+otExecutable must trend to zero.
+   */
+  registryExecutability?: {
+    invocableByName: number;
+    nameLinkActivated: number;
+    notExecutable: number;
+    executableTotal: number;
+    total: number;
+    selfHostedVerified: number;
+  };
   pendingApprovalsCount: number;
   lastTickTime: number;
   aiStudioModel: string;
@@ -613,15 +651,15 @@ export interface SystemStatus {
   // Structural Forge
   artifacts?: StructuralArtifact[];
   
-  // Deterministic Mathematical Loop — the recursive-math convergence score.
+  // Deterministic Mathematical Loop â€” the recursive-math convergence score.
   // NOT a capability score (see capabilityReadiness / readinessBasis).
   readinessScore?: number;
   readinessBasis?: string;
-  /** P1.7: mean(benchmark solved%, verified-repair rate) — a movable capability number. */
+  /** P1.7: mean(benchmark solved%, verified-repair rate) â€” a movable capability number. */
   capabilityReadiness?: number;
   capabilityBasis?: string;
 
-  // Real, durable progress (measured artifacts — NOT the self-consistent
+  // Real, durable progress (measured artifacts â€” NOT the self-consistent
   // readiness number). What the UI should treat as "development".
   realProgress?: {
     registeredTools: number;
@@ -629,9 +667,39 @@ export interface SystemStatus {
     forgeMaterialized: number;
     healedTools: number;
     benchmarkSolved: number;
-    benchmarkTotal: number;
+benchmarkTotal: number;
     verifierPassRate: number;
     openAnomalies: number;
+  };
+  /** Promoted-tool quality audit coverage. `pending` is the honest number:
+   *  a promoted tool that has not been through the gate is not verified. */
+  promotedQualityAudit?: {
+    considered: number;
+    audited: number;
+    cached: number;
+    passed: number;
+    failed: number;
+    pending: number;
+    notAuditable: number;
+    suiteOnly: number;
+    lastRunAt: number;
+    /**
+     * Standing exposure of the promoted registry to the ENHANCED gate.
+     *
+     * `suiteOnly` (here) is the audited-but-weak subset for THIS run; `coverage`
+     * is the whole-registry picture. A large `coverage.enhancedCovered` gap means
+     * most promoted tools still derive their health from the old weak gate.
+     */
+    coverage?: {
+      total: number;
+      differential: number;
+      scale: number;
+      probes: number;
+      suiteOnly: number;
+      unaudited: number;
+      enhancedCovered: number;
+    };
+    failures: Array<{ tool: string; version: string; reasons: string[] }>;
   };
 }
 
@@ -680,11 +748,11 @@ export type ComponentTemplateCategory =
 /**
  * What a self-hosted template output becomes at runtime. `function` is the
  * original JSON-callable method adapter. The others add a transport:
- *  - `cli`   — runnable subcommands
- *  - `api`   — mounted HTTP routes
- *  - `mcp`   — JSON-RPC tool server (Model Context Protocol style)
- *  - `a2a`   — Agent-to-Agent JSON-RPC endpoint with a capability card
- *  - `loop`  — supervised periodic worker emitting heartbeats into the ledger
+ *  - `cli`   â€” runnable subcommands
+ *  - `api`   â€” mounted HTTP routes
+ *  - `mcp`   â€” JSON-RPC tool server (Model Context Protocol style)
+ *  - `a2a`   â€” Agent-to-Agent JSON-RPC endpoint with a capability card
+ *  - `loop`  â€” supervised periodic worker emitting heartbeats into the ledger
  */
 export type ArtifactKind = 'function' | 'cli' | 'api' | 'mcp' | 'a2a' | 'loop';
 

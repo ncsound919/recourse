@@ -101,6 +101,37 @@ export function resolveBundleDir(root: string, name: string): { ok: true; dir: s
   return { ok: true, dir };
 }
 
+/**
+ * Is this directory one of our bundles, and is it the one we think it is?
+ *
+ * The old gate was "has a package.json" — which is exactly what a real project
+ * has, so `overwrite: true` aimed at a project name deleted the project. This
+ * requires the marker ONLY the scaffolder writes, and requires its recorded name
+ * to match. A project with a package.json but no `plugin.manifest.json` is now
+ * untouchable.
+ */
+function isScaffoldedBundle(dir: string, packageName: string): { ok: true } | { ok: false; reason: string } {
+  const manifestPath = path.join(dir, 'plugin.manifest.json');
+  if (!fs.existsSync(manifestPath)) {
+    return {
+      ok: false,
+      reason: `refusing to overwrite ${dir}: it has no plugin.manifest.json, so it was not produced by this scaffolder`,
+    };
+  }
+  try {
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as { name?: unknown };
+    if (manifest.name !== packageName) {
+      return {
+        ok: false,
+        reason: `refusing to overwrite ${dir}: its manifest names "${String(manifest.name)}", not "${packageName}"`,
+      };
+    }
+  } catch (error) {
+    return { ok: false, reason: `refusing to overwrite ${dir}: its manifest is unreadable (${error instanceof Error ? error.message : String(error)})` };
+  }
+  return { ok: true };
+}
+
 export interface ScaffoldOptions {
   /** Root the bundle is written under. Defaults to {@link scaffoldRoot}. */
   readonly root?: string;
@@ -141,17 +172,8 @@ export function scaffoldDshPlugin(spec: DshPluginSpec, opts: ScaffoldOptions = {
         errors: [`${dir} already exists; pass overwrite to replace it`],
       };
     }
-    // Only ever remove something that is recognisably a bundle, so an
-    // `overwrite` pointed at the wrong directory cannot delete a real project.
-    const marker = path.join(dir, 'plugin.manifest.json');
-    const pkg = path.join(dir, 'package.json');
-    if (!fs.existsSync(marker) && !fs.existsSync(pkg)) {
-      return {
-        ok: false,
-        reason: 'write-failed',
-        errors: [`refusing to overwrite ${dir}: it exists but carries no package.json or plugin.manifest.json`],
-      };
-    }
+    const owned = isScaffoldedBundle(dir, normalized.packageName);
+    if (!owned.ok) return { ok: false, reason: 'write-failed', errors: [owned.reason] };
   }
 
   const files = renderDshBundle(normalized);
@@ -263,11 +285,8 @@ export function removeScaffoldedBundle(
   const resolved = resolveBundleDir(root, name);
   if (!resolved.ok) return { ok: false, error: resolved.errors.join('; ') };
   if (!fs.existsSync(resolved.dir)) return { ok: false, error: `no such bundle: ${name}` };
-  const marker = path.join(resolved.dir, 'plugin.manifest.json');
-  const pkg = path.join(resolved.dir, 'package.json');
-  if (!fs.existsSync(marker) && !fs.existsSync(pkg)) {
-    return { ok: false, error: `refusing to remove ${resolved.dir}: it carries no package.json or plugin.manifest.json` };
-  }
+  const owned = isScaffoldedBundle(resolved.dir, name);
+  if (!owned.ok) return { ok: false, error: owned.reason };
   fs.rmSync(resolved.dir, { recursive: true, force: true });
   return { ok: true, removed: resolved.dir };
 }

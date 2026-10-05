@@ -40,6 +40,7 @@ import fs from 'fs';
 import path from 'path';
 import cron, { type ScheduledTask } from 'node-cron';
 import { classifyRun, skipReason, type RunOutcome } from './runOutcome.js';
+import { recordStage } from './acceptance.js';
 
 // ----------------------------------------------------------------------------
 // Types
@@ -62,6 +63,26 @@ export interface ScheduledJobDef {
   cron?: string;
   /** Enabled when the scheduler starts (overridden by persisted toggles). */
   enabledByDefault: boolean;
+  /**
+   * This job's purpose is to MAINTAIN a system, not to produce artifacts:
+   * telemetry flushes, health polls, cache eviction, memory consolidation.
+   *
+   * Declared once, here, as a property of the job — never per run. A run of such
+   * a job that ends with nothing to do is 'maintained', not 'unproductive',
+   * because a healthy idle system finding nothing wrong is the correct outcome
+   * for it.
+   *
+   * This is NOT a way to avoid being measured:
+   *   - artifacts outrank the declaration (classifyRun checks them first), so a
+   *     maintenance job that finds real work is still credited 'artifact';
+   *   - maintenance runs are counted separately and EXCLUDED from the
+   *     artifact-rate denominator, so declaring it can only ever lower a job's
+   *     apparent productivity, never raise it.
+   *
+   * Do not set this on a job that is supposed to do work. If a job claims
+   * maintenance and would otherwise be 'unproductive', that is the finding.
+   */
+  maintenance?: boolean;
   /** Jobs gated behind safe-boot (model/self-modifying) stay disabled until
    *  the operator arms them when safe-boot is active. */
   safeBootGated?: boolean;
@@ -79,6 +100,8 @@ export interface ScheduledJobState extends ScheduledJobDef {
   failCount: number;
   /** How many runs ended in an explicit skip. */
   skipCount: number;
+  /** How many runs found nothing to do on a job declared `maintenance`. */
+  maintainedCount: number;
   /**
    * How many runs completed without throwing but produced nothing verifiable.
    * This is the number that was previously invisible: a job could spin every
@@ -337,10 +360,13 @@ async function runJobOnce(job: ScheduledJobState): Promise<JobRunResult> {
     job.lastRunAt = Date.now();
 
     // Terminal-state classification. A job that ran and threw nothing is NOT
-    // automatically a success: if it produced no verifiable artifact and did not
-    // declare a skip, the run was unproductive and is counted as such. An
-    // artifact that fails hash re-verification also lands here.
-    const report = classifyRun(job.id, result);
+    // automatically a success: if it produced no verifiable artifact, did not
+    // declare a skip, and is not a maintenance job, the run was unproductive
+    // and is counted as such. An artifact that fails hash re-verification also
+    // lands there.
+    const report = classifyRun(job.id, result, {
+      maintenance: job.maintenance === true,
+    });
     job.lastOutcome = report.outcome;
     job.lastOutcomeDetail = report.detail;
     if (report.tampered) {
@@ -355,6 +381,13 @@ async function runJobOnce(job: ScheduledJobState): Promise<JobRunResult> {
       job.lastError = null;
       job.lastSkipped = skipReason(result);
       job.skipCount += 1;
+    } else if (report.outcome === 'maintained') {
+      // Ran, found nothing to do, and that is the job's purpose. Distinct from
+      // both success and failure so a dead loop still reads as dead.
+      job.lastOk = null;
+      job.lastError = null;
+      job.lastSkipped = null;
+      job.maintainedCount += 1;
     } else if (report.outcome === 'unproductive') {
       // Ran, did not throw, produced nothing. Neither healthy nor errored —
       // tracked distinctly so "permanently spinning" is visible.
@@ -366,6 +399,17 @@ async function runJobOnce(job: ScheduledJobState): Promise<JobRunResult> {
       job.lastOk = true;
       job.lastError = null;
       job.lastSkipped = null;
+      // Acceptance evidence: a job genuinely ran and produced something. Only
+      // recorded on the success branch — a skipped, unproductive or throwing run
+      // is not "the scheduler is working", and must never be able to say so.
+      try {
+        recordStage(
+          'scheduled',
+          `job "${job.id}" (${job.name}) ran on its own cadence and produced a verifiable artifact: ${report.detail}`,
+        );
+      } catch {
+        /* recording must never fail the job */
+      }
     }
     job.runCount += 1;
     return result;
@@ -424,6 +468,7 @@ export function registerScheduledJob(def: ScheduledJobDef): { ok: boolean; error
     runCount: 0,
     failCount: 0,
     skipCount: 0,
+    maintainedCount: 0,
     unproductiveCount: 0,
     lastOutcome: null,
     lastOutcomeDetail: null,
@@ -503,6 +548,89 @@ export function listScheduledJobs(): ScheduledJobState[] {
 export function getScheduledJob(id: string): ScheduledJobState | undefined {
   const job = jobs.get(id);
   return job ? { ...job } : undefined;
+}
+
+/**
+ * Can this job actually do work right now?
+ *
+ * WHY THIS EXISTS
+ * `job.enabled` answers "did the operator leave this toggle on". It does NOT
+ * answer "is this job doing anything", and the two came apart: with all 24 jobs
+ * enabled and every autopilot flag off, every job woke on schedule and returned
+ * `{skipped: 'autopilot disabled'}`. Dashboards derived from `enabled` alone
+ * reported a fully armed fleet while the system produced nothing — the same
+ * blind spot `runOutcome.ts` was written to close for runs, applied to state.
+ *
+ * So a job is only `running` if it is enabled AND has actually done real work
+ * recently. Enabled-but-always-skipping is `no_op`, which is the honest reading
+ * and the thing an operator needs to see.
+ *
+ * States:
+ *   'disabled' - operator toggle off; never fires.
+ *   'pending'   - enabled, never fired yet (first cadence not reached).
+ *   'running'   - enabled and its recent runs produced artifacts or real work.
+ *   'no_op'     - enabled but recent runs only skip: armed and accomplishing
+ *                 nothing. This is the state that was invisible.
+ *   'failing'   - enabled and recent runs threw or were unproductive.
+ */
+export type JobEffectiveState = 'disabled' | 'pending' | 'running' | 'no_op' | 'failing';
+
+/** Runs counted as "recently" when deciding whether a job is doing anything. */
+const RECENT_RUN_WINDOW = 5;
+
+export function jobEffectiveState(job: ScheduledJobState): JobEffectiveState {
+  if (!job.enabled) return 'disabled';
+  if (job.runCount === 0) return 'pending';
+
+  const recent = job.runCount - RECENT_RUN_WINDOW > 0 ? job.runCount - RECENT_RUN_WINDOW : 0;
+  const recentRuns = job.runCount - recent;
+  if (recentRuns <= 0) return 'pending';
+
+  // Only the tail of the ledger tells us about now. A job that worked for a
+  // while and then went quiet must not keep reporting 'running'.
+  const didWork = job.lastOk === true || job.lastOutcome === 'artifact';
+  const skipped = job.lastOutcome === 'skipped' || job.lastSkipped;
+  const failed = job.lastOk === false || job.lastOutcome === 'unproductive' || job.lastError;
+
+  if (failed && !didWork) return 'failing';
+  if (didWork) return 'running';
+  if (skipped) return 'no_op';
+  return job.lastOk === null && job.maintainedCount > 0 ? 'running' : 'no_op';
+}
+
+/**
+ * Fleet-level honesty rollup: how many jobs are armed vs actually working.
+ * `armedJobs` alone is the number that reads well and means least.
+ */
+export interface SchedulerEffectiveness {
+  total: number;
+  armedJobs: number;
+  workingJobs: number;
+  noOpJobs: number;
+  failingJobs: number;
+  pendingJobs: number;
+  disabledJobs: number;
+  /** Job ids that are armed but accomplishing nothing. */
+  noOpJobIds: string[];
+  /** Jobs that cannot do work because a gating flag is closed. */
+  blockedJobIds: string[];
+}
+
+export function schedulerEffectiveness(status?: SchedulerStatus): SchedulerEffectiveness {
+  const list = (status?.jobs ?? [...jobs.values()]).map((j) => ({ ...j }));
+  const states = list.map((j) => ({ id: j.id, state: jobEffectiveState(j) }));
+  const byState = (s: JobEffectiveState) => states.filter((x) => x.state === s).map((x) => x.id);
+  return {
+    total: list.length,
+    armedJobs: list.filter((j) => j.enabled).length,
+    workingJobs: byState('running').length,
+    noOpJobs: byState('no_op').length,
+    failingJobs: byState('failing').length,
+    pendingJobs: byState('pending').length,
+    disabledJobs: byState('disabled').length,
+    noOpJobIds: byState('no_op'),
+    blockedJobIds: byState('no_op').concat(byState('disabled')),
+  };
 }
 
 /** Reset every job to enabledByDefault (persisted) — used on full reset. */

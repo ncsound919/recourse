@@ -14,11 +14,18 @@
  * fabricates a decomposition, changepoint, or burst, and never pretends the
  * analysis ran when the service is down.
  *
- * Env: TREND_SIDECAR_URL (default http://127.0.0.1:8800).
+ * Env: TREND_SIDECAR_URL (default http://127.0.0.1:8810).
+ *
+ * Port 8810, NOT 8800. Three services claimed 8800: this sidecar, an external
+ * `sympy_service.py` (which actually holds it), and `KAG_SIDECAR_DEFAULT_URL`
+ * in kagSidecarClient.ts. Only one can bind, so the trend sidecar could never
+ * start — and because `trendHealth` used to accept any HTTP 200, the unrelated
+ * service answering on 8800 made the trend engine look ONLINE. Keep this in sync
+ * with `python/trend_service/main.py`.
  */
 
 export const TREND_SIDECAR_DEFAULT_URL =
-  process.env.TREND_SIDECAR_URL || 'http://127.0.0.1:8800';
+  process.env.TREND_SIDECAR_URL || 'http://127.0.0.1:8810';
 
 export interface TrendSeriesInput {
   id: string;
@@ -136,10 +143,51 @@ async function callTrend<T>(
   }
 }
 
-/** Health check — used by status routes so the UI can report sidecar online. */
+/**
+ * Health check — used by status routes so the UI can report sidecar online.
+ *
+ * Identity is verified, not assumed. A bare HTTP 200 is NOT sufficient evidence
+ * that the trend engine is reachable: this default port is contested, and at the
+ * time of writing `GET /health` on 8800 answered
+ * `{ status: "ok", service: "sympy", sympy_version: "1.14.0" }` — a different
+ * sidecar entirely, with neither statsmodels nor ruptures. Returning ok on that
+ * made every status route report the trend engine online and defeated the
+ * `if (!h.ok) return` fail-soft guard in tests/trendEngine.test.ts, which then
+ * failed deep inside `trendDecompose` instead of skipping.
+ *
+ * So: the payload must claim to be the trend service, and the two libraries the
+ * engine actually calls must be present. Anything else is reported unavailable
+ * with the reason, never as healthy.
+ */
 export async function trendHealth(base = TREND_SIDECAR_DEFAULT_URL, timeoutMs = 2000): Promise<TrendHealthResult> {
   const call = await callTrend<TrendHealthResult>('/health', null, base, timeoutMs, 'GET');
   if (!call.ok || !call.data) return { ok: false, error: call.error, latencyMs: call.latencyMs };
+
+  const d = call.data as Partial<TrendHealthResult> & { service?: string; statsmodels?: unknown; ruptures?: unknown };
+  const service = typeof d.service === 'string' ? d.service : '';
+  if (service && !/trend/i.test(service)) {
+    return {
+      ok: false,
+      error: `wrong service on ${base}: /health answered service="${service}", expected the trend service`,
+      latencyMs: call.latencyMs,
+    };
+  }
+  if (d.status !== undefined && d.status !== 'ok') {
+    return { ok: false, error: `trend sidecar status="${String(d.status)}"`, latencyMs: call.latencyMs };
+  }
+  // Absent keys mean the sidecar never reported its libraries; treat that as
+  // "capability unknown" rather than assuming both are importable.
+  const missing: string[] = [];
+  if (!d.statsmodels) missing.push('statsmodels');
+  if (!d.ruptures) missing.push('ruptures');
+  if (missing.length) {
+    return {
+      ok: false,
+      error: `trend sidecar at ${base} cannot serve ${missing.join(' and ')} (not reported by /health)`,
+      latencyMs: call.latencyMs,
+    };
+  }
+
   return {
     ok: true,
     status: call.data.status,

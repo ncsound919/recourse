@@ -63,7 +63,16 @@ export const PROVIDER_RULES: readonly ProviderRule[] = [
   { service: 'synthbook', provider: 'hacker_news', trust: 'metadata', why: 'real HN item ids; the span is the item text, not a primary source' },
   { service: 'synthbook', provider: 'pubmed', trust: 'unverified', why: 'only the PMC id is real; title and span are templated from the query string' },
   { service: 'omniresearch', provider: 'baseline-sources', trust: 'retrieved', why: 'a curated registry of vetted sources with authority scores, not generated prose' },
-  { service: 'omniresearch', provider: 'multi-harvest', trust: 'retrieved', why: 'proxies the real ArXiv/OpenAlex/PubMed APIs and returns their own payloads' },
+  { service: 'omniresearch', provider: 'multi-harvest', trust: 'retrieved', why: 'the fan-out lane itself; trust is decided per sub-provider, not by this row' },
+
+  // Sub-providers of OmniResearch's multi-harvest lane. These are keyed
+  // separately from the synthbook rows of the same name because the two services
+  // reach them differently: omniresearch proxies the real ArXiv / Wikipedia
+  // APIs and returns their payloads, whereas synthbook/pubmed synthesises.
+  { service: 'omniresearch', provider: 'arxiv', trust: 'retrieved', why: 'proxies the real ArXiv API and returns its own record' },
+  { service: 'omniresearch', provider: 'wikipedia', trust: 'retrieved', why: 'proxies the real Wikipedia API and returns its own extract' },
+  { service: 'omniresearch', provider: 'openalex', trust: 'retrieved', why: 'proxies the real OpenAlex API and returns its own record' },
+  { service: 'omniresearch', provider: 'pubmed', trust: 'metadata', why: 'real identifiers via the PubMed API; the summary field is the API abstract, so treat as metadata not a full retrieved text' },
 ];
 
 const RULE_BY_KEY = new Map(PROVIDER_RULES.map((r) => [`${r.service}/${r.provider}`, r]));
@@ -182,17 +191,29 @@ async function call<T>(
   }
 }
 
-/** A minimal health probe. Cheap enough to run before deciding to gather. */
+/**
+ * A minimal health probe. Cheap enough to run before deciding to gather.
+ *
+ * "Up" means the service answered at all — a non-JSON 200 is still up. The
+ * previous version required a JSON body, so a healthy service serving
+ * `text/plain` at `/api/health` read as offline, and because it was up-but-
+ * unparsed the gatherer emitted a misleading `returned non-JSON` per-provider
+ * error instead of the single honest "unreachable".
+ */
 export async function serviceHealth(service: 'synthbook' | 'omniresearch'): Promise<ProviderStatus> {
   const res = await call<Json>(service, 'GET', '/api/health');
-  const online = res.ok && typeof res.data === 'object' && res.data !== null;
   return {
     service,
     provider: 'health',
-    ok: online,
+    ok: res.ok,
     count: 0,
     latencyMs: res.latencyMs,
-    error: res.error,
+    // Only a genuine failure carries an error string; a reachable service with a
+    // non-JSON body is up, so it must not read as down.
+    error: res.ok ? '' : res.error,
+    // `down` already means "could not be reached", which includes a timeout. A
+    // timeout is not an outage, so it is reported as an error without claiming
+    // the service is gone.
     ...(res.down ? { serviceDown: true } : {}),
   };
 }
@@ -339,12 +360,17 @@ export async function omniresearchHarvest(query: string): Promise<{ status: Prov
     typeof res.data === 'object' && res.data !== null && Array.isArray((res.data as Record<string, unknown>).sources)
       ? ((res.data as Record<string, unknown>).sources as unknown[])
       : [];
-  const { trust, trustReason } = classify('omniresearch', 'multi-harvest');
   const items: GroundingSource[] = [];
   for (const entry of sources) {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
     const group = entry as Record<string, unknown>;
     const providerName = str(group.provider) || str(group.source) || 'unknown';
+    // Classify the SUB-provider, not the lane. `multi-harvest` is a fan-out over
+    // ArXiv / OpenAlex / PubMed / Wikipedia, and PubMed's synthesised spans are
+    // exactly what the trust registry exists to keep out of a prompt. Stamping
+    // the lane's level onto every child would let a response field — not a
+    // registry edit — promote unverified evidence to quotable.
+    const { trust, trustReason } = classify('omniresearch', providerName);
     const results = Array.isArray(group.results) ? (group.results as unknown[]) : [];
     for (const raw of results) {
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;

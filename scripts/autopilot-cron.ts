@@ -31,9 +31,16 @@
 
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+// server.ts loads .env via 'dotenv/config'; this script did not, so every
+// process.env read here (the OpenHub audit secret, the checkpoint override, the
+// merge reserve) silently resolved to undefined when run from cron — which is
+// why the audit stage reported "RECOURSE_OPENHUB_SECRET is not set" in the one
+// context that actually needs it.
+import 'dotenv/config';
 
 import {
   isAutoMergeEnabled,
+  isProposeEnabled,
   isKillSwitchActive,
   listBusinessSlugs,
   loadBusinessProfile,
@@ -52,8 +59,27 @@ import { chatComplete } from '../src/lib/modelProvider';
 import { createLearnerStore, RecursiveLearner } from '../src/dream/learner.js';
 import { openVectorMemory } from '../src/lib/vectorMemory.js';
 import { deriveOpenHubAuditSignals, latestReportFromDocs } from '../src/lib/fleetSignal.js';
+import { defaultAuditAdapters } from '../src/autopilot/auditAdapters';
 
 const DEFAULT_AUDIT_DIR = 'data/business-profiles';
+
+/**
+ * Should this profile pause for a human checkpoint after opening a PR?
+ *
+ * `requireCheckpoint` was previously read from `profile.repo.requireCheckpoint`,
+ * a field that does not exist on `RepoBinding`, so it was permanently false and
+ * checkpoint.ts never ran in production. It is now an explicit, readable
+ * profile field with a clear default, so "pause for review" is a decision
+ * someone makes rather than an accident of a missing key.
+ */
+function requireCheckpointFor(profile: BusinessProfileT): boolean {
+  const binding = profile.repo as unknown as { requireCheckpoint?: unknown };
+  if (typeof binding?.requireCheckpoint === 'boolean') return binding.requireCheckpoint;
+  const env = process.env.RECOURSE_REQUIRE_CHECKPOINT;
+  if (env === '1') return true;
+  if (env === '0') return false;
+  return false;
+}
 
 // Recursive learner -> audit depth. Constructed lazily so importing this module
 // stays side-effect-free (nothing is read until a scheduled run actually starts).
@@ -194,11 +220,16 @@ export async function runScheduledAudit(
   for (const slug of slugs) {
     try {
       const profile = loadBusinessProfile(slug);
-      const enabled = isAutoMergeEnabled(profile);
-      if (!enabled && !dryRun) {
-        console.log(`[autopilot] ${slug}: auto-merge disabled, skipping`);
+      if (!profile.repo) {
+        console.log(`[autopilot] ${slug}: no repo binding, skipping`);
         continue;
       }
+      // `autoMergeEnabled` gates the IRREVERSIBLE step only. A bound profile is
+      // audited, scored and gap-analysed on every cron pass regardless; it just
+      // does not merge on its own. Previously this check skipped the whole
+      // business, so a read-only profile was never measured.
+      const autoMerge = isAutoMergeEnabled(profile);
+      const mayPropose = isProposeEnabled(profile);
 
       // Close the loop: OpenHub's latest self-report sets a floor on how deep
       // this audit goes — never shallower than the fleet's reported health.
@@ -208,7 +239,7 @@ export async function runScheduledAudit(
       // Only in a real (non-dry) run and only when auto-merge is on (a PR only
       // exists because the loop opened it under that mode; if the operator has
       // since disabled auto-merge, leave the draft PR alone).
-      if (!dryRun && enabled) {
+      if (!dryRun && autoMerge) {
         const auditDir = DEFAULT_AUDIT_DIR;
         const prsDir = path.join(auditDir, slugify(profile.business.name), 'prs');
         const open = await loadOpenPrStates(prsDir);
@@ -254,7 +285,31 @@ export async function runScheduledAudit(
         }
       }
 
-      const outcome = (await runLoop({ profile, dryRun, planner: codePlanner, learner: getLearner(), externalAuditSignals })) as LoopOutcomeLike;
+      // A read-only binding (proposeEnabled: false) is forced into dryRun here,
+      // so a profile the operator does not want written to is audited and scored
+      // but can never open a PR — the permission is enforced at the call site,
+      // not only inside the loop.
+      const effectiveDryRun = dryRun || !mayPropose;
+      if (!mayPropose && !dryRun) {
+        console.log(`[autopilot] ${slug}: read-only binding (proposeEnabled=false) — auditing only, no PRs`);
+      }
+
+      // Audit adapters are REQUIRED in production. runAudit throws when no
+      // auditor produced an included section, and until now nothing outside the
+      // test files constructed one — so this call could only ever fail at the
+      // audit stage. `defaultAuditAdapters` supplies the real auditors.
+      const outcome = (await runLoop({
+        profile,
+        dryRun: effectiveDryRun,
+        planner: codePlanner,
+        learner: getLearner(),
+        externalAuditSignals,
+        adapters: defaultAuditAdapters(),
+        // `checkpointStore` is omitted on purpose: runLoop defaults it to a
+        // FileCheckpointStore rooted at the audit dir. Passing the CLASS here
+        // would pass a constructor where an instance is expected.
+        ...(requireCheckpointFor(profile) ? { requireCheckpoint: true } : {}),
+      })) as LoopOutcomeLike;
       console.log(formatOutcome(slug, outcome));
       // State-machine errors are returned, not thrown — surface them as exit 1
       // so cron wrappers can detect a failed pass.

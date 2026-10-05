@@ -54,4 +54,23 @@ voiceAndBrand:
     - "Per-customer deployment with isolated stack, PII redaction, and a real-time dashboard."
     - "Rental pricing by concurrent agent, with included minutes and transparent overage."
 
+# Repo binding. Without this the autopilot loop exits at stage 2 with
+# `no_repo_binding` and never audits anything.
+#
+# Three independent permissions, deliberately separate:
+#   proposeEnabled:   may push a branch / open a DRAFT PR. true here.
+#   requireCheckpoint: pause each PR for your approval before the veto window.
+#   autoMergeEnabled: may MERGE unattended when the window expires. FALSE —
+#                     the loop drafts and waits, a human merges.
+repo:
+  localPath: "C:/Users/User/Downloads/BUSINESS/PLATFORMS/Aetherdesk-Call-Center"
+  githubUrl: "https://github.com/ncsound919/Aetherdesk-Call-Center"
+  defaultBranch: main
+  auditScheduleCron: "0 6 * * *"
+  proposeEnabled: true
+  autoMergeEnabled: false
+  autoMergeVetoHours: 24
+  minSandboxScore: 0.7
+  requireCheckpoint: true
+
 lastReviewedAt: 2026-09-04T00:00:00.000Z

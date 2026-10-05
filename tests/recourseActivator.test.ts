@@ -379,19 +379,37 @@ describe('probeAutopilotOnce', () => {
     expect(out).toEqual([{ ran: false, reason: 'no_profiles' }]);
   });
 
-  it('skips profiles without an auto-merge repo binding', async () => {
+  it('probes a read-only profile, because a dry run writes nothing', async () => {
+    // `autoMergeEnabled: false` used to skip the probe entirely, which conflated
+    // "may we analyse this repo" with "may we merge" — a read-only profile could
+    // never be measured.
     h.listBusinessSlugs.mockReturnValue(['alpha']);
-    h.loadBusinessProfile.mockReturnValue({ repo: { autoMergeEnabled: false }, business: { name: 'Alpha' } });
+    const profile = { repo: { autoMergeEnabled: false }, business: { name: 'Alpha' } };
+    h.loadBusinessProfile.mockReturnValue(profile);
+    h.runLoop.mockResolvedValue({ state: { status: 'audited' }, context: {} });
     const out = await probeAutopilotOnce();
-    expect(out).toMatchObject([{ ran: false, reason: 'autoMerge_disabled', business: 'alpha' }]);
-    expect(h.runLoop).not.toHaveBeenCalled();
+    expect(out).toMatchObject([{ ran: true, business: 'alpha', reason: 'dry_run_audit', status: 'audited' }]);
+    expect(h.runLoop).toHaveBeenCalledWith(expect.objectContaining({ profile, dryRun: true }));
   });
 
-  it('skips profiles with no repo at all', async () => {
+  it('passes real audit adapters, so the probe reports an audit and not a failure', async () => {
+    h.listBusinessSlugs.mockReturnValue(['alpha']);
+    h.loadBusinessProfile.mockReturnValue({ repo: { autoMergeEnabled: true }, business: { name: 'Alpha' } });
+    h.runLoop.mockResolvedValue({ state: { status: 'audited' }, context: {} });
+    await probeAutopilotOnce();
+    // Without adapters runAudit throws "no auditor produced an included section",
+    // so the probe could only ever report an error.
+    expect(h.runLoop).toHaveBeenCalledWith(expect.objectContaining({ adapters: expect.any(Object) }));
+  });
+
+  it('skips profiles with no repo at all, and says so precisely', async () => {
     h.listBusinessSlugs.mockReturnValue(['alpha']);
     h.loadBusinessProfile.mockReturnValue({ business: { name: 'Alpha' } });
     const out = await probeAutopilotOnce();
-    expect(out).toMatchObject([{ ran: false, reason: 'autoMerge_disabled', business: 'alpha' }]);
+    // Previously reported as `autoMerge_disabled`, which was simply untrue: there
+    // was no repo to merge from.
+    expect(out).toMatchObject([{ ran: false, reason: 'no_repo_binding', business: 'alpha' }]);
+    expect(h.runLoop).not.toHaveBeenCalled();
   });
 
   it('runs the dry-run audit with requireCheckpoint from the env', async () => {
@@ -428,13 +446,15 @@ describe('probeAutopilotOnce', () => {
   it('reports per-business errors with Error.message and string fallback', async () => {
     h.listBusinessSlugs.mockReturnValue(['alpha', 'beta', 'gamma']);
     h.loadBusinessProfile.mockImplementation((slug: string) => {
-      if (slug === 'alpha') return { repo: { autoMergeEnabled: false }, business: { name: 'Alpha' } };
+      if (slug === 'alpha') return { repo: { autoMergeEnabled: true }, business: { name: 'Alpha' } };
       if (slug === 'beta') throw new Error('boom');
       throw 'stringerr';
     });
+    h.runLoop.mockResolvedValue({ state: { status: 'audited' }, context: {} });
     const out = await probeAutopilotOnce();
     expect(out).toMatchObject([
-      { ran: false, reason: 'autoMerge_disabled', business: 'alpha' },
+      // One business failing must not stop the others being probed.
+      { ran: true, business: 'alpha', reason: 'dry_run_audit' },
       { ran: false, reason: 'error:boom', business: 'beta' },
       { ran: false, reason: 'error:stringerr', business: 'gamma' },
     ]);

@@ -36,7 +36,12 @@ export function createMemoryRouter(deps: MemoryRouterDeps): Router {
     catch (e: any) { res.status(500).json({ success: false, error: e.message }); }
   });
 
-  router.post('/memory/index', async (_req, res) => {
+  // indexSystemMemory() deletes and rewrites the durable vector store's gene:*
+  // and snap:* rows. That is a durable-state mutation, so it sits behind the same
+  // fail-closed guard as its three siblings below — it was previously the only
+  // unguarded mutation in this router.
+  router.post('/memory/index', async (req, res) => {
+    if (!requireMutationAuth(req, res)) return;
     try { res.json({ success: true, ...(await deps.indexSystemMemory()) }); }
     catch (e: any) { res.status(500).json({ success: false, error: e.message }); }
   });
@@ -118,6 +123,10 @@ export function createMemoryRouter(deps: MemoryRouterDeps): Router {
         source: 'openhub',
         reportAt: signal.reportAt,
         degraded: signal.degraded,
+        // Why `available` is false: a memory outage is not an OpenHub health
+        // verdict. Without this, `degraded: false` beside `available: false`
+        // read as "healthy" when the truth was "we could not look".
+        reason: (signal as { reason?: string }).reason ?? null,
         health: signal.health,
         belief: signal.beliefs[0] ?? null,
         auditSignals: signal.auditSignals,

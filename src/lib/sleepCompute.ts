@@ -194,6 +194,26 @@ export function takeReadySleepArtifact(name: string, domain?: string): SleepArti
   return found ?? null;
 }
 
+/**
+ * Every VERIFIED sleep-compute artifact name, oldest first.
+ *
+ * WHY THIS EXISTS (F7)
+ * `runSleepComputeUnit` picks ~2 specs from ~2,200 unbuilt to pre-compute, but
+ * `takeReadySleepArtifact` is called by the forge for the ONE spec its
+ * learner-ordered agenda happens to select. With an agenda that large the chance
+ * of an exact name match is ~0.1%, so verified work sat on disk unconsumed
+ * indefinitely — a real `isPrivateIPv4` artifact was sitting there unused.
+ *
+ * This inverts the selection so the producer advertises what it has, letting the
+ * consumer scan for a match instead of the consumer sampling and hoping. The
+ * alternative fix (make the producer guess the consumer's pick) is not possible:
+ * the producer runs in dream's consolidation phase and does not know the agenda.
+ */
+export function readySleepComputeNames(): string[] {
+  const doc = readSleepStore();
+  return doc.artifacts.filter((a) => a.verified).map((a) => a.name);
+}
+
 export interface SleepSnapshot {
   artifacts: number;
   ready: number;

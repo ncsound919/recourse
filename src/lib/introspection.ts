@@ -75,18 +75,29 @@ export interface RunOutcomeHealth {
   artifact: number;
   /** Runs that deliberately did nothing. */
   skipped: number;
+  /**
+   * Runs of jobs declared `maintenance` that found nothing to do. Excluded from
+   * the denominator below: a health poll correctly produces no artifact, so
+   * counting it would drag the rate toward zero for no reason.
+   */
+  maintained: number;
   /** Runs that completed and produced nothing verifiable — counted as failures. */
   unproductive: number;
   /** Runs that threw, or claimed an artifact that failed hash re-verification. */
   failed: number;
   /**
-   * Share of runs that ended in an artifact. null when nothing has run yet.
-   * A LOW value here is the system's honest answer to "are the runs moving the
-   * needle" — and it is now measured rather than inferred.
+   * Share of PRODUCTIVE runs that ended in an artifact: artifact / (artifact +
+   * unproductive + failed). Maintenance and skip runs are excluded from both
+   * numerator and denominator.
+   *
+   * This is the system's honest answer to "are the runs moving the needle" —
+   * now measured rather than inferred. Null when nothing has run yet.
    */
   artifactRate: number | null;
   /** Jobs that ran at least once and never once produced an artifact. */
   jobsNeverUseful: string[];
+  /** Maintenance jobs, listed so the exclusion above is auditable. */
+  jobsDeclaredMaintenance: string[];
 }
 
 /**
@@ -98,24 +109,33 @@ export function runOutcomeHealth(jobs: ScheduledJobState[]): RunOutcomeHealth {
     (acc, j) => {
       acc.artifact += countOutcome(j, 'artifact');
       acc.skipped += j.skipCount ?? 0;
+      acc.maintained += j.maintainedCount ?? 0;
       acc.unproductive += j.unproductiveCount ?? 0;
       // failCount covers throws; a tampered artifact also lands there.
       acc.failed += j.failCount ?? 0;
+      if (j.maintenance === true) acc.maintenanceJobs.push(j.id);
       const ran = j.runCount ?? 0;
       if (ran > 0 && countOutcome(j, 'artifact') === 0) acc.neverUseful.push(j.id);
       return acc;
     },
-    { artifact: 0, skipped: 0, unproductive: 0, failed: 0, neverUseful: [] as string[] },
+    {
+      artifact: 0, skipped: 0, maintained: 0, unproductive: 0, failed: 0,
+      neverUseful: [] as string[], maintenanceJobs: [] as string[],
+    },
   );
-  const totalRuns = agg.artifact + agg.unproductive + agg.failed;
+  // Denominator is PRODUCTIVE runs only. Maintenance/skip are neither wins nor
+  // losses and must not dilute the rate.
+  const productiveRuns = agg.artifact + agg.unproductive + agg.failed;
   return {
     jobs: jobs.length,
     artifact: agg.artifact,
     skipped: agg.skipped,
+    maintained: agg.maintained,
     unproductive: agg.unproductive,
     failed: agg.failed,
-    artifactRate: totalRuns > 0 ? Math.round((agg.artifact / totalRuns) * 1000) / 1000 : null,
+    artifactRate: productiveRuns > 0 ? Math.round((agg.artifact / productiveRuns) * 1000) / 1000 : null,
     jobsNeverUseful: agg.neverUseful,
+    jobsDeclaredMaintenance: agg.maintenanceJobs,
   };
 }
 
@@ -241,14 +261,34 @@ export function introspectionReport(input: {
     });
   }
 
-  if (runs.artifactRate !== null && runs.artifactRate < 0.25 && (runs.artifact + runs.unproductive + runs.failed) >= 5) {
+  const productiveRuns = runs.artifact + runs.unproductive + runs.failed;
+  if (runs.artifactRate !== null && runs.artifactRate < 0.25 && productiveRuns >= 5) {
+    // Only jobs NOT declared maintenance are named: a maintenance job finding
+    // nothing is correct behaviour, so listing it here would be a false alarm.
+    const offenders = runs.jobsNeverUseful.filter((id) => !runs.jobsDeclaredMaintenance.includes(id));
     concerns.push({
       severity: 'warn',
       code: 'runs_not_producing_artifacts',
       detail:
-        `only ${Math.round((runs.artifactRate ?? 0) * 100)}% of runs ended in a verifiable artifact ` +
-        `(${runs.artifact} of ${runs.artifact + runs.unproductive + runs.failed}). ` +
-        `Jobs producing nothing yet: ${runs.jobsNeverUseful.join(', ') || 'none'}.`,
+        `only ${Math.round((runs.artifactRate ?? 0) * 100)}% of productive runs ended in a verifiable artifact ` +
+        `(${runs.artifact} of ${productiveRuns}; ${runs.maintained} maintenance and ${runs.skipped} skipped run(s) excluded). ` +
+        `Productive jobs that have never produced an artifact: ${offenders.join(', ') || 'none'}. ` +
+        `These jobs run but return no verifiable output — wire their results into the run so the outcome can be graded.`,
+    });
+  }
+
+  // The specific failure mode of the previous definition: a maintenance job
+  // that would otherwise be unproductive has declared itself maintenance. That
+  // is legitimate for a health poll and NOT legitimate for real work.
+  const suspicious = runs.jobsNeverUseful.filter((id) => runs.jobsDeclaredMaintenance.includes(id));
+  if (suspicious.length > 0) {
+    concerns.push({
+      severity: 'info',
+      code: 'maintenance_jobs_idle',
+      detail:
+        `${suspicious.length} job(s) declared maintenance have run without producing anything: ` +
+        `${suspicious.join(', ')}. Expected for a health poll, but worth confirming each is genuinely ` +
+        `a keep-the-system-alive loop rather than work relabelled to avoid being measured.`,
     });
   }
 

@@ -15,6 +15,7 @@ import {
   providerStatuses,
 } from '../lib/modelProvider.js';
 import { isIsolateAvailable } from '../lib/isolatedSandbox.js';
+import { evaluateAcceptance } from '../lib/acceptance.js';
 import { repairVerificationStats } from '../lib/repairVerification.js';
 import type { RepairVerification } from '../lib/repairVerification.js';
 import { domainHealth, capabilityReadiness } from '../lib/honestyMetrics.js';
@@ -27,6 +28,8 @@ import type { ReadoutContext } from '../intake/readout.js';
 import type { IntakeSnapshot, BenchmarkRun } from '../intake/types.js';
 import type { SystemSnapshot } from '../lib/systemDiff.js';
 import type { CapabilityDef } from '../lib/capabilities.js';
+import type { PromotedAuditSummary } from '../lib/promotedAudit.js';
+import type { ConsumptionReport } from '../lib/toolConsumption.js';
 import type {
   SystemStatus,
   ToolEntry,
@@ -44,6 +47,11 @@ export interface ReadoutRouterDeps {
   verifyChainIntegrity(): { valid: boolean; length: number; lastHash: string; brokenIndex?: number };
   statusRef(): SystemStatus;
   registryRef(): ToolEntry[];
+  /**
+   * The honest registry pair: how many entries are actually runnable versus
+   * declared-but-inert. Recomputed per request so it can never go stale.
+   */
+  registryExecutability?: () => NonNullable<SystemStatus['registryExecutability']>;
   currentProviderStatus(): { model: string; baseUrl: string; [k: string]: unknown };
   repairVerificationsRef(): RepairVerification[];
   growthWeightsRef(): GrowthFactorWeights;
@@ -66,6 +74,10 @@ export interface ReadoutRouterDeps {
   valueSnapshot?(): Record<string, unknown>;
   /** Self-diagnosis: value-signal health, run outcomes, verification cost. */
   introspectionReport?(): Record<string, unknown>;
+  /** Runs a budgeted slice of the promoted-tool quality audit. */
+  runPromotedAudit?(budget: number): PromotedAuditSummary;
+  /** Classifies every forge-materialized tool by whether a live path calls it. */
+  consumptionReport?(): ConsumptionReport;
   systemSnapshotsRef(): SystemSnapshot[];
   systemBaselineRef(): SystemSnapshot | null;
   legacyDigestRef(): Record<string, unknown> | null;
@@ -87,6 +99,41 @@ export interface ReadoutRouterDeps {
   benchmarkState(): ReadoutContext['benchmark'];
 }
 
+/**
+ * The single most common failure reason across failed forge entries.
+ *
+ * A ledger of 58 failures with no reason is not actionable; "58 x HTTP 401" is.
+ * Longer/more specific messages win so a single auth outage is not averaged
+ * away by unrelated noise.
+ */
+function topFailureReason(
+  failed: Array<{ summary?: string; failures?: Array<{ attempt: number; note: string }> }>,
+): string | null {
+  const counts = new Map<string, number>();
+  for (const f of failed) {
+    // Prefer the last recorded attempt note — that is the reason the build
+    // actually stopped — and fall back to the entry summary.
+    const raw =
+      f.failures && f.failures.length > 0 ? f.failures[f.failures.length - 1].note : f.summary;
+    if (typeof raw !== 'string' || !raw.trim()) continue;
+    // Collapse to the distinctive part: status codes and short quoted reasons.
+    const key =
+      /\b(4\d\d|5\d\d)\b/.test(raw) && raw.length < 160
+        ? raw
+        : raw.slice(0, 80);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  let best: string | null = null;
+  let bestN = 0;
+  for (const [reason, n] of counts) {
+    if (n > bestN) {
+      best = reason;
+      bestN = n;
+    }
+  }
+  return best;
+}
+
 export function createReadoutRouter(deps: ReadoutRouterDeps): Router {
   const router = Router();
 
@@ -94,8 +141,20 @@ export function createReadoutRouter(deps: ReadoutRouterDeps): Router {
     const integrity = deps.verifyChainIntegrity();
     const status = deps.statusRef();
     const registry = deps.registryRef();
-    status.hashChainIntegrity = integrity.valid;
+    // An empty chain is not INVALID, it is UNVERIFIED. Copying `valid` straight into
+    // `hashChainIntegrity` reported "chain integrity OK" for a system that has
+    // never recorded a provenance event, and the seeded default in mockData.ts is
+    // also a hardcoded `true`. Claim integrity only when links were actually
+    // checked; otherwise surface the truth (nothing verified yet).
+    status.hashChainIntegrity = integrity.length > 0 ? integrity.valid : false;
+    status.hashChainUnverified = integrity.length === 0;
     status.registeredToolsCount = registry.length;
+    // Recomputed on every read, not cached on `status`: the boot-time assignment
+    // ran before the registry finished loading and produced all zeros, which reads
+    // as a measurement rather than as "not computed yet".
+    if (deps.registryExecutability) {
+      status.registryExecutability = deps.registryExecutability();
+    }
     let pending = 0;
     registry.forEach(r => {
       pending += (r.pendingVersions?.length || 0);
@@ -103,9 +162,16 @@ export function createReadoutRouter(deps: ReadoutRouterDeps): Router {
     status.pendingApprovalsCount = pending;
 
     // Live model provider status (probe both profiles independently).
+    // The snapshot must be taken AFTER the probes: reading it first reported
+    // the pre-probe state, so the first /status call after a boot always showed
+    // `online: null` (rendered false) even for a healthy local llama-server.
+    // `deep: true` spends one token to confirm the provider can actually
+    // GENERATE, not merely answer /models — otherwise a gateway that rejects
+    // the key on chat (the 401 that hid here for 58 forge attempts) still reads
+    // as healthy on the operator readout.
+    await modelCheckOnline(true, 'local', { deep: true });
+    await modelCheckOnline(true, 'api', { deep: true });
     const live = providerStatuses();
-    await modelCheckOnline(false, 'local');
-    await modelCheckOnline(false, 'api');
     const cps = deps.currentProviderStatus();
     (status.providerStatus as any) = { ...cps, statuses: live };
     status.aiStudioModel = cps.model;
@@ -177,15 +243,39 @@ export function createReadoutRouter(deps: ReadoutRouterDeps): Router {
     const benchmarkHistory = deps.benchmarkHistoryRef();
     const lastBench = benchmarkHistory[benchmarkHistory.length - 1];
     const anomalies = deps.anomaliesRef();
+    const forgeLedger = deps.forgeLedgerRef();
+    const forgeMaterialized = forgeLedger.filter((l) => l.status === 'materialized');
+    const forgeFailed = forgeLedger.filter((l) => l.status === 'failed');
     status.realProgress = {
       registeredTools: registry.length,
       liveSelfHostedTools: liveSelfHosted,
-      forgeMaterialized: deps.forgeLedgerRef().filter((l) => l.status === 'materialized').length,
+      forgeMaterialized: forgeMaterialized.length,
       healedTools: status.selfRepair?.totalHealedCount ?? 0,
       benchmarkSolved: lastBench ? lastBench.solved : 0,
       benchmarkTotal: lastBench ? lastBench.total : 0,
       verifierPassRate: typeof status.verifierPassRate === 'number' ? status.verifierPassRate : 0,
       openAnomalies: anomalies.filter((a) => a.status === 'detected').length,
+    };
+
+    // Autonomy truth. `registeredTools` counts what exists; it says nothing
+    // about whether the machine is running. These blocks exist so the operator
+    // readout cannot read as healthy while every capability path is switched
+    // off — the failure mode where the dashboard and the code disagreed.
+    const forgeLastMaterialized = forgeMaterialized
+      .map((l) => l.at)
+      .filter((t) => typeof t === 'number' && t > 0)
+      .sort((a, b) => b - a)[0] ?? null;
+    (status as any).forge = {
+      entries: forgeLedger.length,
+      materialized: forgeMaterialized.length,
+      failed: forgeFailed.length,
+      lastMaterializedAt: forgeLastMaterialized,
+      // The most common failure reason, so a 58-failure ledger reads as "auth",
+      // not as an unexplained number.
+      topFailureReason: topFailureReason(forgeFailed),
+      // Materialized tools that nothing ever consumed again.
+      selfHostedToolsBuilt: forgeMaterialized.length,
+      selfHostedToolsLive: liveSelfHosted,
     };
 
     // Surface learner state so the dashboard reports real episode count +
@@ -312,6 +402,69 @@ export function createReadoutRouter(deps: ReadoutRouterDeps): Router {
     if (!report) {
       return res.status(503).json({ success: false, error: 'introspection unavailable on this host' });
     }
+    res.json({ success: true, ...report });
+  });
+
+  // Promoted-tool quality audit, on demand. The scheduler advances this in
+  // budgeted slices; an operator (or an unattended loop) can push a bigger slice
+  // here instead of waiting out the cadence. `status.promotedQualityAudit`
+  // carries the coverage — `pending` is the number that is not yet verified.
+  router.post('/quality-audit/run', (req, res) => {
+    const runner = deps.runPromotedAudit;
+    if (!runner) {
+      return res.status(503).json({ success: false, error: 'promoted-tool audit unavailable on this host' });
+    }
+    const budgetRaw = Number((req.body as { budget?: unknown } | undefined)?.budget ?? (req.query.budget as string | undefined));
+    const budget = Number.isFinite(budgetRaw) ? Math.min(500, Math.max(0, Math.floor(budgetRaw))) : 25;
+    const summary = runner(budget);
+    res.json({
+      success: true,
+      budget,
+      summary: `${summary.audited} audited, ${summary.passed} gate-pass, ${summary.failed} gate-fail, ${summary.cached} cached, ${summary.stillPending} pending, ${summary.skipped} not auditable, ${summary.behavioralGap} suite-only`,
+      // Standing exposure: how much of the promoted registry the enhanced
+      // (scale/oracle) gate can actually speak to. A large suiteOnly figure means
+      // those tools still report health from the old weak gate.
+      coverage: summary.coverage,
+      failures: summary.failures.slice(0, 25),
+      skips: summary.skips.slice(0, 25),
+      ms: summary.ms,
+    });
+  });
+
+  router.get('/quality-audit', (_req, res) => {
+    const audit = deps.statusRef().promotedQualityAudit;
+    if (!audit) {
+      return res.json({ success: true, available: false, note: 'no audit run yet on this boot' });
+    }
+    res.json({ success: true, available: true, ...audit });
+  });
+
+  // Does anything CALL the tools the forge builds? `unconsumed` is the number
+  // that decides whether the forge is producing capability or inventory.
+  router.get('/forge/consumption', (_req, res) => {
+    const report = deps.consumptionReport?.();
+    if (!report) {
+      return res.status(503).json({ success: false, error: 'consumption report unavailable on this host' });
+    }
+    res.json({ success: true, ...report });
+  });
+
+  // ==========================================================================
+  // THE ACCEPTANCE GATE — the one endpoint that answers "is it working?".
+  // ==========================================================================
+  // Every other readout in Recourse can be green while the system is idle; this
+  // one cannot. Each stage passes ONLY on an event recorded by the code that
+  // genuinely did that work, within a freshness window matching that stage's
+  // real cadence. No evidence = failure, always, with the reason spelled out.
+  //
+  //   pass:false with a named failing stage is the normal, useful state: it says
+  //   exactly which link in the chain is dark. That is the opposite of the
+  //   `24/24 enabled` and `powerMod: healthy` readings this exists to replace.
+  router.get('/acceptance', (_req, res) => {
+    const report = evaluateAcceptance();
+    // 200 either way: this is a verdict, not an error. A failing acceptance is a
+    // successfully-measured failure, and a 503 would make monitoring read
+    // "the gate correctly says no" as "the endpoint is down".
     res.json({ success: true, ...report });
   });
 

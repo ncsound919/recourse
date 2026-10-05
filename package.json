@@ -33,6 +33,7 @@
     "@opentelemetry/sdk-trace-node": "^2.11.0",
     "@stdlib/math-base-special-riemann-zeta": "^0.3.1",
     "@stdlib/stats-padjust": "^0.2.3",
+    "apache-arrow": "^18.1.0",
     "autograd-ts": "^0.1.5",
     "better-sqlite3": "^13.0.3",
     "clsx": "^2.1.1",

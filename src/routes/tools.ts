@@ -29,6 +29,7 @@ import {
 import { executeResearch, bindToClaims, DEFAULT_RESEARCH_CONFIG } from '../lib/deterministicResearch.js';
 import { fetchExport, parsePrometheusHypotheses, toResearchSources, PROMETHEUS_DEFAULT_URL } from '../lib/prometheusBridge.js';
 import { runAgingSweep, runSatSweep, runRiemannSlice } from '../lib/bfrBridge.js';
+import { guardOutboundUrl } from '../lib/outboundGuard.js';
 import {
   zod400,
   pdfExtractUrlReq,
@@ -63,6 +64,15 @@ export function createToolsRouter(): Router {
   router.post('/pdf/extract-url', async (req, res) => {
     const body = zod400(pdfExtractUrlReq, req, res);
     if (!body) return;
+    // SSRF guard. This route accepts an operator-supplied URL and makes the server
+    // fetch it, which is the textbook SSRF shape: without this, `url` can name the
+    // cloud metadata endpoint or Recourse's own admin surface. Fail closed with 400
+    // and the specific reason, so a blocked target is diagnosable rather than a
+    // generic upstream failure.
+    const verdict = guardOutboundUrl(body.url);
+    if (!verdict.allowed) {
+      return res.status(400).json({ success: false, error: `blocked by outbound guard: ${verdict.reason}` });
+    }
     const result = await pdfExtractUrl(body.url, body.max_pages ? { maxPages: body.max_pages } : {});
     res.json({ success: true, ...result });
   });

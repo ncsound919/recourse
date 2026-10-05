@@ -149,6 +149,27 @@ function safeMeta(raw: any): Record<string, any> | undefined {
   return raw;
 }
 
+/**
+ * Normalize whatever the storage engine hands back for a fixed-size-list vector
+ * column into a plain `number[]`.
+ *
+ * LanceDB does NOT return a JS Array. The column decodes to an Arrow `Vector`,
+ * and `Vector.toArray()` yields a TypedArray (Float32Array) — `Array.isArray()`
+ * is false for BOTH. A guard of `Array.isArray(v) ? v : []` therefore silently
+ * substituted `[]` for every stored row, making `cosine()` return NaN for every
+ * candidate: recall still returned rows (LanceDB's own ANN order), but every
+ * score was NaN, so the JS re-ranking/sort was meaningless. `Array.from` is the
+ * one conversion that is correct for Array, TypedArray, Arrow Vector and
+ * array-like alike.
+ */
+function toNumberArray(raw: any): number[] {
+  if (raw == null) return [];
+  if (Array.isArray(raw)) return raw.map(Number);
+  if (typeof raw.toArray === 'function') return Array.from(raw.toArray() as ArrayLike<number>, Number);
+  if (typeof raw.length === 'number') return Array.from(raw as ArrayLike<number>, Number);
+  return [];
+}
+
 /** Quote an identifier for a LanceDB SQL filter (single quotes doubled). */
 function sqlStr(s: string): string {
   return `'${String(s).replace(/'/g, "''")}'`;
@@ -200,20 +221,30 @@ async function openLance(dir: string): Promise<MemoryStore | null> {
       async remove(id) {
         await table.delete(`id = ${sqlStr(id)}`);
       },
-      async recall(kind, vec, topK) {
-        const rows = await table.search(vec).limit(Math.max(1, topK * 3)).toArray();
+async recall(kind, vec, topK) {
+        // Pull a wider candidate window, then filter by kind, then re-score.
+        // Order matters: filtering AFTER the limit would let a high-scoring
+        // `gene`/`lesson` row evict every `snapshot` row from the window and
+        // silently return none, which is exactly what the in-memory store
+        // (filter -> sort -> slice) does not do.
+        const want = Math.max(1, topK);
+        const rows = await table.search(vec).limit(Math.max(want * 10, 50)).toArray();
         // Re-score with cosine in JS so scores share the in-memory store's
         // semantics (higher = more similar, cosine in [-1, 1]) regardless of the
         // engine's native distance metric.
         const scored = (rows ?? [])
           .filter((r: any) => !kind || r.kind === kind)
-          .map((r: any) => ({
-            id: String(r.id), kind: r.kind, text: String(r.text),
-            vec: r.vec, meta: safeMeta(r.meta),
-            score: cosine(vec, Array.isArray(r.vec) ? r.vec : []),
-          }))
-          .sort((a: RecallHit, b: RecallHit) => b.score - a.score)
-          .slice(0, topK);
+          .map((r: any) => {
+            const stored = toNumberArray(r.vec);
+            return {
+              id: String(r.id), kind: r.kind, text: String(r.text),
+              vec: stored, meta: safeMeta(r.meta),
+              // A row whose vector is missing/wrong-width cannot be scored honestly.
+              score: stored.length === vec.length ? cosine(vec, stored) : Number.NEGATIVE_INFINITY,
+            };
+          })
+          .sort((a, b) => b.score - a.score)
+          .slice(0, want);
         return scored;
       },
       async count() { try { return (await table.countRows()); } catch { return 0; } },

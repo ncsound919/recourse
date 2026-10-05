@@ -40,7 +40,11 @@ export function createInteropRouter(deps: InteropRouterDeps): Router {
       if (stream === 'selfhosted') {
         const entries = await verifyAllSelfHosted();
         const summary = entries.map((e) => ({ name: e.name, hash: e.hash, passed: e.lastVerified?.passed === true, sandbox: e.lastSandboxVerified?.passed === true }));
-        const allPassed = summary.every((s) => s.passed);
+        // `[].every(...)` is vacuously true, so with zero self-hosted modules this
+        // reported `matches: true` — a green deterministic-replay verdict for a
+        // comparison that never happened. With no modules there is nothing that
+        // can match, so the verdict must not read as a pass.
+        const allPassed = summary.length > 0 && summary.every((s) => s.passed);
         return res.json({
           success: true,
           report: {
@@ -48,7 +52,9 @@ export function createInteropRouter(deps: InteropRouterDeps): Router {
             records: summary.length,
             matches: allPassed,
             replayHash: deterministicHash(summary),
-            details: [`re-verified ${summary.length} self-hosted module(s); ${summary.filter((s) => s.sandbox).length} green in the WASM sandbox`],
+            details: [summary.length
+              ? `re-verified ${summary.length} self-hosted module(s); ${summary.filter((s) => s.sandbox).length} green in the WASM sandbox`
+              : 'no self-hosted modules in the manifest — nothing was re-verified, so no replay verdict is claimed'],
           },
         });
       }

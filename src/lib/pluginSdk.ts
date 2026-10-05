@@ -15,6 +15,7 @@
 import crypto from 'node:crypto';
 import { validateGrants } from './wasmSandbox/grants';
 import type { CapabilityGrants } from './wasmSandbox/types';
+import { canonicalize } from './federation/canonical';
 
 export interface PluginManifest {
   id: string;
@@ -43,9 +44,19 @@ export function sha256Hex(input: string): string {
   return crypto.createHash('sha256').update(input).digest('hex');
 }
 
-/** Stable canonical JSON of the fields the signature covers (no `signature`). */
+/**
+ * Stable canonical JSON of the fields the signature covers (no `signature`).
+ *
+ * Uses {@link canonicalize} (recursive key sort) rather than a `JSON.stringify`
+ * replacer array. A replacer array is a key whitelist applied at **every** nesting
+ * level, not just the top one — so the previous implementation silently dropped
+ * every key nested under `capabilities`, which meant the HMAC covered an empty
+ * object while three very different grant sets all produced identical signature
+ * bytes. Recursive canonicalization sorts without filtering, so nested content
+ * is covered and is still order-independent.
+ */
 export function canonicalManifest(m: PluginManifest): string {
-  const ordered = {
+  return canonicalize({
     id: m.id,
     name: m.name,
     version: m.version,
@@ -55,8 +66,7 @@ export function canonicalManifest(m: PluginManifest): string {
     entry: m.entry ?? null,
     capabilities: m.capabilities ?? {},
     sourceHash: m.sourceHash ?? null,
-  };
-  return JSON.stringify(ordered, Object.keys(ordered).sort());
+  });
 }
 
 export function pluginSecret(): string | null {

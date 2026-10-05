@@ -1,4 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+// Spawn-heavy suite: see the rationale in scripts/_note (git history of this
+// file). 30s is the ordinary-tests budget, not a budget for real subprocess
+// sandboxes running in parallel with 300+ other files.
+vi.setConfig({ testTimeout: 180000, hookTimeout: 180000 });
+// SANDBOX_SUITE_TIMEOUT
 import {
   assessForgeCandidate,
   extractToolDoc,

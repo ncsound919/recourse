@@ -26,11 +26,37 @@ export type AuditDepth = 1 | 2 | 3 | 4;
  *  Membership is what matters; `auditorsForDepth` returns them in canonical
  *  `AUDITOR_IDS` order. */
 export const AUDIT_DEPTH_TIERS: Readonly<Record<AuditDepth, readonly AuditorIdT[]>> = {
-  1: ['grader'],
-  2: ['grader', 'reporank'],
-  3: ['grader', 'reporank', 'deep'],
+  1: ['grader', 'olympics'],
+  2: ['grader', 'reporank', 'olympics'],
+  3: ['grader', 'reporank', 'deep', 'olympics'],
   4: ['grader', 'reporank', 'codegang', 'deep', 'olympics'],
 };
+
+/**
+ * Which OpenHub audit preset an audit depth asks for.
+ *
+ * `olympics` is a member of EVERY tier above, which is a change of MEANING
+ * rather than of membership. It is served by OpenHub's audit suite — an
+ * AGGREGATOR running 21 scorers, including reporank, grader, deep, codegang and
+ * codenexus internally, plus 12 local deterministic ones. Treating it as one
+ * peer auditor meant depths 1-3 excluded it, and because the other four slots
+ * had no reachable backend, a learner-chosen shallow audit left the run with
+ * zero auditors and threw. Depth now controls HOW HARD OpenHub looks rather
+ * than whether it looks at all.
+ */
+export function openHubPresetForDepth(depth: AuditDepth | undefined): 'quick' | 'standard' | 'deep' | 'release' {
+  switch (depth) {
+    case 1:
+      return 'quick';
+    case 2:
+      return 'standard';
+    case 3:
+      return 'deep';
+    default:
+      // No depth means the caller did not constrain the run: audit fully.
+      return 'release';
+  }
+}
 
 export interface AuditSignals {
   /** Failure-rate posterior in [0,1]. */
