@@ -30,12 +30,35 @@ export interface SygusPrimitive {
   name: string;
   /** SMT-LIB `define-fun-rec` definition (used in the SMT file). */
   smtDefinition: string;
-  /** The TypeScript implementation (used by the differential oracle). */
-  tsImplementation: (input: unknown) => unknown;
+  /**
+   * The TypeScript implementation (used by the differential oracle).
+   *
+   * Variadic because `app`, `ins` and `filtf` are binary. Each one MUST agree
+   * with its `smtDefinition` — `differentialCheck` enforces this, which is what
+   * makes the table a single source of truth rather than two adjacent claims.
+   */
+  tsImplementation: (...args: unknown[]) => unknown;
   /** Grammar production args (nonterminal placeholders). */
   grammarArgs: string[];
   /** Human description. */
   description: string;
+}
+
+/** Coerce an unknown to a list of numbers, the way the SMT `L` sort means. */
+function asList(v: unknown): number[] {
+  if (!Array.isArray(v)) return [];
+  return v.map(Number).filter((n) => Number.isFinite(n));
+}
+
+/**
+ * Insert `a` into a sorted list, matching the SMT definition exactly:
+ * `(ite (<= a (hd x)) (cons a x) (cons (hd x) (ins a (tl x))))`.
+ */
+function insertSorted(a: number, xs: number[]): number[] {
+  const out = [...xs];
+  const at = out.findIndex((v) => a <= v);
+  out.splice(at < 0 ? out.length : at, 0, a);
+  return out;
 }
 
 /** List datatype declaration for the SMT file. */
@@ -50,42 +73,42 @@ export const LIST_PRIMITIVES: SygusPrimitive[] = [
   {
     name: "app",
     smtDefinition: `(define-fun-rec app ((x L) (y L)) L (ite ((_ is nil) x) y (cons (hd x) (app (tl x) y))))`,
-    tsImplementation: (x) => x, // binary, handled specially in oracle
+    tsImplementation: (x, y) => [...asList(x), ...asList(y)],
     grammarArgs: [],
     description: "append",
   },
   {
     name: "rev",
     smtDefinition: `(define-fun-rec rev ((x L)) L (ite ((_ is nil) x) nil (app (rev (tl x)) (cons (hd x) nil))))`,
-    tsImplementation: (x) => (Array.isArray(x) ? [...x].reverse() : x),
+    tsImplementation: (x) => [...asList(x)].reverse(),
     grammarArgs: ["Start"],
     description: "reverse",
   },
   {
     name: "ins",
     smtDefinition: `(define-fun-rec ins ((a Int) (x L)) L (ite ((_ is nil) x) (cons a nil) (ite (<= a (hd x)) (cons a x) (cons (hd x) (ins a (tl x))))))`,
-    tsImplementation: (x) => x, // internal helper
+    tsImplementation: (a, x) => insertSorted(Number(a), asList(x)),
     grammarArgs: [],
     description: "insert into sorted list",
   },
   {
     name: "sortf",
     smtDefinition: `(define-fun-rec sortf ((x L)) L (ite ((_ is nil) x) nil (ins (hd x) (sortf (tl x)))))`,
-    tsImplementation: (x) => (Array.isArray(x) ? [...x].sort((a, b) => a - b) : x),
+    tsImplementation: (x) => [...asList(x)].sort((a, b) => a - b),
     grammarArgs: ["Start"],
     description: "sort ascending",
   },
   {
     name: "dedupef",
     smtDefinition: `(define-fun-rec dedupef ((x L)) L (ite ((_ is nil) x) nil (cons (hd x) (dedupef (filtf (hd x) (tl x))))))`,
-    tsImplementation: (x) => (Array.isArray(x) ? [...new Set(x)] : x),
+    tsImplementation: (x) => [...new Set(asList(x))],
     grammarArgs: ["Start"],
     description: "remove duplicates",
   },
   {
     name: "filtf",
     smtDefinition: `(define-fun-rec filtf ((a Int) (x L)) L (ite ((_ is nil) x) nil (ite (= a (hd x)) (filtf a (tl x)) (cons (hd x) (filtf a (tl x))))))`,
-    tsImplementation: (x) => x, // internal helper
+    tsImplementation: (a, x) => asList(x).filter((v) => v !== Number(a)),
     grammarArgs: [],
     description: "filter out a value",
   },
@@ -213,9 +236,15 @@ export async function propose(spec: SygusSpec): Promise<ProposeResult> {
     // --sygus-stream enumerates multiple solutions and never terminates.
     // We collect exactly maxSolutions (or until the timeout) then kill the
     // process, so collection is deterministic rather than timeout-dependent.
+    //
+    // --check-synth-sol asks cvc5 to verify each solution against the
+    // constraints itself before streaming it. A candidate that fails its own
+    // check never reaches us, so the stream is pre-filtered by the solver's
+    // own verdict rather than only by ours downstream.
     const args = [
       "--sygus-stream",
       "--sygus-out=status",
+      "--check-synth-sol",
       `--seed=${seed}`,
       inputFile,
     ];
@@ -311,18 +340,57 @@ export function evaluateSygusTerm(term: string, input: number[]): number[] | nul
 }
 
 /**
- * Differential test: for a candidate term, check that the cvc5 model
- * agrees with the hand-rolled implementation on a set of inputs.
+ * One input-output case for the differential oracle. This is the SyGuS 2.1
+ * `oracle-constraint-io` shape: a concrete input and the output the candidate
+ * must produce on it. `SygusSpec.examples` already carries exactly these.
+ */
+export interface DifferentialCase {
+  input: number[];
+  expected: number[];
+}
+
+export interface DifferentialVerdict {
+  agree: boolean;
+  /** Cases actually compared. */
+  checked: number;
+  /** Cases skipped because the term could not be evaluated on them. */
+  unevaluated: number;
+  /** The first input where the candidate and the reference disagreed. */
+  disagreement?: { input: number[]; got: number[] | null; expected: number[] };
+}
+
+/**
+ * Differential test: for a candidate term, check that evaluating it agrees
+ * with the reference outputs on every case.
+ *
+ * This is the CEGIS oracle half of the pipeline: cvc5 proposes, this disposes.
+ * A disagreement returns the counterexample — the single most actionable
+ * artefact a verifier can produce — instead of a bare boolean. A term that
+ * cannot be evaluated on an input is SKIPPED and counted, never silently
+ * treated as agreement: with the old code every path through the loop ended at
+ * `return { agree: true }`, so this function could not fail.
  */
 export function differentialCheck(
   term: string,
-  inputs: number[][]
-): { agree: boolean; disagreement?: { input: number[]; cvc5: number[] | null } } {
-  for (const input of inputs) {
-    const cvc5Out = evaluateSygusTerm(term, input);
-    if (cvc5Out === null) continue;
-    // The term is ground truth for this check; disagreement is detected
-    // by comparing against the hand-rolled enumerator's result in the test.
+  cases: DifferentialCase[]
+): DifferentialVerdict {
+  let checked = 0;
+  let unevaluated = 0;
+  for (const c of cases) {
+    const got = evaluateSygusTerm(term, c.input);
+    if (got === null) {
+      unevaluated += 1;
+      continue;
+    }
+    checked += 1;
+    if (!sameList(got, c.expected)) {
+      return { agree: false, checked, unevaluated, disagreement: { input: c.input, got, expected: c.expected } };
+    }
   }
-  return { agree: true };
+  return { agree: checked > 0, checked, unevaluated };
+}
+
+/** Element-wise list equality for the oracle (delegates to the module's own list reading). */
+function sameList(a: number[], b: number[]): boolean {
+  return a.length === b.length && a.every((v, i) => Object.is(v, b[i]));
 }

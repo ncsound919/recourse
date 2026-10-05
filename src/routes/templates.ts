@@ -12,6 +12,7 @@ import { listComponentTemplates, getComponentTemplate, buildComponentFromTemplat
 import { executeTestSuite } from '../lib/executionSandbox.js';
 import { assessSourceSubstance } from '../lib/honestyMetrics.js';
 import { validateV5Manifest, validateIndexLockEntry, validateAdapterManifest, canonicalize, hashManifest } from '../lib/v5manifest.js';
+import { resolveLockKeys, verifyLockEntry } from '../lib/v5LockWriter.js';
 import {
   writeSelfHostedTool,
   verifySelfHostedEntry,
@@ -308,14 +309,36 @@ export function createTemplatesRouter(deps: TemplatesRouterDeps): Router {
     }
   });
 
-  // Validate an index.lock entry
+  // Validate an index.lock entry: schema first, then the HMAC signature.
+  //
+  // The signature half is what used to be missing — a schema-valid entry passed
+  // with no proof it was ever signed. `resolveLockKeys` reads the key from the
+  // server environment (see V5_LOCK_HMAC_KEY in .env.example); with no key
+  // configured the signature is reported as UNVERIFIED, which is neither
+  // "valid" nor "tampered" and is returned as such.
   router.post('/v5/lock/validate', (req, res) => {
     try {
       const result = validateIndexLockEntry(req.body);
+      if (!result.valid || !result.entry) {
+        res.json({ success: false, errors: result.errors, entry: result.entry ?? null, signature: { checked: false, valid: false as boolean | null, verifiedBy: null, reason: 'schema invalid — signature not attempted' } });
+        return;
+      }
+      const keys = resolveLockKeys();
+      if (!keys.current && !keys.previous) {
+        res.json({
+          success: true,
+          errors: result.errors,
+          entry: result.entry,
+          signature: { checked: false, valid: null, verifiedBy: null, reason: 'No signing key configured — signature unverifiable (set V5_LOCK_HMAC_KEY)' },
+        });
+        return;
+      }
+      const verdict = verifyLockEntry(result.entry, keys);
       res.json({
-        success: result.valid,
-        errors: result.errors,
-        entry: result.entry
+        success: verdict.valid,
+        errors: verdict.valid ? result.errors : [...result.errors, verdict.reason ?? 'signature invalid'],
+        entry: result.entry,
+        signature: { checked: true, valid: verdict.valid, verifiedBy: verdict.verifiedBy, reason: verdict.reason ?? null },
       });
     } catch (err: any) {
       res.status(400).json({ success: false, error: err.message });

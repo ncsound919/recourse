@@ -17,6 +17,7 @@
 import crypto from 'crypto';
 import type { V5IndexLockEntry, V5Manifest, AssuranceTier } from '../types';
 import { hashManifest } from './v5manifest';
+import { timingSafeEqualBuffers } from './cyberDefenseEngine';
 
 // ==========================================
 // Types
@@ -156,8 +157,14 @@ export function writeV5LockEntry(
       log_index: logIndex,
     };
 
-    // Sign the lock entry (without the signature field)
-    const signable = { ...lockEntry, signature: '' };
+    // Sign the lock entry. The canonical form EXCLUDES the signature field —
+    // `verifyLockEntry` destructures it away before re-signing, so signing it
+    // here (even as '') would produce a different string and every entry this
+    // function ever wrote would fail its own verification. That is exactly
+    // what used to happen: write signed `{..., signature: ''}`, verify signed
+    // `{...}` without the key, and the round-trip never worked. Nothing called
+    // either function, so nobody noticed.
+    const { signature: _placeholder, ...signable } = lockEntry;
     const signature = signer.sign(JSON.stringify(signable));
     lockEntry.signature = signature;
 
@@ -185,36 +192,113 @@ export function writeV5LockEntry(
 }
 
 // ==========================================
+// Key resolution — where the HMAC key lives
+// ==========================================
+
+/**
+ * Env names for the lock-entry signing key.
+ *
+ * The key lives in the server environment, alongside `RECOURSE_API_SECRET` —
+ * not in the repo, not in the database, and never in a lock entry. Two values
+ * because rotation must be overlap-safe (Convox/Stripe pattern): while both
+ * are set, entries signed by EITHER verify, so a key can be replaced without
+ * invalidating entries signed minutes earlier. `PREVIOUS` is removed after the
+ * grace window, never widened.
+ */
+export const V5_LOCK_HMAC_KEY_ENV = 'V5_LOCK_HMAC_KEY';
+export const V5_LOCK_HMAC_KEY_PREVIOUS_ENV = 'V5_LOCK_HMAC_KEY_PREVIOUS';
+
+export interface LockKeySet {
+  /** Signer for the current key, or null when no key is configured. */
+  current: HmacLockSigner | null;
+  /** Signer for the retiring key during a rotation grace window. */
+  previous: HmacLockSigner | null;
+}
+
+/**
+ * Resolve the signing keys from the environment.
+ *
+ * Returns nulls — never throws, never invents a key — when unconfigured. A
+ * caller that gets nulls must report "signature unverifiable" rather than
+ * treating the entry as unsigned-valid or unsigned-invalid: those are different
+ * claims and only one of them is true.
+ */
+export function resolveLockKeys(env: NodeJS.ProcessEnv = process.env): LockKeySet {
+  const current = typeof env[V5_LOCK_HMAC_KEY_ENV] === 'string' && (env[V5_LOCK_HMAC_KEY_ENV] as string).length >= 16
+    ? new HmacLockSigner(env[V5_LOCK_HMAC_KEY_ENV] as string)
+    : null;
+  const previous = typeof env[V5_LOCK_HMAC_KEY_PREVIOUS_ENV] === 'string' &&
+    (env[V5_LOCK_HMAC_KEY_PREVIOUS_ENV] as string).length >= 16
+    ? new HmacLockSigner(env[V5_LOCK_HMAC_KEY_PREVIOUS_ENV] as string)
+    : null;
+  return { current, previous };
+}
+
+// ==========================================
 // Lock entry verifier (for downstream consumers)
 // ==========================================
 
+export interface LockSignatureVerdict {
+  valid: boolean;
+  /**
+   * Which key verified the entry. Returned — not collapsed to a boolean —
+   * because the count of entries still verifying under `previous` is the
+   * metric that gates retiring it. Null when nothing verified.
+   */
+  verifiedBy: 'current' | 'previous' | null;
+  reason?: string;
+}
+
 export function verifyLockEntry(
   entry: V5IndexLockEntry,
-  signer: LockSigner
-): { valid: boolean; reason?: string } {
-  // Recompute signature
+  signer: LockSigner | LockKeySet
+): LockSignatureVerdict {
+  // Recompute the signature over the entry minus its signature field.
   const { signature, ...signable } = entry;
-  const expected = signer.sign(JSON.stringify(signable));
-  if (signature !== expected) {
-    return { valid: false, reason: 'Signature mismatch — lock entry was tampered with' };
+  const body = JSON.stringify(signable);
+
+  // Dual-key acceptance during a rotation grace window. BOTH candidates are
+  // always compared (no short-circuit): returning early on the first match
+  // would let response time reveal which key signed the entry.
+  const candidates: Array<{ signer: LockSigner; verifiedBy: 'current' | 'previous' }> =
+    'current' in signer
+      ? [
+          ...(signer.current ? [{ signer: signer.current, verifiedBy: 'current' as const }] : []),
+          ...(signer.previous ? [{ signer: signer.previous, verifiedBy: 'previous' as const }] : []),
+        ]
+      : [{ signer, verifiedBy: 'current' as const }];
+
+  if (candidates.length === 0) {
+    return { valid: false, verifiedBy: null, reason: 'No signing key configured — signature unverifiable' };
+  }
+
+  const presented = Buffer.from(signature ?? '', 'utf8');
+  let verifiedBy: 'current' | 'previous' | null = null;
+  for (const c of candidates) {
+    const expected = Buffer.from(c.signer.sign(body), 'utf8');
+    // Constant-time: `===` leaks key material through response-time variance.
+    if (timingSafeEqualBuffers(presented, expected)) verifiedBy = c.verifiedBy;
+  }
+  if (verifiedBy === null) {
+    return { valid: false, verifiedBy: null, reason: 'Signature mismatch — lock entry was tampered with' };
   }
 
   // Verify obligations are fully discharged
   if (entry.obligations.discharged + entry.obligations.waived !== entry.obligations.total) {
-    return { valid: false, reason: 'Obligations not fully discharged' };
+    return { valid: false, verifiedBy, reason: 'Obligations not fully discharged' };
   }
 
   // Verify model gaps are discharged
   if (entry.model_gaps.discharged !== entry.model_gaps.total) {
-    return { valid: false, reason: 'Model gaps not fully discharged' };
+    return { valid: false, verifiedBy, reason: 'Model gaps not fully discharged' };
   }
 
   // Verify statement_sha matches
   if (!entry.statement_sha || entry.statement_sha.length === 0) {
-    return { valid: false, reason: 'Missing statement_sha' };
+    return { valid: false, verifiedBy, reason: 'Missing statement_sha' };
   }
 
-  return { valid: true };
+  return { valid: true, verifiedBy };
 }
 
 // ==========================================

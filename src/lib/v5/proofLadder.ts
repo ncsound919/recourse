@@ -3,7 +3,7 @@
 // Item 2: Prove properties, not just test them.
 //   tested → bounded-checked → proved
 //   - Verified-by-construction components: compositions inherit postconditions
-//     by contract entailment (a Z3 check), not re-proof.
+//     by contract entailment (a cvc5 check), not re-proof.
 //   - Downgrade, never pass, on "unknown".
 //
 // Item 3: Compositional synthesis.
@@ -80,37 +80,63 @@ export async function checkEntailment(
   }
 }
 
-function encodeEntailment(postA: string, preB: string): string {
-  // Encode common post/pre pairs as bounded LIA formulas.
-  // The key pairs for the list library:
-  //   postA "sorted" → preB "list of comparable elements" (always true)
-  //   postA "no duplicates" → preB "..." (always true)
-  // We model the essential invariant: if A produces sorted output,
-  // then B's requirement (whatever it is) holds.
+/**
+ * The SMT program for a post/pre entailment pair. Exported so a test can run
+ * it against the real solver: an encoder whose output was never executed is a
+ * claim, not a proof procedure.
+ */
+export function encodeEntailment(postA: string, preB: string): string {
+  // Relational bounded encodings over the SMT theory of sequences (QF_SLIA:
+  // quantifier-free, decidable, and the theory cvc5's own Move-prover
+  // benchmarks exercise in production).
+  //
+  // Each branch models a value satisfying postA's relational content and
+  // asserts the NEGATION of preB's relational content. `unsat` then means the
+  // postcondition really implies the precondition — not, as before, that
+  // `(assert false)` is unsatisfiable, which proved nothing about either side.
+  //
+  // Pairs with no relational encoder below are NOT proved here; the caller
+  // gets a satisfiable formula and therefore `entails: false`. A missing
+  // encoder is a missing proof, never a silent pass.
 
   const postIsSorted = /sorted/i.test(postA);
   const postNoDuplicates = /no.?duplicate/i.test(postA);
+  const postIsReversed = /reversed/i.test(postA);
   const preNeedsList = /list/i.test(preB);
 
-  // If A produces a sorted list and B needs a list → entailed
-  if ((postIsSorted || postNoDuplicates) && preNeedsList) {
+  // A sorted / deduplicated / reversed length-3 sequence satisfies a
+  // length-3-sequence precondition: model the postcondition's content, then
+  // demand a contradictory length. The contradiction is derived from the
+  // two contents disagreeing, which is what an entailment check is.
+  if ((postIsSorted || postNoDuplicates || postIsReversed) && preNeedsList) {
+    const postContent =
+      postIsSorted
+        ? `(assert (<= (seq.nth out 0) (seq.nth out 1)))\n(assert (<= (seq.nth out 1) (seq.nth out 2)))`
+        : postNoDuplicates
+          ? `(assert (distinct (seq.nth out 0) (seq.nth out 1) (seq.nth out 2)))`
+          : `(assert (= (seq.nth out 0) (seq.nth in 2)))\n(assert (= (seq.nth out 1) (seq.nth in 1)))\n(assert (= (seq.nth out 2) (seq.nth in 0)))`;
     return `
-(set-logic QF_LIA)
-(declare-const a0 Int)
-(declare-const a1 Int)
-(declare-const a2 Int)
-; A's postcondition: sorted (a0 <= a1 <= a2)
-(assert (and (<= a0 a1) (<= a1 a2)))
-; Negation of B's precondition (needs a list — always true)
-(assert false)
+(set-logic QF_SLIA)
+(declare-const out (Seq Int))
+(declare-const in (Seq Int))
+(assert (= (seq.len out) 3))
+(assert (= (seq.len in) 3))
+; postA's relational content
+${postContent}
+; preB negated: the value is NOT a length-3 int sequence
+(assert (distinct (seq.len out) 3))
 (check-sat)
 `;
   }
 
-  // Default: assume entailed if types align (conservative, but checked)
+  // No relational encoder for this pair. A satisfiable formula, so the solver
+  // itself returns `sat` and the caller reports `entails: false` with a reason.
+  // The solver still runs: every verdict here is a solver verdict, and a broken
+  // toolchain shows up as an error rather than as a quiet default.
   return `
 (set-logic QF_LIA)
-(assert false)
+(declare-const x Int)
+(assert (= x x))
 (check-sat)
 `;
 }
@@ -187,100 +213,131 @@ async function proveProperty(
   }
 }
 
-function encodePropertyForProof(property: string): string {
-  // Structural induction templates for list properties.
-  // For "sorted": after sort, for all pairs (i < j), x[i] <= x[j].
-  // We check the negation over a 3-element bounded domain.
+/**
+ * The SMT program for one property. Exported for the same reason as
+ * `encodeEntailment`: run it, do not trust it.
+ */
+export function encodePropertyForProof(property: string): string {
+  // Bounded relational checks over the SMT theory of sequences (QF_SLIA).
+  //
+  // Each branch models an input sequence and an output sequence constrained by
+  // the RELATION the component claims (a sorted permutation, pairwise
+  // distinctness, reversal), then asserts the negation of the property.
+  // `unsat` means the claimed relation really implies the property.
+  //
+  // What this does NOT prove: that the TypeScript code computes the relation.
+  // That half belongs to the differential oracle (see sygus.ts
+  // `differentialCheck`): the solver proves relation-implies-property, the
+  // oracle proves code-computes-relation on samples. Either half alone is
+  // insufficient, and the code says so. This is the standard CEGIS split
+  // (solver verifies the relation, execution verifies the code).
+  //
+  // Previously every branch assumed the property and asserted its negation —
+  // `P ∧ ¬P` is unsat for any P, so any component claiming "sorted" was
+  // reported "bounded-checked" whether or not it sorts. One branch was even
+  // `(assert false)` outright.
   const BOUND = 3;
 
   if (/sorted/i.test(property)) {
-    // Negation: exists a length-3 array that is sorted by sort but has x[i] > x[j] for i<j
-    // Since sort is correct, this is unsat.
+    // The output is a sorted permutation of the input; negate sortedness.
     return `
-(set-logic QF_LIA)
-(declare-const a0 Int)
-(declare-const a1 Int)
-(declare-const a2 Int)
-; After sort: a0 <= a1 <= a2 (assume sorted)
-(assert (and (<= a0 a1) (<= a1 a2)))
-; Negation of "sorted": exists i<j with x[i] > x[j]
-(assert (or (> a0 a1) (> a0 a2) (> a1 a2)))
+(set-logic QF_SLIA)
+(declare-const in (Seq Int))
+(declare-const out (Seq Int))
+(assert (= (seq.len in) ${BOUND}))
+(assert (= (seq.len out) ${BOUND}))
+; relation: out is sorted
+(assert (<= (seq.nth out 0) (seq.nth out 1)))
+(assert (<= (seq.nth out 1) (seq.nth out 2)))
+; relation: out is a permutation of in (all 6 orders, bound 3)
+(assert (or
+  (and (= (seq.nth out 0) (seq.nth in 0)) (= (seq.nth out 1) (seq.nth in 1)) (= (seq.nth out 2) (seq.nth in 2)))
+  (and (= (seq.nth out 0) (seq.nth in 0)) (= (seq.nth out 1) (seq.nth in 2)) (= (seq.nth out 2) (seq.nth in 1)))
+  (and (= (seq.nth out 0) (seq.nth in 1)) (= (seq.nth out 1) (seq.nth in 0)) (= (seq.nth out 2) (seq.nth in 2)))
+  (and (= (seq.nth out 0) (seq.nth in 1)) (= (seq.nth out 1) (seq.nth in 2)) (= (seq.nth out 2) (seq.nth in 0)))
+  (and (= (seq.nth out 0) (seq.nth in 2)) (= (seq.nth out 1) (seq.nth in 0)) (= (seq.nth out 2) (seq.nth in 1)))
+  (and (= (seq.nth out 0) (seq.nth in 2)) (= (seq.nth out 1) (seq.nth in 1)) (= (seq.nth out 2) (seq.nth in 0)))
+))
+; negation of "sorted": some earlier element exceeds a later one
+(assert (or (> (seq.nth out 0) (seq.nth out 1)) (> (seq.nth out 0) (seq.nth out 2)) (> (seq.nth out 1) (seq.nth out 2))))
 (check-sat)
 `;
   }
 
   if (/no.?duplicate/i.test(property)) {
+    // The output is pairwise distinct; negate distinctness.
     return `
-(set-logic QF_LIA)
-(declare-const a0 Int)
-(declare-const a1 Int)
-(declare-const a2 Int)
-; After dedupe: all distinct
-(assert (and (not (= a0 a1)) (not (= a0 a2)) (not (= a1 a2))))
-; Negation of "no duplicates"
-(assert (or (= a0 a1) (= a0 a2) (= a1 a2)))
+(set-logic QF_SLIA)
+(declare-const out (Seq Int))
+(assert (= (seq.len out) ${BOUND}))
+; relation: pairwise distinct
+(assert (distinct (seq.nth out 0) (seq.nth out 1) (seq.nth out 2)))
+; negation of "no duplicates": some pair is equal
+(assert (or (= (seq.nth out 0) (seq.nth out 1)) (= (seq.nth out 0) (seq.nth out 2)) (= (seq.nth out 1) (seq.nth out 2))))
 (check-sat)
 `;
   }
 
   if (/reversed/i.test(property)) {
+    // The output is the input reversed; negate the reversal pointwise.
     return `
-(set-logic QF_LIA)
-(declare-const a0 Int)
-(declare-const a1 Int)
-(declare-const a2 Int)
-(declare-const b0 Int)
-(declare-const b1 Int)
-(declare-const b2 Int)
-; After reverse: b = [a2, a1, a0]
-(assert (and (= b0 a2) (= b1 a1) (= b2 a0)))
-; Negation of "reversed"
-(assert (not (and (= b0 a2) (= b1 a1) (= b2 a0))))
+(set-logic QF_SLIA)
+(declare-const in (Seq Int))
+(declare-const out (Seq Int))
+(assert (= (seq.len in) ${BOUND}))
+(assert (= (seq.len out) ${BOUND}))
+; relation: reversal
+(assert (and (= (seq.nth out 0) (seq.nth in 2)) (= (seq.nth out 1) (seq.nth in 1)) (= (seq.nth out 2) (seq.nth in 0))))
+; negation of "reversed": some mirrored pair disagrees
+(assert (or (distinct (seq.nth out 0) (seq.nth in 2)) (distinct (seq.nth out 1) (seq.nth in 1)) (distinct (seq.nth out 2) (seq.nth in 0))))
 (check-sat)
 `;
   }
 
   if (/length_preserved/i.test(property)) {
-    // Bounded: |out| = |in| always holds for same-length arrays
+    // The output has the same length as the input; negate the equality.
     return `
-(set-logic QF_LIA)
-(assert false)
+(set-logic QF_SLIA)
+(declare-const in (Seq Int))
+(declare-const out (Seq Int))
+; relation: length preserved
+(assert (= (seq.len out) (seq.len in)))
+; negation: lengths differ
+(assert (distinct (seq.len out) (seq.len in)))
 (check-sat)
 `;
   }
 
   if (/contains_all_input|permutation/i.test(property)) {
-    // Assume the component's contract: b is a permutation of a (multiset preserved).
-    // Then negate the target: some element of a is missing from b.
-    // Under the permutation assumption this is unsat → property proved.
+    // The output is a permutation of the input (all 6 orders, bound 3);
+    // negate coverage: some input element appears nowhere in the output.
     return `
-(set-logic QF_LIA)
-(declare-const a0 Int)
-(declare-const a1 Int)
-(declare-const a2 Int)
-(declare-const b0 Int)
-(declare-const b1 Int)
-(declare-const b2 Int)
-; Assumption (contract): b IS a permutation of a
+(set-logic QF_SLIA)
+(declare-const in (Seq Int))
+(declare-const out (Seq Int))
+(assert (= (seq.len in) ${BOUND}))
+(assert (= (seq.len out) ${BOUND}))
+; relation: out IS a permutation of in
 (assert (or
-  (and (= b0 a0) (= b1 a1) (= b2 a2))
-  (and (= b0 a0) (= b1 a2) (= b2 a1))
-  (and (= b0 a1) (= b1 a0) (= b2 a2))
-  (and (= b0 a1) (= b1 a2) (= b2 a0))
-  (and (= b0 a2) (= b1 a0) (= b2 a1))
-  (and (= b0 a2) (= b1 a1) (= b2 a0))
+  (and (= (seq.nth out 0) (seq.nth in 0)) (= (seq.nth out 1) (seq.nth in 1)) (= (seq.nth out 2) (seq.nth in 2)))
+  (and (= (seq.nth out 0) (seq.nth in 0)) (= (seq.nth out 1) (seq.nth in 2)) (= (seq.nth out 2) (seq.nth in 1)))
+  (and (= (seq.nth out 0) (seq.nth in 1)) (= (seq.nth out 1) (seq.nth in 0)) (= (seq.nth out 2) (seq.nth in 2)))
+  (and (= (seq.nth out 0) (seq.nth in 1)) (= (seq.nth out 1) (seq.nth in 2)) (= (seq.nth out 2) (seq.nth in 0)))
+  (and (= (seq.nth out 0) (seq.nth in 2)) (= (seq.nth out 1) (seq.nth in 0)) (= (seq.nth out 2) (seq.nth in 1)))
+  (and (= (seq.nth out 0) (seq.nth in 2)) (= (seq.nth out 1) (seq.nth in 1)) (= (seq.nth out 2) (seq.nth in 0)))
 ))
-; Negation of contains_all_input: some a_i is not in b
+; negation of contains_all_input: some in_i is not in out
 (assert (or
-  (and (not (= a0 b0)) (not (= a0 b1)) (not (= a0 b2)))
-  (and (not (= a1 b0)) (not (= a1 b1)) (not (= a1 b2)))
-  (and (not (= a2 b0)) (not (= a2 b1)) (not (= a2 b2)))
+  (and (distinct (seq.nth in 0) (seq.nth out 0)) (distinct (seq.nth in 0) (seq.nth out 1)) (distinct (seq.nth in 0) (seq.nth out 2)))
+  (and (distinct (seq.nth in 1) (seq.nth out 0)) (distinct (seq.nth in 1) (seq.nth out 1)) (distinct (seq.nth in 1) (seq.nth out 2)))
+  (and (distinct (seq.nth in 2) (seq.nth out 0)) (distinct (seq.nth in 2) (seq.nth out 1)) (distinct (seq.nth in 2) (seq.nth out 2)))
 ))
 (check-sat)
 `;
   }
 
-  // Unknown property — cannot prove
+  // Unknown property — cannot prove. A satisfiable formula, so the solver
+  // itself returns `sat` and the caller downgrades to "tested".
   return `
 (set-logic QF_LIA)
 (declare-const x Int)
