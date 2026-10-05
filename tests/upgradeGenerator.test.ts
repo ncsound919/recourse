@@ -86,7 +86,7 @@ describe('upgradeGenerator', () => {
     expect(memo?.content).toMatch(/## Recommendation/);
   });
 
-  it('tier A env-style gap is honest: requiresSandboxVerify and no fabricated code', async () => {
+  it('tier A env-style gap is honest: no fabricated code and nothing emitted', async () => {
     const gap = makeGap({
       tier: 'A',
       description: 'Secrets are committed in .env and must be rotated out of the working tree',
@@ -95,14 +95,31 @@ describe('upgradeGenerator', () => {
     });
     const proposal = await generateUpgrade(gap, makeProfile());
 
-    expect(proposal.requiresSandboxVerify).toBe(true);
+    // No planner ran, so no code exists and no placeholder is written either:
+    // a markdown stub is not an upgrade, and shipping one made runs look
+    // productive while delivering nothing.
+    expect(proposal.files).toEqual([]);
+    expect(proposal.skipped).toBe(true);
+    expect(proposal.reason).toBe('planner_unavailable');
+    expect(proposal.verification).toBeUndefined();
+    expect(proposal.requiresSandboxVerify).toBe(false);
     expect(proposal.description).toMatch(/model-based code synthesis is pending/i);
-    expect(proposal.files.length).toBeGreaterThan(0);
-    for (const file of proposal.files) {
-      expect(file.path.endsWith('.md')).toBe(true);
-      expect(file.path).not.toMatch(/\.(ts|tsx|js|jsx|py|mjs|cjs)$/);
-    }
+  });
+
+  it('opt-in allowDocStubs restores the markdown placeholder, still marked skipped', async () => {
+    const gap = makeGap({
+      tier: 'A',
+      description: 'Secrets are committed in .env and must be rotated out of the working tree',
+      fixability: 0.5,
+      affectedDimensions: ['securityPosture'],
+    });
+    const proposal = await generateUpgrade(gap, makeProfile(), { allowDocStubs: true });
+
+    expect(proposal.files).toHaveLength(1);
+    expect(proposal.files[0].path).toMatch(/^docs\/upgrades\/.*\.md$/);
     expect(proposal.files[0].content).toMatch(/model-based code synthesis is pending/i);
+    expect(proposal.skipped).toBe(true);
+    expect(proposal.reason).toBe('planner_unavailable');
   });
 
   it('with a planner, a tier A code gap emits real code + an acceptance test (verification)', async () => {
@@ -121,18 +138,58 @@ describe('upgradeGenerator', () => {
     });
 
     expect(proposal.requiresSandboxVerify).toBe(true);
+    expect(proposal.skipped).toBeUndefined();
     expect(proposal.verification?.files).toEqual(['src/sanitize.js']);
     expect(proposal.verification?.acceptanceTest).toMatch(/sanitize/);
     const file = proposal.files.find((f) => f.path === 'src/sanitize.js');
     expect(file?.content).toContain('export function sanitize');
   });
 
-  it('without a planner, a tier A code gap stays an honest placeholder (no fabricated source)', async () => {
+  it('a planner that returns nothing is reported as skipped, not as an upgrade', async () => {
     const gap = makeGap({ tier: 'A', description: 'Implement input sanitization for the upload endpoint', fixability: 0.6 });
     const proposal = await generateUpgrade(gap, makeProfile(), { planner: async () => null });
-    expect(proposal.requiresSandboxVerify).toBe(true);
+    expect(proposal.skipped).toBe(true);
+    expect(proposal.reason).toBe('planner_unavailable');
+    expect(proposal.files).toEqual([]);
     expect(proposal.verification).toBeUndefined();
-    for (const f of proposal.files) expect(f.path.endsWith('.md')).toBe(true);
+  });
+
+  it('a planner that returns an unusable plan is reported as planner_invalid', async () => {
+    const gap = makeGap({ tier: 'A', description: 'Implement input sanitization for the upload endpoint', fixability: 0.6 });
+    const emptyPlan = await generateUpgrade(gap, makeProfile(), {
+      planner: async () => ({ files: [], acceptanceTest: 'assert true;' }),
+    });
+    expect(emptyPlan.skipped).toBe(true);
+    expect(emptyPlan.reason).toBe('planner_invalid');
+    expect(emptyPlan.files).toEqual([]);
+
+    const noTest = await generateUpgrade(gap, makeProfile(), {
+      planner: async () => ({ files: [{ file: 'src/a.ts', content: 'export const a = 1;' }], acceptanceTest: '   ' }),
+    });
+    expect(noTest.skipped).toBe(true);
+    expect(noTest.reason).toBe('planner_invalid');
+
+    const threw = await generateUpgrade(gap, makeProfile(), {
+      planner: async () => { throw new Error('model offline'); },
+    });
+    expect(threw.skipped).toBe(true);
+    expect(threw.reason).toBe('planner_unavailable');
+  });
+
+  it('a multi-file plan collapses duplicate paths rather than emitting them twice', async () => {
+    const gap = makeGap({ tier: 'A', description: 'Implement input sanitization for the upload endpoint', fixability: 0.6 });
+    const proposal = await generateUpgrade(gap, makeProfile(), {
+      planner: async () => ({
+        files: [
+          { file: 'src/sanitize.js', content: 'export const first = 1;' },
+          { file: 'src/SANITIZE.js', content: 'export const second = 2;' },
+          { file: 'src/empty.js', content: '   ' },
+        ],
+        acceptanceTest: 'assert first === 1;',
+      }),
+    });
+    expect(proposal.files.map((f) => f.path)).toEqual(['src/sanitize.js']);
+    expect(proposal.verification?.files).toEqual(['src/sanitize.js']);
   });
 
   it('tier A gitignore-style gap produces a real .gitignore template without sandbox verify', async () => {

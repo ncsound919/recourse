@@ -222,6 +222,30 @@ describe('runLoop with a real code planner', () => {
     expect(out.state).toMatchObject({ status: 'idle' });
     expect(out.context.currentProposal).toBeNull();
   });
+
+  it('records every proposal as skipped and writes no files when the planner is offline', async () => {
+    const repo = makeTmpRepo();
+    const profile = makeProfile({ repoPath: repo, autoMerge: true });
+    profile.gaps = ['Refactor input handling to sanitize the upload endpoint (code quality)'];
+    const pass = vi.fn(async () => ({ passed: true, output: 'ok' }));
+
+    const out = await runLoop({
+      profile,
+      dryRun: true,
+      adapters: { grader: graderFixture },
+      planner: async () => null,
+      gateExecutors: { sandbox: DEFAULT_EXECUTORS.sandbox, lint: pass, typecheck: pass, tests: pass },
+    });
+
+    // A skipped proposal has no files, so a gate with nothing to check would pass
+    // it. It must not be selected, and the run must say so out loud.
+    expect(out.state).toMatchObject({ status: 'idle' });
+    expect(out.context.currentProposal).toBeNull();
+    expect(out.skipped?.length).toBeGreaterThan(0);
+    for (const s of out.skipped ?? []) expect(s.reason).toBe('planner_unavailable');
+    // And nothing was written: not the code, not a markdown placeholder.
+    expect(fs.readdirSync(repo)).toEqual([]);
+  });
 });
 
 describe('runLoop when no gap passes the gate', () => {

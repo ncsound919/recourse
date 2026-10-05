@@ -83,6 +83,14 @@ export interface GenerateUpgradeOptions {
    * run with a markdown placeholder).
    */
   planner?: (gap: GapT, profile: BusinessProfileT) => Promise<PlannedChange | null>;
+  /**
+   * Emit a `docs/upgrades/*.md` placeholder when no planner produced code.
+   * Off by default: a placeholder is not an upgrade, and counting one as a run
+   * output is what made runs look productive while shipping nothing.
+   */
+  allowDocStubs?: boolean;
+  /** Why the planner produced nothing: reported on the skipped proposal. */
+  plannerUnavailableReason?: 'planner_unavailable' | 'planner_invalid';
 }
 
 export async function generateUpgrade(
@@ -157,10 +165,12 @@ async function buildTierA(
   // real suite. The generator itself never fabricates source.
   if (opts.planner) {
     let planned: PlannedChange | null = null;
+    let reason: 'planner_unavailable' | 'planner_invalid' = opts.plannerUnavailableReason ?? 'planner_unavailable';
     try {
       planned = await opts.planner(gap, profile);
     } catch {
       planned = null;
+      reason = 'planner_unavailable';
     }
     if (planned) {
       const files = upgradeFilesFromPlan(planned);
@@ -182,20 +192,26 @@ async function buildTierA(
           },
         };
       }
+      reason = 'planner_invalid';
     }
-    // No usable plan: fall back to the honest markdown placeholder. (F2 turns
-    // this into a `skipped` proposal with no files.)
+    // No usable plan. Say so instead of shipping a placeholder that reads like
+    // an upgrade: a run with the model offline must be visible as a run that
+    // produced nothing, not as a run that produced markdown.
     return {
       description: `${description}\n\n${HONEST_CODE_NOTE}`,
-      files: [docStubFile(gap, profile, description)],
-      requiresSandboxVerify: true,
+      files: opts.allowDocStubs ? [docStubFile(gap, profile, description)] : [],
+      requiresSandboxVerify: false,
+      skipped: true,
+      reason,
     };
   }
 
   return {
     description: `${description}\n\n${HONEST_CODE_NOTE}`,
-    files: [docStubFile(gap, profile, description)],
-    requiresSandboxVerify: true,
+    files: opts.allowDocStubs ? [docStubFile(gap, profile, description)] : [],
+    requiresSandboxVerify: false,
+    skipped: true,
+    reason: opts.plannerUnavailableReason ?? 'planner_unavailable',
   };
 }
 

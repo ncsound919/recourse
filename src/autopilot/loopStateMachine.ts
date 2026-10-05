@@ -85,7 +85,17 @@ export type LoopRunOptions = {
   externalAuditSignals?: Array<{ uncertainty: number; meanReward: number; attempts: number }>;
 };
 
-export type LoopOutcome = { state: LoopState; context: LoopContext };
+export type LoopOutcome = { state: LoopState; context: LoopContext; skipped?: SkippedProposal[] };
+
+/**
+ * A proposal that produced nothing, and why. Surfaced on the outcome (and in the
+ * run report) so a run whose planner was offline is visibly distinct from a run
+ * that found no gaps worth doing.
+ */
+export interface SkippedProposal {
+  gapId: string;
+  reason: string;
+}
 
 const DEFAULT_AUDIT_DIR = 'data/business-profiles';
 
@@ -325,11 +335,19 @@ export async function runLoop(options: LoopRunOptions): Promise<LoopOutcome> {
     loadLedger(options.ledgerRoot ?? DEFAULT_LEDGER_ROOT),
   );
   let current: UpgradeProposalT | null = null;
+  // A proposal with no files (planner offline, or a plan it could not use) would
+  // sail through a gate that has nothing to check and then be reported as this
+  // run's upgrade. It is recorded as skipped instead and never selected.
+  const skipped: SkippedProposal[] = [];
   try {
     for (const gap of queue.gaps) {
       if (quarantinedGaps.has(gap.id)) continue;
       if (!options.dryRun && gap.tier !== 'A') continue;
       const proposal = await generateUpgrade(gap, profile, options.planner ? { planner: options.planner } : {});
+      if (proposal.skipped === true) {
+        skipped.push({ gapId: gap.id, reason: proposal.reason ?? 'planner_unavailable' });
+        continue;
+      }
       const result = await runGate(
         proposal,
         repo.localPath,
@@ -346,10 +364,11 @@ export async function runLoop(options: LoopRunOptions): Promise<LoopOutcome> {
     return {
       state: { status: 'error', reason: `generate/gate failed: ${errMsg(err)}` },
       context,
+      skipped,
     };
   }
   if (!current) {
-    return { state: { status: 'idle' }, context };
+    return { state: { status: 'idle' }, context, skipped };
   }
   context.currentProposal = current;
 
