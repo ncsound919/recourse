@@ -40,6 +40,7 @@ import { calibrationReport, isCalibrated } from '../lib/calibration';
 import type {
   Directive,
   EpisodeReport,
+  GeneBelief,
   LedgerEntry,
   LearnerState,
   MetaParams,
@@ -49,6 +50,29 @@ import type {
 const FORECAST_WINDOW_SIZE = 200;
 
 const MAX_DIRECTIVES = 20;
+/**
+ * Current learner algorithm version. Bumped whenever the episode transition
+ * changes in a way the previous version cannot reproduce, so an old chain is
+ * reported as `partial` rather than as a divergence nobody observed.
+ */
+export const LEARNER_SCHEMA = 2;
+/**
+ * Belief evidence carried across a gene mutation.
+ *
+ * A mutated gene keeps its id, so its Beta(a, b) is nominally "about" the new
+ * code and is not. Keeping `VERSION_KEEP` of the old mass preserves a little
+ * signal about the gene's lineage while `PRIOR_STRENGTH` keeps the posterior
+ * away from a confident 0 or 1 — a version that has been evaluated once should
+ * not be able to veto a different version's first result.
+ */
+const PRIOR_STRENGTH = 2;
+const VERSION_KEEP = 0.25;
+/**
+ * Ceiling on effective sample size. Without it alpha/beta grow without bound,
+ * the posterior stops moving, and a gene that once looked good can never be
+ * shown to be bad again. Capping preserves the mean and restores adaptivity.
+ */
+const MAX_ESS = 40;
 /** Ledger window a replay may re-execute. The window always starts at
  *  genesis, and a window shorter than the chain is reported as
  *  `partial: true` — never as a verified or diverged chain. The cap exists
@@ -88,9 +112,11 @@ function stableStringify(value: unknown): string {
 const h8 = (s: string) => hashString(s).toString(16).padStart(8, '0');
 
 /** Canonical projection of state — excludes timestamps so replay
- *  reproduces identical hashes. */
+ *  reproduces identical hashes. `schema` is included: the algorithm that
+ *  produced these values is part of what they mean. */
 function canonicalState(s: LearnerState): unknown {
   return {
+    schema: s.schema,
     episode: s.episode,
     meta: s.meta,
     selfScore: s.selfScore,
@@ -102,6 +128,36 @@ function canonicalState(s: LearnerState): unknown {
     geneBeliefs: s.geneBeliefs,
     directives: s.directives,
   };
+}
+
+/**
+ * Shrink a belief toward the prior because the gene's code changed under it.
+ * Keeps the posterior mean, drops the accumulated mass to roughly
+ * `PRIOR_STRENGTH + VERSION_KEEP * (n - PRIOR_STRENGTH)`, and resets the attempt
+ * count so the selection layer does not treat the new version as already
+ * evaluated.
+ */
+function shrinkOnVersionChange(belief: GeneBelief, versionHash: string): void {
+  const n = belief.alpha + belief.beta;
+  const keep = Math.min(1, (PRIOR_STRENGTH + VERSION_KEEP * (n - PRIOR_STRENGTH)) / n);
+  belief.alpha = round4(1 + (belief.alpha - 1) * keep);
+  belief.beta = round4(1 + (belief.beta - 1) * keep);
+  belief.attempts = 0;
+  belief.versionHash = versionHash;
+}
+
+/** Scale alpha/beta down to MAX_ESS, preserving the posterior mean. */
+function capEffectiveSampleSize(belief: GeneBelief): void {
+  const n = belief.alpha + belief.beta;
+  if (n <= MAX_ESS) return;
+  const scale = MAX_ESS / n;
+  belief.alpha = round4(belief.alpha * scale);
+  belief.beta = round4(belief.beta * scale);
+}
+
+/** The gene version a belief is keyed against: explicit hash, else code hash. */
+function versionOf(gene: EvalGene): string {
+  return gene.versionHash ?? h8(gene.code);
 }
 
 interface EvalGene {
@@ -340,6 +396,9 @@ export class RecursiveLearner {
       b.attempts += 1;
       b.alpha = round4(b.alpha + r);
       b.beta = round4(b.beta + (1 - r));
+      // Same cap as the gene loop: without it a long-lived real tool's
+      // posterior freezes and it can never be shown to have regressed.
+      capEffectiveSampleSize(b);
       b.meanReward = round4(b.meanReward + meta.learningRate * (r - b.meanReward));
       b.weight = b.meanReward;
       b.lastEpisode = state.episode;
@@ -384,8 +443,13 @@ export class RecursiveLearner {
    *  exactly what that replay proved. Each episode re-runs against the gene
    *  set and external input recorded in its own ledger entry (falling back
    *  to the current selection for pre-`input.genes` entries). The report is
-   *  `partial` whenever the window or the registry makes a full reproduction
-   *  impossible — `matchesHead` is only true for a complete, undrifted run. */
+   *  `partial` whenever the window, the registry, or the learner algorithm
+   *  makes a full reproduction impossible — `matchesHead` is only true for a
+   *  complete, undrifted run.
+   *
+   *  A chain written by an older algorithm cannot be re-executed by this one.
+   *  Replaying it would report a divergence that is really just "the code
+   *  changed", so the replay stops at that episode and says which one. */
   async replayFromGenesis(): Promise<ReplayReport> {
     return this.mutex.runExclusive(() => this.replayFromGenesisUnlocked());
   }
@@ -398,18 +462,25 @@ export class RecursiveLearner {
 
     let state = this.makeGenesis();
     let replayedHead = state.ledgerHead;
+    let replayed = 0;
     let divergedAtEpisode: number | null = null;
     let driftAtEpisode: number | null = null;
+    let schemaChangedAtEpisode: number | null = null;
     const fallbackGenes = await this.activeGenes();
     const registry = await this.geneRegistry.list();
     const byId = new Map(registry.map((g) => [g.id, g]));
 
     for (let i = 0; i < entries.length; i++) {
       const entry = entries[i];
+      if ((entry.schema ?? 1) !== LEARNER_SCHEMA) {
+        schemaChangedAtEpisode = entry.episode;
+        break;
+      }
       const genes = replayGenes(entry, fallbackGenes, byId);
       const result = this.execute(state, genes, entry.input?.externalScore);
       state = result.state;
       replayedHead = result.entry.stateHash;
+      replayed += 1;
       if (result.entry.inputHash !== entry.inputHash) {
         // inputHash covers only the evaluated gene set, so a mismatch means
         // the recorded input no longer resolves — drift, not corruption.
@@ -419,13 +490,15 @@ export class RecursiveLearner {
       }
     }
 
-    const partial = entries.length < totalEpisodes || driftAtEpisode !== null;
+    const partial =
+      replayed < totalEpisodes || driftAtEpisode !== null || schemaChangedAtEpisode !== null;
     return {
-      replayed: entries.length,
+      replayed,
       totalEpisodes,
       partial,
       driftAtEpisode,
       divergedAtEpisode,
+      schemaChangedAtEpisode,
       matchesHead: !partial && divergedAtEpisode === null && replayedHead === storedHead,
       storedHead,
       replayedHead,
@@ -514,6 +587,17 @@ export class RecursiveLearner {
         lastEpisode: 0,
       };
 
+      // A mutated gene keeps its id. If this evidence was collected against
+      // different code, shrink it toward the prior BEFORE forecasting —
+      // otherwise the forecast for new code is the old code's posterior mean,
+      // and the very first result of the new version is scored against a
+      // prediction the old version produced.
+      const vh = versionOf(gene);
+      if (belief.versionHash !== undefined && belief.versionHash !== vh) {
+        shrinkOnVersionChange(belief, vh);
+      }
+      belief.versionHash = vh;
+
       const priorMean = belief.alpha / (belief.alpha + belief.beta);
       predictionErrors.push(Math.abs(reward - priorMean));
       episodeForecasts.push({ predicted: round4(priorMean), realized: round4(reward) });
@@ -521,6 +605,9 @@ export class RecursiveLearner {
       belief.alpha = round4(belief.alpha + reward);
       belief.beta = round4(belief.beta + (1 - reward));
       belief.attempts += 1;
+      // Unbounded alpha/beta would freeze the posterior; cap the mass so a
+      // gene can still be shown to have regressed.
+      capEffectiveSampleSize(belief);
       belief.meanReward = round4(belief.meanReward + meta.learningRate * (reward - belief.meanReward));
       belief.weight = belief.meanReward;
       belief.lastEpisode = state.episode;
@@ -590,6 +677,7 @@ export class RecursiveLearner {
       prevHash: state.ledgerHead,
       inputHash,
       stateHash,
+      schema: LEARNER_SCHEMA,
       input: {
         genes: genes.map((g) => ({ id: g.id, versionHash: g.versionHash })),
         externalScore: typeof externalScore === 'number' && Number.isFinite(externalScore)
@@ -711,7 +799,7 @@ export class RecursiveLearner {
       minForecasts: 10,
     };
     return {
-      schema: 1,
+      schema: LEARNER_SCHEMA,
       episode: 0,
       meta,
       geneBeliefs: {},
@@ -739,14 +827,24 @@ export class RecursiveLearner {
   }
 
   /** Backfill fields a stored state may predate. `execute()` pushes onto
-   *  `state.forecastWindow` unconditionally, so a save written before that
-   *  field existed (or a truncated/partial write) threw on the very first
-   *  episode and the learner never advanced past the episode it loaded with.
-   *  Repair on load instead of crashing; the repair is persisted once. */
+   * `state.forecastWindow` unconditionally, so a save written before that
+   * field existed (or a truncated/partial write) threw on the very first
+   * episode and the learner never advanced past the episode it loaded with.
+   * Repair on load instead of crashing; the repair is persisted once.
+   *
+   * A belief with no `versionHash` is left undefined on purpose: the next
+   * episode sets it and skips the prior shrink. Applying the shrink here
+   * would silently discard evidence that is perfectly good for the version it
+   * was actually collected against. */
   private migrateState(raw: LearnerState): { state: LearnerState; changed: boolean } {
     const genesis = this.makeGenesis();
     let changed = false;
     const state = { ...genesis, ...raw } as LearnerState;
+
+    if (raw.schema !== LEARNER_SCHEMA) {
+      state.schema = LEARNER_SCHEMA;
+      changed = true;
+    }
 
     const meta = { ...genesis.meta, ...((raw.meta ?? {}) as Partial<MetaParams>) } as MetaParams;
     for (const key of Object.keys(genesis.meta) as Array<keyof MetaParams>) {

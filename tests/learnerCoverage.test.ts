@@ -8,6 +8,7 @@ import {
   FileLearnerStore,
   SupabaseLearnerStore,
   createLearnerStore,
+  LEARNER_SCHEMA,
 } from '../src/dream/learner';
 import type { GeneRegistryStore } from '../src/dream/mutator';
 import type { RegistryGene } from '../src/dream/mutator-types';
@@ -38,7 +39,7 @@ class MockRegistry implements GeneRegistryStore {
 
 function genesisState(): LearnerState {
   return {
-    schema: 1, episode: 0,
+    schema: LEARNER_SCHEMA, episode: 0,
     meta: { learningRate: 0.2, temperature: 0.5, promotionThreshold: 0.85, decayFactor: 0.5, calibrationGate: 0.20, minForecasts: 10 },
     geneBeliefs: {}, selfScore: 0.5, calibrationError: 0.5, brierScore: 0, ece: 0.5,
     forecastWindow: [], directives: [], ledgerHead: '00000000',
@@ -278,6 +279,7 @@ describe('learner.ts coverage', () => {
       const report = await learner.replayFromGenesis();
       expect(report.replayed).toBe(2);
       expect(report.divergedAtEpisode).toBeNull();
+      expect(report.schemaChangedAtEpisode).toBeNull();
       expect(report.matchesHead).toBe(true);
     });
 
@@ -290,6 +292,117 @@ describe('learner.ts coverage', () => {
       const report = await learner.replayFromGenesis();
       expect(report.divergedAtEpisode).toBe(1);
       expect(report.matchesHead).toBe(false);
+    });
+
+    it('stops at an entry written by an older algorithm instead of claiming divergence', async () => {
+      const reg = new MockRegistry([makeGene('g1', 'g1', 'coding')]);
+      const learner = freshLearner(reg);
+      await learner.runEpisode();
+      await learner.runEpisode();
+      const ledger = (globalThis as unknown as { __learnerLedger: LedgerEntry[] }).__learnerLedger;
+      // Episode 2 pretends to come from the pre-versionHash algorithm.
+      ledger[1] = { ...ledger[1], schema: 1 };
+      const report = await learner.replayFromGenesis();
+      expect(report.schemaChangedAtEpisode).toBe(2);
+      // Reproducing it would produce a hash mismatch, but that mismatch would
+      // mean "the code changed", not "the chain diverged".
+      expect(report.divergedAtEpisode).toBeNull();
+      expect(report.partial).toBe(true);
+      expect(report.replayed).toBe(1);
+      expect(report.matchesHead).toBe(false);
+    });
+  });
+
+  describe('gene beliefs are keyed by version, not just id', () => {
+    /**
+     * A gene with no test vectors, so its reward is exactly the external score
+     * the test supplies. With vectors present the reward is a 50/50 blend with
+     * the property score and the controlled values below would not hold.
+     */
+    function rewardOnlyGene(id: string, versionHash = 'abcdef01'): RegistryGene {
+      return { ...makeGene(id, id, 'coding'), testVectors: [], versionHash };
+    }
+
+    async function warm(reg: MockRegistry, reward: number, episodes: number) {
+      const learner = freshLearner(reg);
+      for (let i = 0; i < episodes; i++) await learner.runEpisode(reward);
+      return learner;
+    }
+
+    it('shrinks toward the prior when a gene is mutated under its belief', async () => {
+      const gene = rewardOnlyGene('g1');
+      const reg = new MockRegistry([gene]);
+      const learner = await warm(reg, 0.95, 30);
+      const before = (await learner.status()).geneBeliefs.g1;
+      expect(before.alpha).toBeGreaterThan(10);
+      expect(before.versionHash).toBe('abcdef01');
+
+      // Same id, new code.
+      gene.versionHash = 'ffff9999';
+      await learner.runEpisode(0.05);
+      const after = (await learner.status()).geneBeliefs.g1;
+
+      expect(after.versionHash).toBe('ffff9999');
+      expect(after.alpha + after.beta).toBeLessThan(before.alpha + before.beta);
+      // The attempt count resets: the new version has not been evaluated yet.
+      expect(after.attempts).toBe(1);
+    });
+
+    it('forecasts the new version closer to its own results than the old version would', async () => {
+      // 30 high-reward episodes, then a mutation that always fails.
+      const gene = rewardOnlyGene('g1');
+      const reg = new MockRegistry([gene]);
+      const learner = await warm(reg, 0.95, 30);
+      gene.versionHash = 'ffff9999';
+
+      // Baseline: what the OLD belief would have predicted for the new version.
+      const stalePosterior = (await learner.status()).geneBeliefs.g1;
+      const baselinePrediction = stalePosterior.alpha / (stalePosterior.alpha + stalePosterior.beta);
+      const actual = 0.05;
+
+      await learner.runEpisode(actual);
+      const ledger = (globalThis as unknown as { __learnerLedger: LedgerEntry[] }).__learnerLedger;
+      const forecast = ledger[ledger.length - 1].forecasts![0];
+
+      expect(forecast.realized).toBe(actual);
+      // The shrink must move the prediction away from the old version's ~0.96.
+      expect(baselinePrediction).toBeGreaterThan(0.9);
+      expect(Math.abs(forecast.predicted - actual)).toBeLessThan(
+        Math.abs(baselinePrediction - actual),
+      );
+    });
+
+    it('leaves an unversioned belief alone on its first sighting', async () => {
+      const reg = new MockRegistry([rewardOnlyGene('g1')]);
+      freshLearner(reg);
+      seedState({
+        geneBeliefs: {
+          g1: belief('g1', { alpha: 20, beta: 1, attempts: 19, versionHash: undefined }),
+        },
+      });
+      const seeded = learnerOnSeededState(reg);
+      await seeded.runEpisode(0.5);
+      const after = (await seeded.status()).geneBeliefs.g1;
+      // No shrink: the evidence is still valid for the version it was
+      // collected against, so it only gained this episode's outcome. A shrink
+      // would have pulled alpha down to roughly 7.
+      expect(after.alpha).toBeCloseTo(20.5, 3);
+      expect(after.beta).toBeCloseTo(1.5, 3);
+      expect(after.versionHash).toBe('abcdef01');
+    });
+
+    it('caps effective sample size so a regressed gene can still be shown to regress', async () => {
+      const reg = new MockRegistry([rewardOnlyGene('g1')]);
+      const learner = freshLearner(reg);
+      for (let i = 0; i < 62; i++) await learner.runEpisode(0.99);
+      const locked = (await learner.status()).geneBeliefs.g1;
+      expect(locked.alpha + locked.beta).toBeLessThanOrEqual(40.001);
+      expect(locked.alpha / (locked.alpha + locked.beta)).toBeGreaterThan(0.95);
+
+      // With the cap in place, a run of failures can still move the posterior.
+      for (let i = 0; i < 30; i++) await learner.runEpisode(0.0);
+      const after = (await learner.status()).geneBeliefs.g1;
+      expect(after.alpha / (after.alpha + after.beta)).toBeLessThan(0.6);
     });
   });
 
