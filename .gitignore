@@ -46,3 +46,7 @@ scripts/kw-import-phoenix.js
 
 # runtime pid files for background loops (recreated on every start)
 *.pid
+
+# OpenHub audit-tooling runtime state (not source)
+.openhub/
+.openhub/
