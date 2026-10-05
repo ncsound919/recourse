@@ -150,10 +150,10 @@ export function createCapabilityRuntimeRouter(deps: CapabilityRuntimeRouterDeps)
   });
 
   // Prometheus metrics exposition (Wave 2 observability).
-  router.get('/metrics', (req, res) => {
+  router.get('/metrics', async (req, res) => {
     if (!deps.telemetryAuthorized(req, res)) return;
     res.setHeader('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
-    res.send(metricsText());
+    res.send(await metricsText());
   });
 
   // Efficiency telemetry (P0/P1): completion-cache hit rate, sleep-time-compute

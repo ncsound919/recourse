@@ -1,5 +1,17 @@
+#!/usr/bin/env tsx
 // EcoShorthand v3 — text + binary + batch + wildcards + conditions + temporal + schemas + adaptive dict
 // Services: axiom(@a) recourse(@r) dsh(@d) openhub(@o) localjev(@l)
+//
+// A STANDALONE BENCHMARK, not a library: everything below `samples` prints a
+// compression report to stdout at module scope. It lived at src/lib/ecoShorthand.ts,
+// where it read as a working capability that the product could call — nothing
+// imported it, not even a test, and `scripts/orphan-check.mts` correctly flagged
+// it. Moved here because that is what it is. Run it:
+//   npx tsx scripts/eco-shorthand.ts
+//
+// The wire format below is NOT what any Recourse transport uses (see
+// src/lib/trendSidecarClient.ts, src/routes/bridges.ts — all JSON/HTTP). Treat
+// this as a measurement of an idea, not as a live protocol.
 
 export type Service = "axiom" | "recourse" | "dsh" | "openhub" | "localjev";
 export type Op = "?" | "!" | "~" | ">" | "<" | "=" | "+" | "-" | "*" | "&" | "%" | "^" | "@" | "$";
@@ -118,7 +130,11 @@ export function encode(m: Message): string {
 }
 
 export function decode(s: string): Message {
-  const re = /^(@[ardol])(@[ardol](?:&@[ardol])*)([?!~><=+\-*&%@$^])([^:\[\]{}]+)(?::([a-z]+))?(?:\[([^\]]*)\])?(?:\{([^}]*)\})?(?:\?([^\s]+)(==|!=|>|<|>=|<=)([^\s]+))?(?:\^(\w+):(\d+)(ms|s|m|h)?)?(?:#(\w+))?(v(\d+))?$/;
+  // `schema` may contain both ':' (the bundled sample uses `event:stream`) and
+  // the letter 'v', so it cannot be `\w+` or `[^#v]+` — both fail on the very
+  // first round-trip of a file that had never been run. Anchored non-greedy
+  // with `version` pinned to a trailing `v<digits>`.
+  const re = /^(@[ardol])(@[ardol](?:&@[ardol])*)([?!~><=+\-*&%@$^])([^:\[\]{}]+)(?::([a-z]+))?(?:\[([^\]]*)\])?(?:\{([^}]*)\})?(?:\?([^\s]+)(==|!=|>|<|>=|<=)([^\s]+))?(?:\^(\w+):(\d+)(ms|s|m|h)?)?(?:#(.+?))?(?:v(\d+))?$/;
   const m = s.match(re);
   if (!m) throw new Error(`Parse error: ${s}`);
   const [, srcRaw, dstRaw, op, path, typeCode, argsRaw, metaRaw, condField, condOp, condValue, tempType, tempValue, tempUnit, schema, ver] = m;

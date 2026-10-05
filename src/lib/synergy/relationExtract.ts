@@ -14,6 +14,7 @@
  */
 import type { Rel } from './types.js';
 import { canonicalizeTerm } from './vocabulary.js';
+import { extractAstRelations } from '../astRelExtract.js';
 
 export type RelationBasisKind = 'declared' | 'translation' | 'suite';
 
@@ -50,28 +51,64 @@ function splitArgs(raw: string): string[] {
  * Parse explicit `@rel <functor> <arg> [->|,| ] ...` annotations from source
  * comments. Only allowlisted functors are admitted; anything else is noted and
  * dropped (never silently turned into a placeholder relation).
+ *
+ * The annotation text comes from `extractAstRelations` (tree-sitter), so only
+ * real comments are scanned. The regex this replaced matched `@rel` inside
+ * string literals too, which admitted relations from data rather than from
+ * code. Tree-sitter is unavailable in some builds; when it is, this falls back
+ * to the regex and SAYS SO in `notes`, because a silently weaker basis would be
+ * indistinguishable from a clean parse.
  */
 export function extractDeclaredRelations(sourceCode: string | undefined, _domain: string): ExtractedRelations {
   if (!sourceCode) return { ...EMPTY };
   const relations: Rel[] = [];
   const notes: string[] = [];
-  const re = /@rel\s+([a-z_]+)\s+([^\r\n*]+)/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(sourceCode)) !== null) {
-    const functor = m[1].toLowerCase();
+
+  const admit = (functorRaw: string, argsRaw: string): void => {
+    const functor = functorRaw.toLowerCase();
     if (!ALLOWED_FUNCTORS.has(functor)) {
       notes.push(`rejected off-vocabulary functor "${functor}"`);
-      continue;
+      return;
     }
-    const args = splitArgs(m[2].trim());
+    const args = splitArgs(argsRaw.trim());
     if (args.length < 1) {
       notes.push(`rejected "${functor}" with no arguments`);
-      continue;
+      return;
     }
     relations.push({ functor, type: 'rel', args, order: relations.length + 1 });
+  };
+
+  let extracted: ReturnType<typeof extractAstRelations> | null = null;
+  try {
+    extracted = extractAstRelations(sourceCode);
+  } catch (err) {
+    notes.push(`tree-sitter unavailable (${err instanceof Error ? err.message : String(err)}) — fell back to a regex scan, which also matches @rel inside string literals`);
   }
+
+  if (extracted) {
+    if (extracted.parseErrors) {
+      notes.push('source has parse errors — only comments tree-sitter could still resolve were scanned');
+    }
+    for (const rej of extracted.rejected) {
+      notes.push(
+        rej.args === ''
+          ? `rejected "${rej.functor}" with no arguments (line ${rej.line})`
+          : `rejected off-vocabulary functor "${rej.functor}" (line ${rej.line})`,
+      );
+    }
+    for (const rel of extracted.relations) {
+      admit(rel.functor, rel.args.join(' '));
+    }
+  } else {
+    const re = /@rel\s+([a-z_]+)\s+([^\r\n*]+)/gi;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(sourceCode)) !== null) {
+      admit(m[1], m[2]);
+    }
+  }
+
   if (relations.length === 0) return { relations: [], basis: null, confidence: 0, notes };
-  return { relations, basis: 'declared', confidence: 1, notes };
+  return { relations, basis: 'declared', confidence: extracted ? 1 : 0.8, notes };
 }
 
 export interface TranslationPair {

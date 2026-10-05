@@ -46,7 +46,7 @@ import type { ToolDomain } from '../dream/types';
 import { loadLatestScorecard, projectScorecard, saveScorecard, slugify } from './scorecard';
 import { analyzeGaps } from './gapAnalyzer';
 import { generateUpgrade, type PlannedChange } from './upgradeGenerator';
-import { runGate, type GateExecutors } from './preMergeGate';
+import { runGate, autoDeployAllowedFor, type GateExecutors } from './preMergeGate';
 import { checkAndMerge, computeVetoDeadline, parseOwnerRepo, savePRState } from './vetoScheduler';
 import { fetchGitHubToken } from './keywireClient';
 import { createGitHubClient } from './gitHubClient';
@@ -373,8 +373,8 @@ export async function runLoop(options: LoopRunOptions): Promise<LoopOutcome> {
   context.currentProposal = current;
 
   // 7. PR phase. Skipped in a dry run, and skipped entirely for a read-only
-  // binding — the analysis above still ran and its result is in `context`, so a
-  // read-only profile reports real gaps without touching the remote.
+  //  binding — the analysis above still ran and its result is in `context`, so a
+  //  read-only profile reports real gaps without touching the remote.
   if (options.dryRun || !mayPropose) {
     return {
       state: {
@@ -386,8 +386,23 @@ export async function runLoop(options: LoopRunOptions): Promise<LoopOutcome> {
         ...(options.dryRun ? { reason: 'dry_run' } : { reason: 'propose_disabled' }),
       },
       context,
+      skipped,
     };
   }
+
+  // A green gate authorises an auto-merge only for a tier that permits one.
+  // `qualityTier` is the table; previously the tier check was a second,
+  // hand-written `gap.tier !== 'A'` in the generate loop and nothing consulted
+  // tier behaviour at merge time at all.
+  const deploy = autoDeployAllowedFor(current);
+  if (!deploy.allowed) {
+    return {
+      state: { status: 'error', reason: `auto_merge_refused: ${deploy.reason}` },
+      context,
+      skipped,
+    };
+  }
+
 
   try {
     const parsed = parseOwnerRepo(repo.githubUrl);

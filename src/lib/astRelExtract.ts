@@ -22,6 +22,15 @@ export interface AstRel {
 
 export interface AstExtractResult {
   relations: AstRel[];
+  /**
+   * Annotations whose functor is outside the controlled vocabulary.
+   *
+   * These are dropped, not admitted — but they are REPORTED, because a silent
+   * drop is indistinguishable from "there were none". A caller that owes the
+   * operator a reason for a rejected relation cannot produce one from a list
+   * that was already filtered.
+   */
+  rejected: Array<{ functor: string; line: number; args: string }>;
   parseErrors: boolean;
   nodeCount: number;
 }
@@ -42,39 +51,53 @@ function extractCommentText(node: Parser.SyntaxNode): string {
   return text;
 }
 
-function parseRelAnnotations(commentText: string): AstRel[] {
-  const rels: AstRel[] = [];
+interface RelScan {
+  accepted: AstRel[];
+  rejected: AstExtractResult['rejected'];
+}
+
+function parseRelAnnotations(commentText: string): RelScan {
+  const accepted: AstRel[] = [];
+  const rejected: AstExtractResult['rejected'] = [];
   const re = /@rel\s+([a-z_]+)\s+([^\r\n*]+)/gi;
   let match: RegExpExecArray | null;
   while ((match = re.exec(commentText)) !== null) {
     const functor = match[1].toLowerCase();
-    if (!ALLOWED_FUNCTORS.has(functor)) continue;
     const args = match[2]
       .trim()
       .split(/\s*->\s*|\s*,\s*|\s+/)
       .map((s) => s.trim())
       .filter((s) => s.length > 0);
-    if (args.length === 0) continue;
-    rels.push({ functor, args, line: 0, column: 0 });
+    if (!ALLOWED_FUNCTORS.has(functor)) {
+      rejected.push({ functor, line: 0, args: args.join(' ') });
+      continue;
+    }
+    if (args.length === 0) {
+      rejected.push({ functor, line: 0, args: '' });
+      continue;
+    }
+    accepted.push({ functor, args, line: 0, column: 0 });
   }
-  return rels;
+  return { accepted, rejected };
 }
 
 export function extractAstRelations(sourceCode: string): AstExtractResult {
   const tree = parser.parse(sourceCode);
   const relations: AstRel[] = [];
+  const rejected: AstExtractResult['rejected'] = [];
   let nodeCount = 0;
 
   function walk(node: Parser.SyntaxNode) {
     nodeCount++;
     if (node.type === 'comment' || node.type === 'comment_directive') {
-      const commentText = extractCommentText(node);
-      const rels = parseRelAnnotations(commentText);
-      for (const rel of rels) {
-        rel.line = node.startPosition.row + 1;
+      const line = node.startPosition.row + 1;
+      const scan = parseRelAnnotations(extractCommentText(node));
+      for (const rel of scan.accepted) {
+        rel.line = line;
         rel.column = node.startPosition.column + 1;
         relations.push(rel);
       }
+      for (const rej of scan.rejected) rejected.push({ ...rej, line });
     }
     for (let i = 0; i < node.childCount; i++) {
       const child = node.child(i);
@@ -85,6 +108,7 @@ export function extractAstRelations(sourceCode: string): AstExtractResult {
   walk(tree.rootNode);
   return {
     relations,
+    rejected,
     parseErrors: tree.rootNode.hasError,
     nodeCount,
   };

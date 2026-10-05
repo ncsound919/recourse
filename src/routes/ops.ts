@@ -11,6 +11,9 @@ import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { metrics } from '../lib/metrics';
 import { tracer, exportOtlp } from '../lib/tracing';
+import { getOssTracerStatus } from '../lib/tracingOss';
+import { getLangfuseStatus } from '../lib/langfuseIntegration';
+import { ossMetrics } from '../lib/observability';
 import { openPolicyEngine, type PolicyAction, type PolicyEngine } from '../lib/policy';
 import { openApprovalStore, type ApprovalStore } from '../lib/approvals';
 import { buildDockerComposePlan, runDeployPlan } from '../lib/deploy';
@@ -155,15 +158,26 @@ export function createOpsRouter(deps: OpsRouterDeps): Router {
     res.json({ success: true, count: tracer.count, spans: tracer.recent(limit) });
   });
 
-  router.get('/tracing/status', (req, res) => {
+  router.get('/tracing/status', async (req, res) => {
     if (!allowRead(req, res)) return;
     const endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
+    // `getOssTracerStatus` reports whether the OTLP tracer provider is actually
+    // initialised. Before this, `/tracing/status` answered `enabled: true` from
+    // the mere PRESENCE of an env var, which said nothing about whether a single
+    // span had ever been exported.
+    const reg = ossMetrics();
     res.json({
       success: true,
       enabled: Boolean(endpoint),
       exporterEndpoint: endpoint ?? null,
       serviceName: process.env.OTEL_SERVICE_NAME || 'recourse',
       bufferedSpans: tracer.count,
+      otlp: getOssTracerStatus(),
+      langfuse: getLangfuseStatus(),
+      ossMetrics: {
+        enabled: reg !== null,
+        bytes: reg ? (await reg.getMetrics()).length : 0,
+      },
     });
   });
 
@@ -176,7 +190,19 @@ export function createOpsRouter(deps: OpsRouterDeps): Router {
   return router;
 }
 
-/** Prometheus text exposition of the process metrics registry. */
-export function metricsText(): string {
-  return metrics.render();
+/**
+ * Prometheus text exposition of the process metrics registry.
+ *
+ * The OSS registry (`prom-client`) is merged in when it holds metrics, so a
+ * process that opted into the standard instrumentation exposes both the
+ * hand-rolled counters and the standard ones on one endpoint. Before this the
+ * OSS registry was a fully-implemented module no route could reach.
+ */
+export async function metricsText(): Promise<string> {
+  const base = metrics.render();
+  const reg = ossMetrics();
+  if (!reg) return base;
+  const oss = await reg.getMetrics();
+  if (oss.trim() === '') return base;
+  return `${base}\n# --- prom-client OSS registry ---\n${oss}`;
 }

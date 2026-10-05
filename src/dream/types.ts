@@ -2,9 +2,10 @@
 // Re-export these from your existing `../types` module so the view compiles:
 //   export * from './dream/types';
 
+import type { GeneIrSpec } from './ast-genes';
+
 export type DreamPhase =
-  | 'idle'
-  | 'rem_counterfactual_sim'
+  | 'idle'  | 'rem_counterfactual_sim'
   | 'synaptic_pruning'
   | 'cross_pollination'
   | 'theorem_induction'
@@ -44,6 +45,13 @@ export interface DreamThought {
   crystallizationReadiness: number;   // 0..1 — raised by passing theorem induction
   abstractGenomeDraft?: string;       // compiled gene source shown in the UI
   genome?: GenomeSpec;                // structural spec used for mutation/crossover
+  /** Typed-IR gene this thought came from (src/dream/ast-genes.ts). Present on
+   *  thoughts drawn from the IR pool so they can be mutated further; they are
+   *  verified through the same sandbox contract as any other thought. */
+  irSpec?: GeneIrSpec;
+  /** Sandbox vectors the IR gene was exercised against, carried forward so
+   *  crystallization stores a real suite. */
+  irVectors?: unknown[];
   /** Where this thought came from: the configured API model, or the deterministic rule lexicon. */
   origin?: 'local_model' | 'api_model' | 'rule_based';
   /** Arbitrary code candidate (local-model thoughts) + its own assert suite. */

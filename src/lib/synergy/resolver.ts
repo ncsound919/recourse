@@ -7,6 +7,8 @@ import { verifyCodingCode } from '../verifiers.js';
 import { sha256Hex } from './manifest.js';
 import { appendInsight, type LedgerInsight } from '../trendLedger.js';
 import { ladderCandidates, type LadderOperator } from './adapters.js';
+import { measureIncoherence } from '../incoherence.js';
+import { executeToolFunction } from '../executionSandbox.js';
 import type {
   TransferCandidate, TransferResult, AdmissionDecision, SynergyMap, SynergyEdge,
 } from './types.js';
@@ -100,15 +102,71 @@ export async function resolveWithLadder(
   acceptanceTest: string,
   input: { sourceCode?: string },
   drafter?: () => Promise<{ ok: boolean; sourceCode?: string; error?: string }>,
+  opts: {
+    /** Inputs to run BOTH the original and the accepted adaptation through, so
+     *  a disagreement can be detected (see `measureIncoherence`). Unset = no
+     *  measurement, never a reported zero. */
+    incoherenceInputs?: unknown[][];
+    /** Entrypoint to call when running those inputs. */
+    entrypointName?: string;
+  } = {},
 ): Promise<LadderResolution> {
   const attempts: LadderAttemptRecord[] = [];
   const candidates = ladderCandidates({ sourceCode: input.sourceCode, acceptanceTest });
   let last: TransferResult | null = null;
   let lastOperator: LadderOperator | 'model' | 'none' = 'none';
 
+  /**
+   * Disagreement between two INDEPENDENT implementations of the same spec is a
+   * sound certificate that one of them is wrong — it has no false positives.
+   * The ladder runs several and returns on the first pass, so the signal was
+   * thrown away. When the caller supplies inputs to try, the accepted candidate
+   * is compared against the source it was adapted from; a disagreement is
+   * attached to the passing attempt so the caller can see WHICH input exposed
+   * the fragility of the candidate it accepted.
+   *
+   * Needs TWO samples: one side is always the adaptation, so with no original
+   * source there is nothing to disagree with and the measurement is skipped
+   * rather than reported as zero disagreement.
+   */
+  const disagreementsFor = (operator: string, sourceCode: string): string[] => {
+    const original = input.sourceCode;
+    if (!opts.incoherenceInputs || opts.incoherenceInputs.length === 0) return [];
+    if (!original || original.trim() === '' || original.trim() === sourceCode.trim()) return [];
+    try {
+      const callOriginal = (...args: unknown[]) => {
+        const r = executeToolFunction(original, opts.entrypointName, args);
+        if (!r.success) throw new Error(r.error ?? 'execution failed');
+        return r.returnValue;
+      };
+      const callAdapted = (...args: unknown[]) => {
+        const r = executeToolFunction(sourceCode, opts.entrypointName, args);
+        if (!r.success) throw new Error(r.error ?? 'execution failed');
+        return r.returnValue;
+      };
+      const measured = measureIncoherence(operator, {
+        samples: [callOriginal, callAdapted],
+        inputs: opts.incoherenceInputs,
+      });
+      if (!measured.flagsError) return [];
+      return measured.disagreeingInputs.slice(0, 3).map(
+        (args) => `input ${JSON.stringify(args).slice(0, 60)}`,
+      );
+    } catch (err) {
+      return [`incoherence measurement failed: ${err instanceof Error ? err.message : String(err)}`];
+    }
+  };
+
   for (const c of candidates) {
     const result = resolveTransfer(candidate, acceptanceTest, c.sourceCode, 'operator_ladder');
-    attempts.push({ operator: c.operator, outcome: result.outcome, detail: c.note });
+    const notes = result.outcome === 'passed' ? disagreementsFor(c.operator, c.sourceCode) : [];
+    attempts.push({
+      operator: c.operator,
+      outcome: result.outcome,
+      detail: notes.length > 0
+        ? `${c.note}; it disagrees with the source it was adapted from on ${notes.length} input(s): ${notes.join('; ')}`
+        : c.note,
+    });
     last = result;
     lastOperator = c.operator;
     if (result.outcome === 'passed') return { result, operator: c.operator, attempts };
@@ -119,7 +177,14 @@ export async function resolveWithLadder(
       const draft = await drafter();
       if (draft.ok && draft.sourceCode) {
         const result = resolveTransfer(candidate, acceptanceTest, draft.sourceCode, 'model');
-        attempts.push({ operator: 'model', outcome: result.outcome, detail: 'model-drafted adaptation' });
+        const notes = disagreementsFor('model', draft.sourceCode);
+        attempts.push({
+          operator: 'model',
+          outcome: result.outcome,
+          detail: notes.length > 0
+            ? `model-drafted adaptation; it disagrees with the source it was adapted from on ${notes.length} input(s): ${notes.join('; ')}`
+            : 'model-drafted adaptation',
+        });
         last = result;
         lastOperator = 'model';
         if (result.outcome === 'passed') return { result, operator: 'model', attempts };

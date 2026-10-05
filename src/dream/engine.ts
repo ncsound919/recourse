@@ -30,6 +30,7 @@ import { executeTestSuite } from '../lib/executionSandbox';
 import { reconcileDreamRegistry, type ReconcileReport } from './reconcileRegistry';
 import { AsyncMutex } from '../lib/asyncMutex';
 import { recordStage } from '../lib/acceptance';
+import { compileGeneIr, irStats, mutateIr, seedIrGenes, validateIr, verifyIrGene } from './ast-genes';
 import type { DreamStore } from './store';
 
 /** A request to the dream model generator. */
@@ -140,6 +141,35 @@ const REM_OPERATORS = [
   { key: 'edge_case_stress', label: 'Edge-case stress at input boundaries' },
   { key: 'parameter_mutation', label: 'Parameter-space mutation of the gene blueprint' },
 ];
+
+/**
+ * Probability that a REM thought is drawn from the typed-IR gene pool instead of
+ * the free-form genome. Deliberately a minority: the IR representation is a
+ * second, structurally different way to express a gene, and both must survive
+ * the same verify-then-crystallize contract. A draw that does not verify returns
+ * no thought at all, so this can only slow the phase, never weaken it.
+ */
+const IR_GENE_DRAW_RATE = 0.25;
+const IR_SEEDS = seedIrGenes();
+
+/**
+ * A private RNG for the IR branch, derived from (seed, tick, index).
+ *
+ * The phase's main `rng` stream is NOT touched. Several tests pin the exact
+ * provenance sequence a seeded engine produces; consuming one extra draw from
+ * `rng` to decide the branch shifts every subsequent draw and changes all of
+ * them. Deriving separately keeps the free-form path bit-identical.
+ */
+function irRng(seed: number, tick: number, index: number): () => number {
+  let a = (seed ^ Math.imul(tick + 1, 0x9e3779b1) ^ Math.imul(index + 1, 0x85ebca6b)) >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 const LEXICON: Record<ToolDomain, { premises: string[]; hypotheses: string[] }> = {
   math: {
@@ -468,6 +498,23 @@ export class DreamingEngine {
     const n = 1 + Math.floor(rng() * 2); // 1-2 mutations per REM phase
     for (let i = 0; i < n; i++) {
       const domain = pick(rng, DOMAINS);
+      // Occasionally draw from the typed-IR gene pool instead of the free-form
+      // genome. The IR genes are a structurally different representation with
+      // the same verify-then-crystallize contract, so a thought that survives
+      // this path is proven by the same sandbox verdict as any other. They were
+      // a fully-implemented module nothing reached, which meant the typed
+      // representation contributed zero genes.
+      //
+      // The branch decision and the mutation both draw from `irRng`, never from
+      // `rng`, so the free-form path is bit-identical to before.
+      const irDraw = irRng(s.seed, s.tick, i);
+      if (irDraw() < IR_GENE_DRAW_RATE) {
+        const irThought = this.buildIrThought(s, irDraw, domain);
+        if (irThought) {
+          created.push(irThought);
+          continue;
+        }
+      }
       let genome = generateGenome(domain, rng);
       const parent = s.recentThoughts.length ? pickWeightedByIntensity(s.recentThoughts, rng) : null;
       if (parent?.genome && parent.domain === domain && rng() < 0.6) {
@@ -479,6 +526,48 @@ export class DreamingEngine {
     }
     s.recentThoughts.unshift(...created);
     return created;
+  }
+
+  /**
+   * Build one thought from the typed-IR gene pool: draw a seed or mutate the
+   * previous IR thought in this domain, VERIFY it through the real sandbox, and
+   * return null when it does not pass. A thought is only ever created from a
+   * verified gene, so the readiness numbers below are measurements.
+   */
+  private buildIrThought(s: DreamState, rng: () => number, domain: ToolDomain): DreamThought | null {
+    const parentIr = s.recentThoughts.find(
+      (t) => t.domain === domain && t.irSpec !== undefined,
+    )?.irSpec;
+    // Seeds carry their own vectors; a mutated spec keeps its parent's, so the
+    // invariant checks below are exercised on inputs that already shaped it.
+    const seed = IR_SEEDS.find((sd) => sd.spec.domain === domain);
+    const spec = parentIr && rng() < 0.6 ? mutateIr(parentIr, rng) : (seed ?? IR_SEEDS[0]).spec;
+    const vectors = parentIr ? (s.recentThoughts.find((t) => t.irSpec === parentIr)?.irVectors ?? seed?.vectors ?? []) : (seed?.vectors ?? []);
+    if (vectors.length === 0) return null;
+    const problems = validateIr(spec);
+    if (problems.length > 0) return null;
+    const verification = verifyIrGene(spec, vectors);
+    if (!verification.verified) return null;
+    const stats = irStats(spec);
+    const id = `dt_${hashString(`ir:${domain}:${spec.name}:${stats.nodes}:${s.tick}`).toString(16).padStart(8, '0').slice(0, 10)}`;
+    return {
+      id,
+      phase: s.currentPhase,
+      domain,
+      premise: `Typed-IR gene ${spec.name} over ${spec.fields.map((f) => f.name).join(', ')}`,
+      hypothesis: `A typed-IR expression of ${spec.name} satisfies its determinism and finiteness invariants`,
+      simulatedOutcome: verification.summary,
+      intensity: intensityFromChecks(verification.checks, true, []),
+      crystallizationReadiness: readinessFromChecks(verification.checks, true),
+      abstractGenomeDraft: compileGeneIr(spec),
+      irSpec: spec,
+      irVectors: vectors,
+      origin: 'rule_based',
+      invariantChecks: verification.checks,
+      provenance: ['typed_ir_gene', parentIr ? `mutated:${spec.name}` : 'ir_seed'],
+      createdAt: new Date().toISOString(),
+      tick: s.tick,
+    };
   }
 
   private phasePruning(s: DreamState): number {

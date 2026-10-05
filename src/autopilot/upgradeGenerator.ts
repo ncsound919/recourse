@@ -18,6 +18,7 @@
 import { UpgradeProposal, type GapT, type UpgradeFileT, type UpgradeProposalT } from './loopTypes';
 import type { BusinessProfileT } from './businessProfile';
 import { repoBinding } from './businessProfile';
+import { behaviorFor, type ArtifactKindT } from './qualityTier';
 
 export const REVIEW_REQUIRED_MARKER = 'REVIEW_REQUIRED.md';
 export const NO_AUTO_DEPLOY_MARKER = 'NO_AUTO_DEPLOY.md';
@@ -93,12 +94,29 @@ export interface GenerateUpgradeOptions {
   plannerUnavailableReason?: 'planner_unavailable' | 'planner_invalid';
 }
 
+/**
+ * The artifact kind this generator produces for a gap's tier.
+ *
+ * The tier is decided upstream by `gapAnalyzer`, but WHICH KIND of artifact a
+ * tier produces was written out a second time as an if-chain here, alongside a
+ * second copy of the marker table in `qualityTier`. `qualityTier` is the single
+ * source of truth for tier behaviour; this maps onto it.
+ */
+function artifactKindFor(gap: GapT): ArtifactKindT {
+  if (gap.tier === 'A') return 'internal_tool';
+  const text = gap.description;
+  if (/landing|website|web presence/i.test(text)) return 'landing_page';
+  if (/faq|content|seo|comparison|blog/i.test(text)) return 'faq_page';
+  return 'strategy_memo';
+}
+
 export async function generateUpgrade(
   gap: GapT,
   profile: BusinessProfileT,
   opts: GenerateUpgradeOptions = {},
 ): Promise<UpgradeProposalT> {
   const nowMs = Date.now();
+  const kind = artifactKindFor(gap);
   const base = {
     id: `upgrade-${gap.id}-${nowMs}`,
     gapId: gap.id,
@@ -106,6 +124,8 @@ export async function generateUpgrade(
     title: titleFor(gap.description, gap.id),
     generatedAt: new Date(nowMs).toISOString(),
     expectedScoreDelta: expectedScoreDeltaFor(gap),
+    artifactKind: kind,
+    autoDeployAllowed: behaviorFor(gap.tier).autoDeploy,
   };
 
   if (gap.tier === 'A') {

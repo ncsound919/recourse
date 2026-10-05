@@ -14,6 +14,7 @@ import { extractMethods, type RawMethod } from '../lib/synergy/methodIndex.js';
 import { extractProblems } from '../lib/synergy/problemIndex.js';
 import { recordSynergyScan } from '../lib/synergy/ledger.js';
 import { resolveWithLadder, admit, applyTransferResult, recordTransferResult, acceptanceTestIsNonTrivial } from '../lib/synergy/resolver.js';
+import { createModelDrafter, draftAdaptation } from '../lib/synergy/aiAdapter.js';
 import { requireMutationAuth } from '../lib/mutationAuth.js';
 import { readFleetDogfood } from '../lib/fleetDogfood.js';
 import type { RecourseProblem } from '../lib/problemArchive.js';
@@ -169,10 +170,33 @@ export function createSynergyRouter(): Router {
     }
     try {
       // Operator ladder (CBR): try deterministic adaptations of the submitted
-      // source in order; the first admissible pass wins. No model drafter here —
-      // execution decides, never the caller. This is what gives the result its
-      // honest adaptedBy provenance (operator_ladder, not a caller claim).
-      const resolution = await resolveWithLadder(candidate, body.acceptanceTest, { sourceCode: body.sourceCode });
+      // source in order; the first admissible pass wins. Execution decides,
+      // never the caller: the drafter below only produces source for
+      // `resolveTransfer` to judge, so the model's opinion never sets a status.
+      //
+      // `draftAdaptation` is used directly rather than `attemptTransfer` because
+      // this route already admits the ladder's own verdict; calling `admit`
+      // twice would let the model's draft bypass the ladder's record.
+      const drafter = createModelDrafter();
+      const resolution = await resolveWithLadder(
+        candidate,
+        body.acceptanceTest,
+        { sourceCode: body.sourceCode },
+        async () => {
+          const draft = await draftAdaptation(
+            {
+              candidate,
+              problemStatement: `${candidate.fromDomain} -> ${candidate.toDomain} transfer`,
+              acceptanceTest: body.acceptanceTest as string,
+              methodName: candidate.id,
+            },
+            drafter,
+          );
+          return draft.ok && draft.sourceCode
+            ? { ok: true, sourceCode: draft.sourceCode }
+            : { ok: false, error: draft.error ?? 'drafter produced no source' };
+        },
+      );
       const result = resolution.result;
       const decision = result
         ? admit(result)

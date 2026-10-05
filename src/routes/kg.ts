@@ -11,6 +11,7 @@ import { Router } from 'express';
 import { createHash } from 'node:crypto';
 import { kgSidecarHealth, kgCentrality, kgNeighborhood, kgBridges, oncologyKgToGraph, KG_SIDECAR_DEFAULT_URL } from '../lib/kgSidecarClient.js';
 import { buildLiveOncologyGraph, liveEvidenceHealth } from '../lib/liveOncologyGraph.js';
+import { kagSidecarBase, kagSidecarHealth, kagReason, kagInfer } from '../lib/kagSidecarClient.js';
 import { synthesizeOdeKinetics } from '../lib/odeKineticSynthesizer.js';
 import { runDosingSweep } from '../lib/dosingOptimizer.js';
 import { exportOdeToSbml } from '../lib/sbmlExporter.js';
@@ -57,6 +58,46 @@ export function createKgRouter(): Router {
     if (!body) return;
     const result = await kgBridges(oncologyKgToGraph(), body.from, body.to);
     res.json({ success: true, ...result });
+  });
+
+  // --- KAG sidecar (logical-form reasoning over the Neo4j KG) -------------
+  // Reports `configured: false` and `online: false` when KAG_SIDECAR_URL is
+  // unset. The client has NO default port precisely because 8800 is contested;
+  // see kagSidecarClient.ts.
+  router.get('/kag/sidecar', async (_req, res) => {
+    const health = await kagSidecarHealth();
+    res.json({
+      success: true,
+      configured: kagSidecarBase() !== null,
+      online: health.ok,
+      service: health.service ?? null,
+      neo4j_available: health.neo4j_available ?? null,
+      sidecarUrl: kagSidecarBase(),
+      latencyMs: health.latencyMs ?? null,
+      error: health.error ?? null,
+    });
+  });
+
+  router.post('/kag/reason', async (req, res) => {
+    const query = typeof req.body?.query === 'string' ? req.body.query.trim() : '';
+    if (!query) {
+      res.status(400).json({ success: false, error: 'query is required' });
+      return;
+    }
+    const domain = typeof req.body?.domain === 'string' ? req.body.domain : undefined;
+    const maxHops = Number(req.body?.maxHops) > 0 ? Number(req.body.maxHops) : undefined;
+    const result = await kagReason(query, { ...(domain ? { domain } : {}), ...(maxHops ? { maxHops } : {}) });
+    res.json({ success: result.ok, ...result });
+  });
+
+  router.post('/kag/infer', async (req, res) => {
+    const { subject, predicate, object } = (req.body ?? {}) as Record<string, unknown>;
+    if (typeof subject !== 'string' || typeof predicate !== 'string') {
+      res.status(400).json({ success: false, error: 'subject and predicate are required' });
+      return;
+    }
+    const result = await kagInfer(subject, predicate, typeof object === 'string' ? object : undefined);
+    res.json({ success: result.ok, ...result });
   });
 
   // --- Live evidence layer (Open Targets + PubTator -> grounded graph) ---

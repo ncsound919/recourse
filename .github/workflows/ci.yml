@@ -27,6 +27,13 @@ jobs:
         run: npm run typecheck
       - name: Lint (oxlint)
         run: npm run lint
+      # A module under src/ that exports symbols but has no production importer
+      # reads as a working capability that nothing can call. 22 of them existed
+      # here at once. This gate is what stops the next one appearing silently;
+      # an allowlisted exception must carry a reason in
+      # scripts/orphan-allowlist.json.
+      - name: Orphan modules (exports with no production importer)
+        run: npm run orphan-check
       - name: Test
         run: npm test
       - name: Build (client + server bundle)

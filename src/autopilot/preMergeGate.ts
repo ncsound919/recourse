@@ -46,6 +46,7 @@ import { fileURLToPath } from 'node:url';
 import { GateResult, verificationLane, verificationPaths, type GateResultT, type ProposalVerificationT, type UpgradeProposalT } from './loopTypes';
 import { executeTestSuite } from '../lib/executionSandbox';
 import { bundleModulesDetailed, type ModuleSource } from '../lib/multiFileForge';
+import { behaviorFor } from './qualityTier';
 import type { RepoBindingT } from './businessProfile';
 
 // ============================================================================
@@ -635,6 +636,38 @@ function resolveExecutor(step: GateStep, executors: GateExecutors | undefined): 
   const injected = executors[step];
   if (injected) return injected;
   return () => ({ passed: true, output: `${step} executor not provided` });
+}
+
+/**
+ * A gate pass only authorises an auto-merge when the proposal's tier actually
+ * permits one. `qualityTier` is the table that says so; the generator stamps
+ * the proposal with the result. A proposal that carries no stamp falls back to
+ * the tier's own table rather than defaulting to "allowed".
+ */
+export function autoDeployAllowedFor(proposal: UpgradeProposalT): {
+  allowed: boolean;
+  reason: string;
+} {
+  if (proposal.autoDeployAllowed === false) {
+    return {
+      allowed: false,
+      reason: `tier ${proposal.tier} artifacts are never auto-deployable (${behaviorFor(proposal.tier).decisionAuthority} decides)`,
+    };
+  }
+  if (proposal.autoDeployAllowed === true && !behaviorFor(proposal.tier).autoDeploy) {
+    // The proposal claims auto-deploy but its tier disagrees; the tier wins.
+    return {
+      allowed: false,
+      reason: `proposal claims auto-deploy but tier ${proposal.tier} is ${behaviorFor(proposal.tier).decisionAuthority}-gated`,
+    };
+  }
+  const behavior = behaviorFor(proposal.tier);
+  return {
+    allowed: behavior.autoDeploy,
+    reason: behavior.autoDeploy
+      ? `tier ${behavior.tier} artifacts are auto-deployable; required markers: ${behavior.requiredMarkers.join(', ') || '(none)'}`
+      : `tier ${behavior.tier} artifacts (${behavior.decisionAuthority}) are NEVER auto-deployable`,
+  };
 }
 
 export async function runGate(

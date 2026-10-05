@@ -13,6 +13,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { searchSkills, skillDigest } from '../skills/index.js';
 import { exportSkillFiles, candidateFromSkillText, currentToolVersion, isVerifiableVersion } from '../skills/exporter.js';
+import { buildExportableResponse } from '../lib/exportableHygiene.js';
 import {
   verifyCodingCode,
   verifySystemicCode,
@@ -173,15 +174,27 @@ export function createSkillsRouter(deps: SkillsRouterDeps): Router {
     res.json({ success: true, markdown: skillDigest(deps.snapshot()), generatedAt: new Date().toISOString() });
   });
 
-  /** List which registry tools are exportable (they carry verified source). */
-  router.get('/skills/exportable', (_req, res) => {
-    const items = deps.getRegistry()
+  /**
+   * List which registry tools are exportable (they carry verified source).
+   *
+   * `?raw=1` returns the pre-hygiene list. Without it the response is de-duped
+   * and degraded tools pruned, and the `hygiene` block reports how many were
+   * removed — previously this route returned every registered tool (~5,771) of
+   * which ~28 were worth adopting, with nothing saying so.
+   */
+  router.get('/skills/exportable', (req, res) => {
+    const registry = deps.getRegistry()
       .filter((t) => isVerifiableVersion(currentToolVersion(t)))
       .map((t) => {
         const v = currentToolVersion(t)!;
         return { name: t.name, domain: t.domain, version: v.version, score: v.score, passed: v.passed_verifier, description: t.description };
       });
-    res.json({ success: true, exportRoot: deps.getExportRoot(), count: items.length, tools: items });
+    if (String(req.query.raw ?? '') === '1') {
+      res.json({ success: true, exportRoot: deps.getExportRoot(), count: registry.length, tools: registry });
+      return;
+    }
+    const { count, tools, hygiene } = buildExportableResponse(registry);
+    res.json({ success: true, exportRoot: deps.getExportRoot(), count, tools, hygiene });
   });
 
   /** Export a verified registry tool as a SKILL.md folder. */

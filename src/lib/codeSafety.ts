@@ -12,6 +12,9 @@
  * This screen is DEFENSE IN DEPTH, not a sandbox, and it is known to be
  * incomplete (a key built at runtime, `o[k]`, cannot be caught by any regex).
  * In-process evaluation is therefore refused by default; see isolationRequired.
+ * When an operator accepts the risk, the Semgrep screen in
+ * `codeSafetyOss.screenCodeWithSemgrep` runs as a second opinion — it can add
+ * rejections but never clear one.
  *
  * Screen rules: It rejects the known escape
  * vocabulary (host globals, dynamic code construction, prototype-chain
@@ -20,6 +23,8 @@
  * needs any of it, so false positives only cost a rejected candidate.
  * isolated-vm remains the real boundary; prefer it wherever available.
  */
+
+import { screenCodeWithSemgrep } from './codeSafetyOss.js';
 
 export interface CodeSafetyVerdict {
   ok: boolean;
@@ -91,6 +96,9 @@ export function assertInProcessSafe(source: string): void {
 
 /** Env flag that explicitly opts back into in-process evaluation. */
 export const ALLOW_INPROCESS_ENV = 'RECOURSE_ALLOW_INPROCESS_EVAL';
+/** Opt-in switch for the Semgrep second-opinion screen. Off by default: it
+ *  spawns a subprocess on a hot path. See `secondOpinionSemgrep`. */
+export const SEMGREP_SECOND_OPINION_ENV = 'RECOURSE_SEMGREP_SECOND_OPINION';
 
 /**
  * Whether in-process evaluation is refused when isolated-vm is unavailable.
@@ -118,5 +126,62 @@ export function inProcessFallbackRefusal(...sources: string[]): string | null {
   if (violations.length) {
     return `unsafe code rejected before in-process evaluation: ${[...new Set(violations)].join('; ')}`;
   }
+  // Second opinion (opt-in; see secondOpinionSemgrep). The regex screen above is
+  // documented as incomplete (a key built at runtime, `o[k]`, cannot be caught
+  // by any regex), so an operator can add a Semgrep pass. It can only ADD
+  // rejections; it can never clear one.
+  const semgrep = secondOpinionSemgrep(sources);
+  if (semgrep.violations.length > 0) {
+    return `unsafe code rejected by semgrep before in-process evaluation: ${semgrep.violations.join('; ')}`;
+  }
   return null;
+}
+
+/**
+ * Run the Semgrep second-opinion screen over every source.
+ *
+ * OFF unless `RECOURSE_SEMGREP_SECOND_OPINION=1`. That default matters:
+ * `inProcessFallbackRefusal` sits on hot paths (every forge candidate, every
+ * dream evaluation), and one `semgrep` spawn is ~7s and up to 30s under load.
+ * Measured: wiring this in unconditionally pushed the fallback-coverage tests
+ * from ~15ms to 45-95s each and they then failed on timeout.
+ *
+ * With the flag unset this returns immediately with `enabled: false` — which is
+ * a different answer from "scanned, found nothing", and is reported as such.
+ */
+export function secondOpinionSemgrep(sources: string[]): {
+  enabled: boolean;
+  violations: string[];
+  scanned: boolean;
+  reason?: string;
+} {
+  if (process.env[SEMGREP_SECOND_OPINION_ENV] !== '1') {
+    return {
+      enabled: false,
+      violations: [],
+      scanned: false,
+      reason: `semgrep second opinion is off (set ${SEMGREP_SECOND_OPINION_ENV}=1 to enable)`,
+    };
+  }
+  const violations: string[] = [];
+  const reasons: string[] = [];
+  let scanned = false;
+  for (const source of sources) {
+    if (!source || source.trim() === '') continue;
+    const result = screenCodeWithSemgrep(source);
+    if (!result.scanned) {
+      if (result.reason) reasons.push(result.reason);
+      continue;
+    }
+    scanned = true;
+    for (const v of result.violations) {
+      violations.push(`${v.rule} (${v.severity}) at line ${v.line}`);
+    }
+  }
+  return {
+    enabled: true,
+    violations,
+    scanned,
+    ...(reasons.length > 0 ? { reason: reasons[0] } : {}),
+  };
 }

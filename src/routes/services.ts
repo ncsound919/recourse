@@ -33,8 +33,26 @@ import {
   trendDecompose,
   TREND_SIDECAR_DEFAULT_URL,
 } from '../lib/trendSidecarClient.js';
+import {
+  inspectSidecarBase,
+  inspectSidecarHealth,
+} from '../lib/inspectSidecarClient.js';
+import { toInspectSamples, renderInspectJsonl } from '../lib/inspectExport.js';
+import {
+  unstructuredSidecarBase,
+  unstructuredSidecarHealth,
+  unstructuredChunks,
+} from '../lib/unstructuredSidecarClient.js';
+import type { ToolEntry } from '../types';
 
-export function createServicesRouter(): Router {
+export interface ServicesRouterDeps {
+  /** The live tool registry, for the Inspect NDJSON export. Optional: without it
+   *  the export route reports an honest empty export rather than inventing
+   *  samples. */
+  getRegistry?: () => ToolEntry[];
+}
+
+export function createServicesRouter(deps: ServicesRouterDeps = {}): Router {
   const router = Router();
 
   // --- translation engines ---
@@ -186,6 +204,64 @@ export function createServicesRouter(): Router {
     }
     const result = await trendDecompose(body.series as never, body.period ?? 7);
     res.json({ success: true, ...result });
+  });
+
+  // --- Inspect sidecar (capability evaluation harness) --------------------
+  // `configured: false` when INSPECT_SIDECAR_URL is unset. The client has NO
+  // default port: the old default 8810 is the port python/trend_service/main.py
+  // actually binds, so a default here would report the TREND service as inspect.
+  router.get('/inspect/sidecar', async (_req, res) => {
+    const health = await inspectSidecarHealth();
+    res.json({
+      success: true,
+      configured: inspectSidecarBase() !== null,
+      online: health.ok,
+      service: health.service ?? null,
+      inspect_available: health.inspect_available ?? null,
+      sidecarUrl: inspectSidecarBase(),
+      error: health.error ?? null,
+    });
+  });
+
+  // The Inspect harness consumes exactly this NDJSON shape, so exporting it is
+  // the first half of making the sidecar usable at all.
+  router.get('/inspect/export.jsonl', (req, res) => {
+    const body = (req.body ?? {}) as { limit?: number };
+    const limit = Math.max(1, Math.min(2000, Number(body.limit) || 500));
+    const registry = deps.getRegistry?.() ?? [];
+    const samples = toInspectSamples(registry.slice(0, limit));
+    res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+    // `samples.length` is deliberately not reported: a reader counting lines is
+    // the honest measure, and a header claiming a count that includes skipped
+    // tools would be a second, wrong number.
+    res.send(renderInspectJsonl(samples));
+  });
+
+  // --- Unstructured sidecar (document ingest + RAG chunking) -------------
+  router.get('/unstructured/sidecar', async (_req, res) => {
+    const health = await unstructuredSidecarHealth();
+    res.json({
+      success: true,
+      configured: unstructuredSidecarBase() !== null,
+      online: health.ok,
+      service: health.service ?? null,
+      sidecarUrl: unstructuredSidecarBase(),
+      error: health.error ?? null,
+    });
+  });
+
+  router.post('/unstructured/chunks', async (req, res) => {
+    const text = typeof req.body?.text === 'string' ? req.body.text : '';
+    if (!text.trim()) {
+      return res.status(400).json({ success: false, error: 'text is required' });
+    }
+    const chunkSize = Number(req.body?.chunkSize) > 0 ? Number(req.body.chunkSize) : undefined;
+    const overlap = Number(req.body?.overlap) >= 0 ? Number(req.body.overlap) : undefined;
+    const result = await unstructuredChunks(text, {
+      ...(chunkSize ? { chunkSize } : {}),
+      ...(overlap !== undefined ? { overlap } : {}),
+    });
+    res.json({ success: result.ok, ...result });
   });
 
   return router;

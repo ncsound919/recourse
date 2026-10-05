@@ -3,7 +3,24 @@
 // Inspect sidecar client — capability evaluation harness.
 // Stateless HTTP service; honest when unavailable.
 
-export const INSPECT_SIDECAR_DEFAULT_URL = process.env.INSPECT_SIDECAR_URL || 'http://127.0.0.1:8810';
+/**
+ * Env var naming the Inspect sidecar. There is deliberately NO default URL.
+ *
+ * This client previously defaulted to `http://127.0.0.1:8810`, which
+ * `python/trend_service/main.py:387` actually binds. Wiring it into a health
+ * route with that default would have probed the TREND service and reported it as
+ * the inspect service. An unset env var now means "not configured".
+ */
+export const INSPECT_SIDECAR_ENV = 'INSPECT_SIDECAR_URL';
+
+/** The configured sidecar base URL, or null when it is not configured. */
+export function inspectSidecarBase(explicit?: string): string | null {
+  const url = explicit ?? process.env[INSPECT_SIDECAR_ENV];
+  if (!url || url.trim() === '') return null;
+  return url.trim();
+}
+
+const NOT_CONFIGURED = { ok: false, error: `${INSPECT_SIDECAR_ENV} is not set — inspect sidecar not configured` } as const;
 
 export interface InspectHealthResult {
   ok: boolean;
@@ -70,16 +87,20 @@ async function getInspect<T>(path: string, base: string, timeoutMs: number): Pro
   }
 }
 
-export async function inspectSidecarHealth(base = INSPECT_SIDECAR_DEFAULT_URL, timeoutMs = 2000): Promise<InspectHealthResult> {
-  return getInspect<InspectHealthResult>('/health', base, timeoutMs);
+export async function inspectSidecarHealth(base?: string, timeoutMs = 2000): Promise<InspectHealthResult> {
+  const resolved = inspectSidecarBase(base);
+  if (!resolved) return { ...NOT_CONFIGURED };
+  return getInspect<InspectHealthResult>('/health', resolved, timeoutMs);
 }
 
 export async function inspectEval(
   evalName: string,
   opts: { model?: string; samples?: number; timeoutMs?: number; base?: string } = {},
 ): Promise<InspectEvalResult> {
-  const { model, samples, timeoutMs = 15000, base = INSPECT_SIDECAR_DEFAULT_URL } = opts;
-  return postInspect<InspectEvalResult>('/inspect/eval', { eval_name: evalName, model, samples }, base, timeoutMs);
+  const { model, samples, timeoutMs = 15000 } = opts;
+  const resolved = inspectSidecarBase(opts.base);
+  if (!resolved) return { ...NOT_CONFIGURED };
+  return postInspect<InspectEvalResult>('/inspect/eval', { eval_name: evalName, model, samples }, resolved, timeoutMs);
 }
 
 export async function inspectScore(
@@ -87,6 +108,8 @@ export async function inspectScore(
   responses: unknown[],
   opts: { timeoutMs?: number; base?: string } = {},
 ): Promise<InspectScoreResult> {
-  const { timeoutMs = 10000, base = INSPECT_SIDECAR_DEFAULT_URL } = opts;
-  return postInspect<InspectScoreResult>('/inspect/score', { eval_name: evalName, responses }, base, timeoutMs);
+  const { timeoutMs = 10000 } = opts;
+  const resolved = inspectSidecarBase(opts.base);
+  if (!resolved) return { ...NOT_CONFIGURED };
+  return postInspect<InspectScoreResult>('/inspect/score', { eval_name: evalName, responses }, resolved, timeoutMs);
 }

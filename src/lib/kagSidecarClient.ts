@@ -3,7 +3,26 @@
 // KAG sidecar client — logical-form-guided reasoning over Neo4j KG.
 // Stateless HTTP service; honest when unavailable.
 
-export const KAG_SIDECAR_DEFAULT_URL = process.env.KAG_SIDECAR_URL || 'http://127.0.0.1:8800';
+/**
+ * Env var naming the KAG sidecar. There is deliberately NO default URL.
+ *
+ * This client previously defaulted to `http://127.0.0.1:8800`, which is the
+ * contested port that `python/trend_service/main.py:22-27` names as the cause of
+ * three services once claiming 8800. With a default in place, wiring this client
+ * into a health route would have probed 8800 and reported whatever answered —
+ * the exact "health endpoint reported ONLINE for an unrelated service" failure.
+ * An unset env var now means "not configured", which is reported as such.
+ */
+export const KAG_SIDECAR_ENV = 'KAG_SIDECAR_URL';
+
+/** The configured sidecar base URL, or null when it is not configured. */
+export function kagSidecarBase(explicit?: string): string | null {
+  const url = explicit ?? process.env[KAG_SIDECAR_ENV];
+  if (!url || url.trim() === '') return null;
+  return url.trim();
+}
+
+const NOT_CONFIGURED = { ok: false, error: `${KAG_SIDECAR_ENV} is not set — KAG sidecar not configured` } as const;
 
 export interface KagHealthResult {
   ok: boolean;
@@ -82,16 +101,20 @@ async function getKag<T>(path: string, base: string, timeoutMs: number): Promise
   }
 }
 
-export async function kagSidecarHealth(base = KAG_SIDECAR_DEFAULT_URL, timeoutMs = 2000): Promise<KagHealthResult> {
-  return getKag<KagHealthResult>('/health', base, timeoutMs);
+export async function kagSidecarHealth(base?: string, timeoutMs = 2000): Promise<KagHealthResult> {
+  const resolved = kagSidecarBase(base);
+  if (!resolved) return { ...NOT_CONFIGURED };
+  return getKag<KagHealthResult>('/health', resolved, timeoutMs);
 }
 
 export async function kagReason(
   query: string,
   opts: { domain?: string; maxHops?: number; timeoutMs?: number; base?: string } = {},
 ): Promise<KagReasonResult> {
-  const { domain, maxHops = 3, timeoutMs = 15000, base = KAG_SIDECAR_DEFAULT_URL } = opts;
-  return postKag<KagReasonResult>('/kag/reason', { query, domain, max_hops: maxHops }, base, timeoutMs);
+  const { domain, maxHops = 3, timeoutMs = 15000 } = opts;
+  const resolved = kagSidecarBase(opts.base);
+  if (!resolved) return { ...NOT_CONFIGURED };
+  return postKag<KagReasonResult>('/kag/reason', { query, domain, max_hops: maxHops }, resolved, timeoutMs);
 }
 
 export async function kagInfer(
@@ -100,6 +123,8 @@ export async function kagInfer(
   object?: string,
   opts: { timeoutMs?: number; base?: string } = {},
 ): Promise<KagInferResult> {
-  const { timeoutMs = 10000, base = KAG_SIDECAR_DEFAULT_URL } = opts;
-  return postKag<KagInferResult>('/kag/infer', { subject, predicate, object }, base, timeoutMs);
+  const { timeoutMs = 10000 } = opts;
+  const resolved = kagSidecarBase(opts.base);
+  if (!resolved) return { ...NOT_CONFIGURED };
+  return postKag<KagInferResult>('/kag/infer', { subject, predicate, object }, resolved, timeoutMs);
 }

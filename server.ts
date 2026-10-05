@@ -261,6 +261,7 @@ import { runOpenEndedCycle, rewardForResult, capabilityKeyFor, type OpenEndedCyc
 import { propertyVectorsForProblem } from './src/lib/openEnded/propertyVectors.js';
 import { FleetRecursionLedger } from './src/lib/openEnded/fleetRecursion.js';
 import { mintProblems } from './src/lib/openEnded/problemMint.js';
+import { problemFromVerifiedTool } from './src/lib/problemGenerator.js';
 import { inspire } from './src/lib/inspirationCrossover.js';
 
 // Intake / benchmark / readout subsystem
@@ -355,6 +356,7 @@ import { createOpsRouter } from './src/routes/ops.js';
 import { reverifyRegistry, type DreamGeneRef, type ReverifyReport } from './src/lib/registryReverify.js';
 import { metrics } from './src/lib/metrics.js';
 import { tracer, runInSpan, parseTraceparent, formatTraceparent, currentSpan } from './src/lib/tracing.js';
+import { bootObservability, flushLangfuse } from './src/lib/observability.js';
 import { A2A_SKILLS, openA2aTaskStore } from './src/lib/a2a.js';
 import type { A2aOperation } from './src/lib/a2a.js';
 import { buildOpenApiSpec } from './src/lib/openapi.js';
@@ -873,6 +875,8 @@ function gracefulExit(code: number): void {
   if (shuttingDown) return;
   shuttingDown = true;
   flushDurableState();
+  // Langfuse buffers client-side; without this a SIGTERM drops the tail.
+  try { flushLangfuse(); } catch { /* observability must never block exit */ }
   releaseInstanceLock();
   process.exit(code);
 }
@@ -3419,7 +3423,7 @@ async function runGlobalLensPublishPass(): Promise<{ result: import('./src/lib/g
 // translation / keywire / trend bridges. Extracted to src/routes/services.ts
 // (stateless proxies over lib modules).
 // ---------------------------------------------------------------------------
-app.use('/api/recourse', createServicesRouter());
+app.use('/api/recourse', createServicesRouter({ getRegistry: () => registry }));
 app.use('/api/recourse', createSynergyRouter());
 // Bidirectional Recourse <-> Draymond dogfood loop (trend + synergy + TID).
 app.use('/api/recourse', createFleetDogfoodRouter());
@@ -6774,16 +6778,63 @@ async function mintForgeSpecFromLearnerPlan(): Promise<number> {
 if (allForgeSpecs().some((s) => s.name === spec.name)) continue;
       if (admitAgendaSpec(spec, 'learner_mint').admitted) added += 1;
     }
-    if (added > 0) {
+
+    // No-LLM fallback. When the model drafted nothing, derive a problem from a
+    // tool that already has a VERIFIED suite: the suite becomes the acceptance
+    // test verbatim and the tool's own verified source becomes the hidden
+    // reference, so the problem is real by construction (the reference provably
+    // passes) rather than merely proposed. Previously this module existed but
+    // nothing called it, so an offline mint produced nothing at all.
+    let fallback = 0;
+    if (result.minted.length === 0) {
+      for (const tool of registry) {
+        const cur = tool.versions.find((v) => v.version === tool.currentVersion);
+        if (!cur?.test_suite_code || cur.passed_verifier !== true || !cur.source_code) continue;
+        if (knownTitles.includes(tool.name)) continue;
+        const problem = problemFromVerifiedTool({
+          name: tool.name,
+          domain: tool.domain,
+          description: tool.description,
+          suite: cur.test_suite_code,
+        });
+        if (!problem) continue;
+        const spec = mintedProblemToForgeSpec(
+          {
+            ...problem,
+            hints: {
+              requiredPrimitives: problem.hints?.requiredPrimitives ?? 1,
+              acceptanceLines: problem.hints?.acceptanceLines ?? 1,
+              dataDims: problem.hints?.dataDims ?? 1,
+            },
+            functionName: tool.name,
+            referenceSource: cur.source_code as string,
+          },
+          { sourceDirectiveId: target.directiveId },
+        );
+        if (registry.some((t) => t.name === spec.name)) continue;
+        if (allForgeSpecs().some((s) => s.name === spec.name)) continue;
+        if (admitAgendaSpec(spec, 'learner_mint').admitted) fallback += 1;
+        if (fallback >= 3) break;
+      }
+      if (fallback > 0) {
+        appendProvenanceEvent('capability_adopted', {
+          driverId: `verified_tool_repro:${target.domain}`,
+          note: `derived ${fallback} problem(s) from already-verified tools because the model minted none`,
+          domain: target.domain,
+        });
+      }
+    }
+
+    if (added > 0 || fallback > 0) {
       saveStateToDisk();
       appendProvenanceEvent('capability_adopted', {
         driverId: `learner_mint:${target.domain}`,
-        note: `minted ${added} new ${target.domain} forge spec(s) from learner ${target.action}`,
+        note: `minted ${added} new ${target.domain} forge spec(s) from learner ${target.action}${fallback > 0 ? ` (+${fallback} from verified tools)` : ''}`,
         domain: target.domain,
       });
-      console.log(`[forge] minted ${added} new ${target.domain} spec(s) from learner plan (${target.reason}).`);
+      console.log(`[forge] minted ${added + fallback} new ${target.domain} spec(s) from learner plan (${target.reason}).`);
     }
-    return added;
+    return added + fallback;
   } catch (err) {
     console.warn('[forge] learner mint failed:', err instanceof Error ? err.message : String(err));
     return 0;
@@ -8950,6 +9001,12 @@ app.use(
 // Initialize Express + Vite Server
 async function startServer() {
   console.log(`[boot] t+${Math.round(process.uptime())}s startServer entered`);
+  // O11: OSS observability, wired at boot behind env flags. Both modules are
+  // no-ops when their env is unset, so this adds capability and no dependency
+  // on a service being up. They used to be fully-implemented modules reachable
+  // only from their own test files, which is why nothing here ever traced
+  // anything.
+  bootObservability();
   // Dream state comes from the engine's own durable store.
   dreamState = await dreamEngine.status();
   console.log(`[boot] t+${Math.round(process.uptime())}s dream status resolved (active=${dreamState?.isDreamingActive})`);

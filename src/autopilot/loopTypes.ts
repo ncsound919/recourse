@@ -217,6 +217,11 @@ export const UpgradeProposal = z.object({
   skipped: z.boolean().optional(),
   /** Why it was skipped: 'planner_unavailable' | 'planner_invalid'. */
   reason: z.string().optional(),
+  /** `qualityTier` artifact kind this proposal produces, and whether its tier
+   *  permits auto-deploy. Recorded so the gate's threshold is derived from one
+   *  table rather than restated per call site. */
+  artifactKind: z.string().optional(),
+  autoDeployAllowed: z.boolean().optional(),
   passedSandbox: z.boolean().optional(),
   passedLint: z.boolean().optional(),
   passedTypecheck: z.boolean().optional(),

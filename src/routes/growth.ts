@@ -25,6 +25,8 @@ import {
   type SuppressionStore,
 } from '../lib/growth/index.js';
 import type { BusinessProfileT } from '../autopilot/businessProfile.js';
+import { loadResearchBrief } from '../autopilot/research.js';
+import { slugify } from '../autopilot/scorecard.js';
 
 export interface GrowthRouterDeps {
   crm: CrmStore;
@@ -203,6 +205,24 @@ export function createGrowthRouter(deps: GrowthRouterDeps): Router {
     const result = buildAdPlan(req.body ?? {});
     if (!result.ok) { res.status(400).json({ success: false, errors: result.errors }); return; }
     res.json({ success: true, plan: result.plan });
+  });
+
+  // --- Research brief ------------------------------------------------------
+  // Read-only: returns the persisted brief, or an honest "none yet" with the
+  // command to produce one. The pipeline itself writes to disk and fetches the
+  // web, so it is exposed as an operator action rather than a GET.
+  router.get('/research/brief', (req, res) => {
+    if (!deps.requireMutationAuth(req, res)) return;
+    const slug = typeof req.query.slug === 'string' ? req.query.slug : slugify(deps.getProfile?.()?.business?.name ?? '');
+    if (!slug) { res.status(503).json({ success: false, error: 'no business profile available' }); return; }
+    const brief = loadResearchBrief(slug);
+    res.json({
+      success: true,
+      slug,
+      brief,
+      present: brief !== null,
+      ...(brief ? {} : { hint: 'no research-brief.json for this slug — run: npm run research -- --profile=' + slug }),
+    });
   });
 
   // --- Public lead capture ------------------------------------------------

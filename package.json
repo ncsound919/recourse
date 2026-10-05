@@ -14,6 +14,7 @@
     "clean": "node -e \"const fs=require('fs');fs.rmSync('dist',{recursive:true,force:true});fs.rmSync('server.js',{force:true});\"",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src tests api server.ts mcp-server.ts",
+    "orphan-check": "tsx scripts/orphan-check.mts",
     "self-improve": "tsx scripts/nightly-self-improvement.ts",
     "pipelines:bench": "tsx scripts/pipeline-benchmark.ts",
     "ecos:propose": "tsx scripts/ecos-propose.ts",

@@ -5,6 +5,7 @@ import { solveHornClauses, calculateCosineDistance } from './neuroSymbolicEngine
 import { auditCodeSecurity, sha256Sync, timingSafeEqualBuffers } from './cyberDefenseEngine';
 import { synthesizeBellState } from './quantumEngine';
 import { synthesizeTemplateRepair, recordSelfRepairExperience } from './componentTemplates';
+import { repairWithAst } from './repairAst';
 
 export const BIOTECH_LEGS = {
   debulking: 'Debulk bulk disease (tumor burden reduction)',
@@ -366,8 +367,24 @@ export function diagnoseAndRepairCode(
   let confidence = 0.95;
   let preventativeMeasures: string[] = ['Added automated boundary verifiers'];
 
+  // Structural pre-pass. Everything below is string matching over the source;
+  // `repairWithAst` parses it and reports the same four fault classes
+  // structurally. It is advisory only (every repair it returns has
+  // `applied: false`), so it can only ADD a diagnosis here — and it gives the
+  // generic branch below a specific fault name to work from when `faultHint`
+  // was absent.
+  const astFindings = repairWithAst(brokenCode);
+  const astFault = astFindings.repairs.find((r) => !r.applied && r.type !== 'none') ?? null;
+  if (astFault) {
+    preventativeMeasures = [
+      ...astFault.description ? [`AST check: ${astFault.description}`] : [],
+      'Added automated boundary verifiers',
+    ];
+  }
+  const effectiveHint = faultHint ?? astFault?.type;
+
   // 1. Check for Vieta Sign Error
-  if (brokenCode.includes('return b / a') || faultHint === 'vieta_sign_bug') {
+  if (brokenCode.includes('return b / a') || effectiveHint === 'vieta_sign_bug') {
     rootCause = 'Vieta quadratic root sum formula returned +b/a instead of algebraically correct -b/a';
     errorType = 'vieta_sign_bug';
     repairedCode = brokenCode.replace(/return\s+b\s*\/\s*a/g, 'return -b / a');
@@ -381,7 +398,7 @@ export function diagnoseAndRepairCode(
     recordSelfRepairExperience('vieta_sign_bug', 'math', true, 1.0, templateApplied);
   }
   // 2. Check for Division by Zero / Numerical Instability
-  else if (brokenCode.includes('/ 0') || brokenCode.includes('denominator = 0') || faultHint === 'division_by_zero') {
+  else if (brokenCode.includes('/ 0') || brokenCode.includes('denominator = 0') || effectiveHint === 'division_by_zero') {
     rootCause = 'Unchecked division by zero causing NaN / Infinity numerical blowup';
     errorType = 'division_by_zero';
     repairedCode = brokenCode
@@ -394,7 +411,7 @@ export function diagnoseAndRepairCode(
     recordSelfRepairExperience('division_by_zero', (domain as ToolDomain) || 'math', true, 0.99, templateApplied);
   }
   // 3. Check for Off-by-one Boundary Errors
-  else if (brokenCode.includes('<= arr.length') || faultHint === 'boundary_off_by_one') {
+  else if (brokenCode.includes('<= arr.length') || effectiveHint === 'boundary_off_by_one') {
     rootCause = 'Array index off-by-one condition (<= length) causing undefined dereference';
     errorType = 'boundary_off_by_one';
     repairedCode = brokenCode.replace(/<=\s*([a-zA-Z0-9_]+)\.length/g, '< $1.length');
@@ -404,7 +421,7 @@ export function diagnoseAndRepairCode(
     recordSelfRepairExperience('boundary_off_by_one', (domain as ToolDomain) || 'coding', true, 0.98);
   }
   // 4. Check for Async Deadlock / Unhandled Promise
-  else if (faultHint === 'async_deadlock' || (brokenCode.includes('new Promise') && !brokenCode.includes('resolve') && !brokenCode.includes('reject'))) {
+  else if (effectiveHint === 'async_deadlock' || (brokenCode.includes('new Promise') && !brokenCode.includes('resolve') && !brokenCode.includes('reject'))) {
     rootCause = 'Deadlock in asynchronous executor: Promise never resolves or rejects';
     errorType = 'async_deadlock';
     templateApplied = 'tpl_token_bucket';
@@ -415,7 +432,7 @@ export function diagnoseAndRepairCode(
     preventativeMeasures = ['Wrapped execution in bounded timeout circuit', 'Injected auto-release lock guard'];
   }
   // 5. Check for Syntax / AST corruption
-  else if (brokenCode.includes('fontFinally:') || brokenCode.includes('<<<SYNTAX_CORRUPT>>>') || faultHint === 'syntax_ast_error' || brokenCode.includes('export function ()')) {
+  else if (brokenCode.includes('fontFinally:') || brokenCode.includes('<<<SYNTAX_CORRUPT>>>') || effectiveHint === 'syntax_ast_error' || brokenCode.includes('export function ()')) {
     rootCause = 'Corrupted AST token sequence / unclosed block syntax';
     errorType = 'syntax_ast_error';
     repairedCode = brokenCode
@@ -433,7 +450,7 @@ export function diagnoseAndRepairCode(
     recordSelfRepairExperience('syntax_ast_error', (domain as ToolDomain) || 'coding', true, confidence, templateApplied);
   }
   // 6. Check for Security Taint / Eval
-  else if (brokenCode.includes('eval(') || faultHint === 'security_taint') {
+  else if (brokenCode.includes('eval(') || effectiveHint === 'security_taint') {
     rootCause = 'Dynamic eval execution detected violating zero-trust container policy';
     errorType = 'security_taint';
     repairedCode = brokenCode.replace(/eval\((.*?)\)/g, 'JSON.parse($1)');
@@ -444,7 +461,7 @@ export function diagnoseAndRepairCode(
     recordSelfRepairExperience('security_taint', 'cyber_defense', true, 1.0, templateApplied);
   }
   // 7. Check for Biotech Leg / Tier conflict
-  else if (brokenCode.includes('"leg": "invalid"') || faultHint === 'biotech_kg_conflict') {
+  else if (brokenCode.includes('"leg": "invalid"') || effectiveHint === 'biotech_kg_conflict') {
     rootCause = 'Biotech oncology claim submitted invalid leg or conflicting trial tier';
     errorType = 'biotech_kg_conflict';
     repairedCode = brokenCode
@@ -457,7 +474,7 @@ export function diagnoseAndRepairCode(
     recordSelfRepairExperience('biotech_kg_conflict', 'biotech', true, 0.98, templateApplied);
   }
   // 8. Check for Quantum Decoherence
-  else if (brokenCode.includes('probabilities_sum = 1.45') || faultHint === 'quantum_decoherence') {
+  else if (brokenCode.includes('probabilities_sum = 1.45') || effectiveHint === 'quantum_decoherence') {
     rootCause = 'Non-unitary state vector transformation exceeded L2 normalization tolerance';
     errorType = 'quantum_decoherence';
     repairedCode = brokenCode.replace(/probabilities_sum\s*=\s*1\.45/g, 'probabilities_sum = 1.0');
