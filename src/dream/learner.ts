@@ -827,7 +827,7 @@ export class RecursiveLearner {
     // Severity first: when the cap bites, act on the worst genes before
     // spending budget on propagating already-good ones.
     return out
-      .sort((a, b) => (DIRECTIVE_SEVERITY[a.kind] - DIRECTIVE_SEVERITY[b.kind]) || a.geneName.localeCompare(b.geneName))
+      .sort((a, b) => (DIRECTIVE_SEVERITY[a.kind] - DIRECTIVE_SEVERITY[b.kind]) || String(a.geneName ?? '').localeCompare(String(b.geneName ?? '')))
       .slice(0, MAX_DIRECTIVES);
   }
 
