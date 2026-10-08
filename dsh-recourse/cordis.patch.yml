@@ -1,0 +1,30 @@
+# dsh-recourse bundle patch.
+#
+# Mounts the plugin into the host composition. The plugin registers the
+# `recourse_*` tools, contributes one model-facing usage section, and mounts an
+# authenticated web proxy that the in-harness panel reads from.
+#
+# It replaces the `mcp-recourse` stdio bridge row in the profile's
+# cordis.patch.yml. See ../README.md for the migration and rollback.
+#
+# Config note: `apiSecretEnvVar` names an environment variable rather than the
+# secret itself, so the value never lands in this file. RECOURSE_API_SECRET is
+# lifted into the DSH process environment by BUSINESS\start-all.ps1.
+- insert:
+    - id: recourse
+      # Node-resolvable package name - must stay in sync with package.json `name`.
+      name: dsh-recourse
+      config:
+        # Recourse HTTP origin. Must match the service this plugin is meant to
+        # drive; PORT on the Recourse side wins if it differs.
+        apiBaseUrl: !!js process.env.RECOURSE_API_URL || 'http://127.0.0.1:3050'
+        # Read the bearer secret from the environment, never inline it here.
+        apiSecretEnvVar: 'RECOURSE_API_SECRET'
+        # Cooperative deadline for ordinary read calls.
+        defaultTimeoutMs: 15000
+        # Forge and evolve run a real model + sandbox; they need minutes, not
+        # seconds. This is what the stdio bridge's blanket 30s cap could not do.
+        longTimeoutMs: 600000
+        promptSectionOrder: 117
+        contributePrompt: true
+        mountWebProxy: true

@@ -1,0 +1,17 @@
+{
+  "name": "dsh-profile-headless",
+  "private": true,
+  "dependencies": {
+    "@deepseek-ai/dsh-audit-suite": "link:C:/axiom-plugins/audit-suite",
+    "@deepseek-ai/dsh-experimental-tool-axiom": "link:C:/axiom-plugins/tool-axiom"
+  },
+  "dsh": {
+    "profile": {
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "@deepseek-ai/dsh-headless"
+      ],
+      "patchReload": "startup"
+    }
+  }
+}

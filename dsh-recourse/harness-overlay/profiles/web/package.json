@@ -1,0 +1,32 @@
+{
+  "name": "dsh-profile-web",
+  "private": true,
+  "dependencies": {
+    "@co-engram/dsh": "^0.6.0",
+    "@weibaohui/dsh-tasks": "^0.5.9",
+    "dsh-autotier": "^0.2.8",
+    "dsh-checkpoint-rewind": "^0.6.18",
+    "dsh-file-claim": "^0.2.0",
+    "dsh-recourse": "link:C:/Users/User/Downloads/BUSINESS/INFRASTRUCTURE/dsh-recourse",
+    "dsh-teams-x": "^0.2.0"
+  },
+  "dsh": {
+    "profile": {
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "@deepseek-ai/dsh-web-app",
+        "dsh-teams-x",
+        "dsh-autotier",
+        "dsh-checkpoint-rewind",
+        "dsh-file-claim",
+        "@co-engram/dsh",
+        "@weibaohui/dsh-tasks",
+        "@deepseek-ai/dsh-experimental-voice-input-bundle",
+        "@deepseek-ai/dsh-experimental-agent-team-profile",
+        "@deepseek-ai/dsh-experimental-auto-review",
+        "@deepseek-ai/dsh-experimental-schedule-bundle",
+        "dsh-recourse"
+      ]
+    }
+  }
+}
