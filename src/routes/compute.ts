@@ -19,6 +19,8 @@ import {
   enqueueLearnerStressEval,
   enqueueRepairDiagnose,
   enqueueSmallModelTraining,
+  enqueueSurvivalTraining,
+  enqueueMetaAnalysis,
 } from '../lib/remoteComputeIntegrations.js';
 
 export interface ComputeDeps {
@@ -406,6 +408,40 @@ export function createComputeRouter(deps: ComputeDeps): Router {
       const result = await enqueueRepairDiagnose(script, issue, { platform, hardware, maxRuntimeMs });
       if (!result.queued) return res.status(409).json({ success: false, ...result });
       deps.appendProvenanceEvent('compute_remote_repair_enqueued', { jobId: result.task!.id, issueId: issue.id, platform: result.task!.platform, generation: deps.generation() });
+      res.json({ success: true, task: result.task });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // Survival (Cox PH + C-index) on a remote box.
+  router.post('/compute/remote/train/survival', async (req, res) => {
+    await ensureInit();
+    try {
+      const { features, durations, events, platform, hardware, maxRuntimeMs } = req.body ?? {};
+      if (!Array.isArray(features) || !Array.isArray(durations) || !Array.isArray(events)) {
+        return res.status(400).json({ success: false, error: 'features, durations, events arrays required' });
+      }
+      const result = await enqueueSurvivalTraining({ features, durations, events }, { platform, hardware, maxRuntimeMs });
+      if (!result.queued) return res.status(409).json({ success: false, ...result });
+      deps.appendProvenanceEvent('compute_remote_survival_enqueued', { jobId: result.task!.id, platform: result.task!.platform, generation: deps.generation() });
+      res.json({ success: true, task: result.task });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // Meta-analysis (random-effects + bootstrap) on a remote box.
+  router.post('/compute/remote/meta-analysis', async (req, res) => {
+    await ensureInit();
+    try {
+      const { items, seed, boot, platform, hardware, maxRuntimeMs } = req.body ?? {};
+      if (!Array.isArray(items) || items.length < 2) {
+        return res.status(400).json({ success: false, error: 'items array (>=2) required' });
+      }
+      const result = await enqueueMetaAnalysis({ items, seed, boot }, { platform, hardware, maxRuntimeMs });
+      if (!result.queued) return res.status(409).json({ success: false, ...result });
+      deps.appendProvenanceEvent('compute_remote_meta_analysis_enqueued', { jobId: result.task!.id, k: items.length, platform: result.task!.platform, generation: deps.generation() });
       res.json({ success: true, task: result.task });
     } catch (e: any) {
       res.status(500).json({ success: false, error: e.message });

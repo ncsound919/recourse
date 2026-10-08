@@ -12,74 +12,38 @@
  * rejects. It never fabricates a grade, signal, insight, or a successful write.
  *
  * Env:
- *   DRAYMOND_URL / DRAYMOND_OPS_URL   base URL (default http://localhost:3000)
+ *   DRAYMOND_URL / DRAYMOND_OPS_URL   base URL (default http://127.0.0.1:3444)
  *   DRAYMOND_CRON_SECRET / CRON_SECRET  Bearer token (required by Draymond)
  *   DRAYMOND_TIMEOUT_MS               per-call timeout (default 8000)
  */
 
-export const DRAYMOND_DEFAULT_URL =
-  process.env.DRAYMOND_URL || process.env.DRAYMOND_OPS_URL || 'http://localhost:3000';
+import { fleetCall, fleetBaseUrl, type BridgeCall } from './fleetRegistry.js';
+
+export const DRAYMOND_DEFAULT_URL = fleetBaseUrl('draymond');
 
 export function draymondConfig(): { baseUrl: string; secret: string; timeoutMs: number } {
   return {
-    baseUrl: (process.env.DRAYMOND_URL || process.env.DRAYMOND_OPS_URL || DRAYMOND_DEFAULT_URL).replace(/\/+$/, ''),
+    baseUrl: fleetBaseUrl('draymond'),
     secret: process.env.DRAYMOND_CRON_SECRET || process.env.CRON_SECRET || '',
     timeoutMs: Math.max(1000, Number(process.env.DRAYMOND_TIMEOUT_MS) || 8000),
   };
 }
 
-export interface BridgeCall<T> {
-  ok: boolean;
-  /** True only when the call returned 2xx AND a JSON body. */
-  available: boolean;
-  status: number;
-  data: T | null;
-  error?: string;
-  latencyMs: number;
-}
+export type { BridgeCall } from './fleetRegistry.js';
 
-async function call<T>(
+function call<T>(
   path: string,
   init: { method: 'GET' | 'POST'; body?: unknown },
   opts: { baseUrl?: string; timeoutMs?: number } = {},
 ): Promise<BridgeCall<T>> {
   const cfg = draymondConfig();
-  const base = (opts.baseUrl ?? cfg.baseUrl).replace(/\/+$/, '');
-  const timeoutMs = opts.timeoutMs ?? cfg.timeoutMs;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  const started = Date.now();
-  try {
-    const res = await fetch(`${base}${path}`, {
-      method: init.method,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(cfg.secret ? { Authorization: `Bearer ${cfg.secret}` } : {}),
-      },
-      ...(init.method === 'POST' ? { body: JSON.stringify(init.body ?? {}) } : {}),
-      signal: controller.signal,
-    });
-    const latencyMs = Date.now() - started;
-    const data = (await res.json().catch(() => null)) as T | null;
-    if (!res.ok) {
-      return { ok: false, available: false, status: res.status, data, latencyMs, error: `draymond HTTP ${res.status} ${path}` };
-    }
-    return { ok: true, available: data !== null, status: res.status, data, latencyMs };
-  } catch (err) {
-    const latencyMs = Date.now() - started;
-    return {
-      ok: false,
-      available: false,
-      status: 0,
-      data: null,
-      latencyMs,
-      error: err instanceof Error && err.name === 'AbortError'
-        ? `draymond timed out after ${timeoutMs}ms`
-        : err instanceof Error ? err.message : 'draymond unreachable',
-    };
-  } finally {
-    clearTimeout(timer);
-  }
+  return fleetCall<T>('draymond', path, {
+    method: init.method,
+    body: init.body,
+    baseUrl: opts.baseUrl ?? cfg.baseUrl,
+    timeoutMs: opts.timeoutMs ?? cfg.timeoutMs,
+    headers: cfg.secret ? { Authorization: `Bearer ${cfg.secret}` } : {},
+  });
 }
 
 // -- Health -------------------------------------------------------------------

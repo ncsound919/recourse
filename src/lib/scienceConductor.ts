@@ -274,7 +274,7 @@ export interface ServiceMap {
 }
 
 export interface ScienceFinding {
-  kind: 'dose_response' | 'lod_comparison' | 'niche_classification' | 'mechanistic_run' | 'gap_reported' | 'dedup' | 'kg_bridge' | 'evidence_binding' | 'gene_lookup' | 'bounty_draft' | 'translation_mapping' | 'translation_metric' | 'music_therapy_trial' | 'tuning_contrast' | 'music_therapy_benchmark' | 'literature_check';
+  kind: 'dose_response' | 'lod_comparison' | 'niche_classification' | 'mechanistic_run' | 'gap_reported' | 'dedup' | 'kg_bridge' | 'evidence_binding' | 'gene_lookup' | 'bounty_draft' | 'translation_mapping' | 'translation_metric' | 'music_therapy_trial' | 'tuning_contrast' | 'music_therapy_benchmark' | 'literature_check' | 'science_experiment_result';
   hypothesisId: string;
   problemId: string;
   claim: string;
@@ -2003,6 +2003,24 @@ export function stopScienceConductor(): { stopped: boolean; reason?: string } {
 }
 
 /** Read recent findings from disk (newest last). */
+/** Append a finding produced outside runScienceCycle (e.g. a Kaggle experiment applier). Same ledger, same shape. */
+export function recordExternalFinding(f: ScienceFinding, artifact: ResearchArtifact): void {
+  appendJsonl(FINDINGS_FILE, { ...f, artifact });
+}
+
+/** Kinds appended by external experiment appliers (not by runScienceCycle). Internal, E4. */
+export const EXTERNAL_EXPERIMENT_KINDS: ReadonlySet<string> = new Set(['science_experiment_result']);
+
+/** Last `limit` conductor findings, skipping external experiment results so they cannot crowd the window. */
+export function recentConductorFindings(limit = 50): ScienceFinding[] {
+  return readJsonlTail<ScienceFinding>(FINDINGS_FILE, limit + 5000).filter((f) => !EXTERNAL_EXPERIMENT_KINDS.has(f.kind)).slice(-limit);
+}
+
+/** Last `limit` external experiment results (logistics, WDBC method runs). */
+export function recentExperimentFindings(limit = 6): ScienceFinding[] {
+  return readJsonlTail<ScienceFinding>(FINDINGS_FILE, limit + 5000).filter((f) => EXTERNAL_EXPERIMENT_KINDS.has(f.kind)).slice(-limit);
+}
+
 export function recentFindings(limit = 50): ScienceFinding[] {
   return readJsonlTail<ScienceFinding>(FINDINGS_FILE, limit);
 }

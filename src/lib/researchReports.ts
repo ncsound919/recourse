@@ -35,6 +35,8 @@ export interface FleetReport {
   cycleCount: number;
   lastCycleAt: number | null;
   findingsCount: number;
+  /** External experiment results (Kaggle appliers), internal E4; not conductor findings. */
+  experimentFindingsCount: number;
   trendInsightsCount: number;
   ledgerValid: boolean;
   goalProgress: ReturnType<typeof getGoalProgress>;
@@ -65,7 +67,9 @@ const HONESTY_LINE =
 export async function generateFleetReport(): Promise<FleetReport> {
   const conductor = getConductorStatus();
   const cycles = recentCycles();
-  const findings = recentFindings(1_000_000_000);
+  // Conductor findings only; external experiment results are counted separately below.
+  const allFindings = recentFindings(1_000_000_000);
+  const findings = allFindings.filter((f) => f.kind !== 'science_experiment_result');
   const insights = recentInsights(1_000_000_000);
   const chain = verifyLedgerChain();
   const scheduler = getSchedulerStatus();
@@ -121,6 +125,7 @@ export async function generateFleetReport(): Promise<FleetReport> {
     cycleCount: conductor.cyclesRun,
     lastCycleAt: conductor.lastCycleAt,
     findingsCount: findings.length,
+    experimentFindingsCount: allFindings.length - findings.length,
     trendInsightsCount: insights.length,
     ledgerValid: chain.valid,
     goalProgress,
@@ -172,6 +177,7 @@ export function renderFleetReportMarkdown(report: FleetReport): string {
   L.push(`- Science cycles run: ${report.cycleCount}`);
   L.push(`- Last cycle at: ${report.lastCycleAt ? isoDateTime(new Date(report.lastCycleAt)) : 'never'}`);
   L.push(`- Findings recorded: ${report.findingsCount}`);
+  L.push(`- External experiment results (internal, E4): ${report.experimentFindingsCount}`);
   L.push(`- Trend ledger insights: ${report.trendInsightsCount}`);
   L.push(`- Ledger chain valid: ${report.ledgerValid ? 'yes' : 'NO — chain broken'}`);
   L.push('');

@@ -29,6 +29,7 @@ import {
   type GlobalLensPublishInput,
   type GlobalLensPublishResult,
 } from './globalLensBridge.js';
+import { mirrorReadout } from './lensReadoutMirror.js';
 
 export interface PublishDomainSpec {
   /** Corpus project id(s) this domain owns (matches CorpusRoot.project). */
@@ -115,8 +116,12 @@ export function artifactsForDomain(spec: PublishDomainSpec, artifacts: CorpusArt
 }
 
 /** Findings with an attached publishable artifact (real computation + hash). */
+/** Kinds that stay in the internal ledger and are NEVER composed into a public brief (unverified-provenance data). */
+const INTERNAL_ONLY_KINDS = new Set(['science_experiment_result']);
+
 export function artifactFindings(findings: Array<ScienceFinding & { artifact?: ResearchArtifact }>): Array<ScienceFinding & { artifact: ResearchArtifact }> {
   return (findings as Array<ScienceFinding & { artifact?: ResearchArtifact }>)
+    .filter((f) => !INTERNAL_ONLY_KINDS.has(f.kind))
     .filter((f): f is ScienceFinding & { artifact: ResearchArtifact } => !!f.artifact && !!f.artifact.claim)
     .slice(-20);
 }
@@ -333,6 +338,14 @@ export async function runPublishPass(opts: {
       continue;
     }
     const r = await publish(article);
+    // Oncology readouts are mirrored into the Oncology Ecosystem tree regardless of publish
+    // outcome; the file records the real status (never claims "published" on failure).
+    if (!opts.publish && spec.projects.includes('overlay-oncology')) {
+      mirrorReadout(article.title, article.body, {
+        source: 'global-lens-publish', published: r.ok, inserted: r.inserted, error: r.error,
+        url: article.url, category: article.category,
+      });
+    }
     results.push({ domain: spec.label, title: article.title, ok: r.ok, inserted: r.inserted, error: r.error });
     if (!r.ok) skipped.push(`${spec.label}: ${r.error ?? 'publish failed'}`);
   }

@@ -27,6 +27,8 @@ vi.mock('../src/lib/oncologyGrantEngine.js', () => ({
 vi.mock('../src/lib/scienceConductor.js', () => ({
   recentCycles: h.recentCycles,
   recentFindings: h.recentFindings,
+  // issueTracker reads conductor-only findings (external experiment results excluded).
+  recentConductorFindings: h.recentFindings,
 }));
 vi.mock('../src/lib/trendLedger.js', () => ({
   recentInsights: h.recentInsights,

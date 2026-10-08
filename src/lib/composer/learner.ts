@@ -119,6 +119,11 @@ export class ComposerLearner {
     return this.state[style]?.episodes ?? [];
   }
 
+  /** Every episode across all styles, in style insertion order. */
+  allEpisodes(): Episode[] {
+    return Object.values(this.state).flatMap((sl) => sl?.episodes ?? []);
+  }
+
   /** Candidate briefs to explore: around liked seeds + unrated seed range.
    *  Deterministic for a given learner state (no wall-clock input). */
   suggestNext(style: StyleId, count = 4, bars = 8): ComposeBrief[] {

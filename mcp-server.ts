@@ -101,6 +101,7 @@ const TOOL_DEFS = new Map<string, { config: ToolConfig; handler: ToolHandler }>(
  */
 const NATIVE_TOOLS = [
   'recourse.status',
+  'recourse.fleet_health',
   'recourse.registry',
   'recourse.selfhosted',
   'recourse.inspect_gene',
@@ -486,6 +487,36 @@ defineTool('recourse.axiom_status', {
 }, async () => {
   try {
     const j = await apiGet('/api/recourse/axiom/status');
+    return text(JSON.stringify(j, null, 2));
+  } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
+});
+
+defineTool('recourse.fleet_health', {
+  title: 'Fleet service reachability',
+  description: 'Probe every fleet service Recourse talks to (Keywire, OpenHub, OmniResearch, Axiom, Draymond, Dev-Brain, LiteLLM, Global Lens): resolved URL, env override, reachable. Read-only.',
+}, async () => {
+  try {
+    const j = await apiGet('/api/recourse/fleet/services');
+    return text(JSON.stringify(j, null, 2));
+  } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
+});
+
+defineTool('recourse.fleet_signal', {
+  title: 'OpenHub fleet signal',
+  description: 'Latest OpenHub self-report folded into Recourse fleet memory: beliefs, audit signals, health, and whether it is degraded. Read-only.',
+}, async () => {
+  try {
+    const j = await apiGet('/api/recourse/fleet/signal');
+    return text(JSON.stringify(j, null, 2));
+  } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
+});
+
+defineTool('recourse.draymond_status', {
+  title: 'Draymond bridge status',
+  description: 'Draymond bridge config (URL, secret configured?), live reachability and the last dogfood cycle snapshot. Read-only.',
+}, async () => {
+  try {
+    const j = await apiGet('/api/recourse/fleet/draymond');
     return text(JSON.stringify(j, null, 2));
   } catch (e: any) { return text(`Recourse unreachable: ${e.message}`); }
 });

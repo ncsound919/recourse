@@ -165,6 +165,18 @@ function saveToggles(): void {
   }
 }
 
+/**
+ * True when the operator has EXPLICITLY persisted `false` for a job.
+ *
+ * Boot code that self-arms a job ("arm it every boot") used to call
+ * `setJobEnabled(id, true)` and clobber the operator's durable choice — so a
+ * disabled job came back on the next restart. A self-arming caller must honor a
+ * persisted `false` and leave the absence of a decision to `enabledByDefault`.
+ */
+export function isPersistedDisabled(id: string): boolean {
+  return loadToggles().enabled[id] === false;
+}
+
 // ----------------------------------------------------------------------------
 // Cron-subset next-run estimator (reporting only)
 // ----------------------------------------------------------------------------

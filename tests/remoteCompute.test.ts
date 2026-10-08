@@ -28,6 +28,7 @@ import type {
   ComputePlatformStatus,
   UnifiedComputeClient,
 } from '../src/lib/computePlatforms';
+import { kagglePlatform } from '../src/lib/computePlatforms';
 
 // ---------------------------------------------------------------------------
 // Fake unified client (no network)
@@ -113,8 +114,13 @@ describe('remoteCompute', () => {
     const job = buildRemoteJob('learner_stress_eval', { script: 'result={"externalScore":1.0}' });
     expect(job?.kind).toBe('notebook');
     expect(job?.hardware?.type).toBe('cpu');
-    const gpuJob = buildRemoteJob('train_small_model', { rows: [[1]], target: [1] });
+    // CPU by default: scikit-learn / HTTP-only jobs must not spend GPU quota.
+    expect(buildRemoteJob('train_small_model', { rows: [[1]], target: [1] })?.hardware?.type).toBe('cpu');
+    const gpuJob = buildRemoteJob('train_small_model', { rows: [[1]], target: [1] }, { hardware: { type: 'gpu' } });
     expect(gpuJob?.hardware?.type).toBe('gpu');
+    // Accelerator sessions cap at 9h, CPU at 12h.
+    expect(gpuJob?.maxRuntimeMs).toBe(9 * 3_600_000);
+    expect(job?.maxRuntimeMs).toBe(12 * 3_600_000);
   });
 
   // --- result parsing ---
@@ -146,6 +152,26 @@ describe('remoteCompute', () => {
     const res = await enqueueRemoteTask('learner_stress_eval', { script: 'result={"externalScore":0.5}' }, {}, { client });
     expect(res.queued).toBe(false);
     expect(res.reason).toMatch(/remote|local/i);
+  });
+
+  it('routes a CPU job to Kaggle when it is available and no platform is given', async () => {
+    // Regression: the generic selector scored CPU jobs toward local/e2b, so every
+    // CPU offload (train_small_model, stress eval) silently refused even with
+    // Kaggle configured. The remote path must choose among notebook platforms.
+    const client = fakeClient();
+    kagglePlatform.configured = true;
+    try {
+      const res = await enqueueRemoteTask(
+        'train_small_model',
+        { rows: [[1], [2], [3], [4]], target: [0, 1, 0, 1] },
+        {},
+        { client },
+      );
+      expect(res.queued).toBe(true);
+      expect(res.task?.platform).toBe('kaggle');
+    } finally {
+      kagglePlatform.configured = false;
+    }
   });
 
   it('refuses explicit non-notebook platforms (local, e2b, huggingface)', async () => {
@@ -288,5 +314,17 @@ describe('remoteCompute', () => {
     await enqueueRemoteTask('learner_stress_eval', { script: 'result={"externalScore":0.66}' }, { platform: 'kaggle' }, { client });
     await drainRemoteTasks({ client });
     expect(seen).toEqual([0.66]);
+  });
+});
+
+describe('buildSmallModelNotebook � candidate scoring', () => {
+  it('embeds predictRows and emits a predictions step only when candidates are given', () => {
+    const withPred = buildSmallModelNotebook({ rows: [[1], [2], [3], [4]], target: [0, 1, 0, 1], model: 'mlp', predictRows: [[5], [6]] });
+    const src = withPred.notebook.cells[0].source as string;
+    expect(src).toContain('[[5],[6]]');
+    expect(src).toContain('result["predictions"]');
+
+    const noPred = buildSmallModelNotebook({ rows: [[1], [2], [3], [4]], target: [0, 1, 0, 1] });
+    expect(noPred.notebook.cells[0].source as string).not.toContain('[[5],[6]]');
   });
 });

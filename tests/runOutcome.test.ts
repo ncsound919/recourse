@@ -52,6 +52,14 @@ describe('classifyRun — terminal states', () => {
     expect(res.outcome).toBe('artifact');
     expect(res.detail).toContain('2 verified artifacts');
   });
+
+  it('accepts a BARE artifact (the documented shape that was silently uncredited)', () => {
+    // A job that returns the artifact itself, not wrapped, must still be credited.
+    const a = artifact();
+    const res = classifyRun('composer_retrain', a);
+    expect(res.outcome).toBe('artifact');
+    expect(res.artifact?.id).toBe(a.id);
+  });
 });
 
 describe('classifyRun — a run never self-certifies', () => {

@@ -32,6 +32,7 @@ import { AsyncMutex } from '../lib/asyncMutex';
 import { recordStage } from '../lib/acceptance';
 import { compileGeneIr, irStats, mutateIr, seedIrGenes, validateIr, verifyIrGene } from './ast-genes';
 import type { DreamStore } from './store';
+import { assessModelTests } from './testStrength';
 
 /** A request to the dream model generator. */
 export interface DreamGeneratorInput {
@@ -39,6 +40,9 @@ export interface DreamGeneratorInput {
   domain: ToolDomain;
   tick: number;
   recentHypotheses: string[];
+  /** Present on a second attempt: the previous candidate and the real sandbox
+   *  failure it hit, so the model can fix it instead of starting over. */
+  repair?: { sourceCode: string; testSuiteCode: string; failure: string };
 }
 
 /** The model's answer: a premise, a falsifiable hypothesis, and — crucially —
@@ -650,7 +654,7 @@ export class DreamingEngine {
         if (seen.has(key)) continue;
         seen.add(key);
       }
-      if (t.crystallizationReadiness >= AUTO_PROMOTE_THRESHOLD && t.genome) {
+      if (t.crystallizationReadiness >= AUTO_PROMOTE_THRESHOLD && (t.genome || (t.code && t.codeTests))) {
         const tool = this.promote(s, t);
         if (tool) tools.push(tool);
       }
@@ -722,6 +726,23 @@ export class DreamingEngine {
     }
 
     const isModelCode = !!t.code;
+    if (isModelCode && t.codeTests) {
+      // The model wrote both the code and the tests that grade it, so passing is
+      // not enough: the suite must also notice when the code is broken.
+      const strength = assessModelTests(t.code!, t.codeTests, (c, x) => executeTestSuite(c, x));
+      if (!strength.ok) {
+        t.invariantChecks = [...(t.invariantChecks ?? []), { name: 'test_strength', passed: false, detail: strength.reasons.join(' | ').slice(0, 200) }];
+        t.simulatedOutcome = `held back: ${strength.reasons[0]}`;
+        t.crystallizationReadiness = round2(Math.max(0.05, t.crystallizationReadiness - 0.2));
+        return null;
+      }
+      if (strength.mutation && strength.mutation.total > 0) {
+        t.invariantChecks = [...(t.invariantChecks ?? []), {
+          name: `test_strength: killed ${strength.mutation.killed}/${strength.mutation.total} mutants`,
+          passed: true,
+        }];
+      }
+    }
     const slug = (t.hypothesis || t.domain)
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '_')
@@ -739,7 +760,7 @@ export class DreamingEngine {
       // Module form: real `export`, so the registry substance gate accepts it.
       code: isModelCode ? t.code! : compileGenomeModule(t.genome!),
       verified: allChecksGreen,
-      invariantChecks: v.checks ?? [],
+      invariantChecks: isModelCode ? (t.invariantChecks ?? v.checks ?? []) : (v.checks ?? []),
       testVectors: isModelCode ? undefined : geneVectors(t.genome!),
       crystallizedAt: new Date().toISOString(),
       fromThoughtId: t.id,
@@ -800,14 +821,49 @@ export class DreamingEngine {
       tick: s.tick,
       recentHypotheses: s.recentThoughts.slice(0, 5).map((t) => t.hypothesis),
     };
-    let candidate: DreamGeneratorResult | null = null;
-    try {
-      candidate = await this.generator(input);
-    } catch {
-      candidate = null;
-    }
+    let candidate = await this.callGenerator(input);
     if (!candidate) return null;
 
+    let thought = this.thoughtFromCandidate(s, domain, candidate, ['api_model_rem'], 'api_model');
+    // One bounded repair round. A first attempt that only failed an assertion is
+    // usually one edit from working; throwing it away wastes the model call.
+    // The repair is verified exactly like the original — it earns nothing by
+    // having been "fixed" — and is tagged so the provenance says it happened.
+    if (thought && thought.crystallizationReadiness < 0.6 && candidate.sourceCode?.trim() && candidate.testSuiteCode?.trim()) {
+      const failure = (thought.invariantChecks ?? []).find((c) => !c.passed)?.detail
+        ?? thought.simulatedOutcome;
+      const retry = await this.callGenerator({
+        ...input,
+        repair: { sourceCode: candidate.sourceCode, testSuiteCode: candidate.testSuiteCode, failure: String(failure).slice(0, 400) },
+      });
+      if (retry) {
+        const repaired = this.thoughtFromCandidate(s, domain, retry, ['api_model_rem', 'repaired'], 'api_model');
+        if (repaired && repaired.crystallizationReadiness >= thought.crystallizationReadiness) {
+          thought = repaired;
+          candidate = retry;
+        }
+      }
+    }
+    return thought;
+  }
+
+  private async callGenerator(input: DreamGeneratorInput): Promise<DreamGeneratorResult | null> {
+    if (!this.generator) return null;
+    try {
+      return await this.generator(input);
+    } catch {
+      return null;
+    }
+  }
+
+  /** Verify one model candidate in the real sandbox and shape it into a thought; null when it carries no code/tests. */
+  private thoughtFromCandidate(
+    s: DreamState,
+    domain: ToolDomain,
+    candidate: DreamGeneratorResult,
+    provenance: string[],
+    origin: NonNullable<DreamThought['origin']>,
+  ): DreamThought | null {
     const id = `dt_${hashString(`${s.seed}:${s.tick}:${domain}:model:${candidate.hypothesis}`).toString(16).padStart(8, '0').slice(0, 10)}`;
     const code = (candidate.sourceCode || '').trim();
     const tests = (candidate.testSuiteCode || '').trim();
@@ -831,12 +887,43 @@ export class DreamingEngine {
       abstractGenomeDraft: code || undefined,
       code: code || undefined,
       codeTests: tests || undefined,
-      origin: 'api_model',
+      origin,
       invariantChecks: checks,
-      provenance: ['api_model_rem'],
+      provenance,
       createdAt: new Date().toISOString(),
       tick: s.tick,
     };
+  }
+
+  /**
+   * Take candidates generated ELSEWHERE (e.g. a remote Kaggle batch) into the
+   * thought stream. Nothing is trusted on arrival: each one is re-run through the
+   * local sandbox, repeats of a recent hypothesis are dropped, and the stream is
+   * trimmed to the pool cap afterwards. Serialized with the dream tick.
+   */
+  async ingestExternalCandidates(
+    candidates: Array<DreamGeneratorResult & { domain?: ToolDomain }>,
+    source = 'remote_batch',
+  ): Promise<{ ingested: number; verified: number; duplicates: number; rejected: number }> {
+    return this.mutex.runExclusive(async () => {
+      const s = await this.loadOrDefault();
+      let ingested = 0, verified = 0, duplicates = 0, rejected = 0;
+      for (const c of candidates) {
+        const domain = c.domain && DOMAINS.includes(c.domain) ? c.domain : DOMAINS[(ingested + rejected + s.tick) % DOMAINS.length];
+        const thought = this.thoughtFromCandidate(s, domain, c, [source], 'api_model');
+        if (!thought) { rejected += 1; continue; }
+        if (!isNovelHypothesis(thought.hypothesis, s.recentThoughts)) { duplicates += 1; continue; }
+        s.recentThoughts.unshift(thought);
+        ingested += 1;
+        if (thought.crystallizationReadiness >= 0.6) verified += 1;
+      }
+      if (ingested) {
+        this.recomputeCoherence(s);
+        this.trimStream(s);
+        await this.store.save(s);
+      }
+      return { ingested, verified, duplicates, rejected };
+    });
   }
 
   private recomputeCoherence(s: DreamState): void {

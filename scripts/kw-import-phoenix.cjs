@@ -27,7 +27,7 @@ function parseEnvFile(file) {
   return out;
 }
 
-const BASE = process.env.KEYWIRE_URL || 'http://127.0.0.1:3000';
+const BASE = process.env.KEYWIRE_URL || 'http://127.0.0.1:4700';
 const PROJECT = 'prj-mt7jrul1';
 const ENV_SLUG = 'production';
 

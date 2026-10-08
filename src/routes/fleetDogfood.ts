@@ -7,6 +7,7 @@
 import { Router } from 'express';
 import { requireMutationAuth } from '../lib/mutationAuth.js';
 import { draymondConfig, draymondHealth } from '../lib/draymondBridge.js';
+import { fleetHealth, fleetBaseUrl, FLEET_SERVICE_IDS, type FleetServiceId } from '../lib/fleetRegistry.js';
 import { runFleetDogfoodCycle, readFleetDogfood } from '../lib/fleetDogfood.js';
 
 export function createFleetDogfoodRouter(): Router {
@@ -21,6 +22,23 @@ export function createFleetDogfoodRouter(): Router {
       config: { baseUrl: cfg.baseUrl, secretConfigured: Boolean(cfg.secret), timeoutMs: cfg.timeoutMs },
       health,
       last: readFleetDogfood(),
+    });
+  });
+
+  // One probe of every fleet service Recourse talks to: resolved URL, whether it
+  // came from an env override, and reachability. `?only=axiom,draymond` narrows it.
+  router.get('/fleet/services', async (req, res) => {
+    const only = String(req.query.only ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+    const ids = only.length
+      ? FLEET_SERVICE_IDS.filter((id): id is FleetServiceId => only.includes(id))
+      : FLEET_SERVICE_IDS;
+    const services = await fleetHealth(ids);
+    res.json({
+      success: true,
+      reachable: services.filter((s) => s.reachable).length,
+      total: services.length,
+      services,
+      urls: Object.fromEntries(ids.map((id) => [id, fleetBaseUrl(id)])),
     });
   });
 

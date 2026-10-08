@@ -30,7 +30,7 @@ import {
   type GapRef,
   type Hypothesis,
 } from './oncologyGrantEngine.js';
-import { recentCycles, recentFindings } from './scienceConductor.js';
+import { recentCycles, recentConductorFindings as recentFindings } from './scienceConductor.js';
 import { recentInsights, verifyLedgerChain, type LedgerInsight } from './trendLedger.js';
 import {
   initGoalLedger,

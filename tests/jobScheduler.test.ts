@@ -14,6 +14,7 @@ import {
   nextRunForCron,
   resetSchedule,
   schedulerStorePath,
+  isPersistedDisabled,
   type ScheduledJobDef,
 } from '../src/lib/jobScheduler.js';
 import { buildArtifact } from '../src/lib/researchArtifact.js';
@@ -244,6 +245,17 @@ describe('enabled toggles + persistence', () => {
     resetSchedule();
     expect(getScheduledJob('reset_default')!.enabled).toBe(true);
     expect(getScheduledJob('reset_persisted')!.enabled).toBe(false);
+  });
+
+  it('isPersistedDisabled is true only for an explicit false', () => {
+    // No entry yet -> not an explicit decision.
+    expect(isPersistedDisabled('never_decided')).toBe(false);
+    fs.writeFileSync(storeFile, JSON.stringify({ enabled: { off_job: false, on_job: true } }), 'utf-8');
+    expect(isPersistedDisabled('off_job')).toBe(true);
+    expect(isPersistedDisabled('on_job')).toBe(false);
+    // A corrupt store must not read as a disable.
+    fs.writeFileSync(storeFile, 'not json', 'utf-8');
+    expect(isPersistedDisabled('off_job')).toBe(false);
   });
 });
 

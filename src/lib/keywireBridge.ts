@@ -2,7 +2,7 @@
  * Keywire ecosystem command-plane bridge — stateless HTTP client for the
  * Keywire zero-trust vault's `/api/v1/ecosystem/*` routes.
  *
- * Keywire is an EXTERNAL process (default http://127.0.0.1:3000). This module
+ * Keywire is an EXTERNAL process (default http://127.0.0.1:4700). This module
  * never owns fleet state and never invents it: every fetch is guarded by a
  * timeout and returns `ok:false` with the underlying error when Keywire is
  * down, rejects, or answers with a non-2xx — mirroring the honesty contract in
@@ -17,12 +17,13 @@
  *   GET  /api/v1/ecosystem/pm2/status     → pm2 jlist process table
  *   GET  /api/v1/ecosystem/servers        → fleet server manifest
  *
- * Env: KEYWIRE_URL (default http://127.0.0.1:3000). The same env name is used
+ * Env: KEYWIRE_URL (default http://127.0.0.1:4700). The same env name is used
  * by `src/autopilot/keywireClient.ts`.
  */
 
-export const KEYWIRE_DEFAULT_URL =
-  process.env.KEYWIRE_URL || 'http://127.0.0.1:3000';
+import { fleetBaseUrl } from './fleetRegistry.js';
+
+export const KEYWIRE_DEFAULT_URL = fleetBaseUrl('keywire');
 
 // ---------------------------------------------------------------------------
 // Shapes (mirror Keywire/src/ecosystem.ts response payloads).

@@ -13,7 +13,7 @@
  * resolver returns undefined and the guard falls back to CLOSED.
  */
 
-const KEYWIRE_DEFAULT_URL = 'http://127.0.0.1:3000';
+const KEYWIRE_DEFAULT_URL = 'http://127.0.0.1:4700';
 const KEYWIRE_DEFAULT_PROJECT = 'prj-mt7jrul1'; // Overlay365 Fleet
 const KEYWIRE_DEFAULT_ENV = 'production';
 const KEYWIRE_DEFAULT_TTL_MS = 30_000;

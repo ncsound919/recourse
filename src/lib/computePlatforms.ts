@@ -12,10 +12,14 @@
  *   - Quota tracked per-platform; caller decides fallback policy
  */
 
-import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import {
+  kaggleRun, kaggleSlug, kernelRef, kernelMetadata, parseKernelStatus, parseKernelLog,
+  resolveKaggleCredentials, reserveQuota, settleQuota, readQuota, committedHours,
+  type KaggleCredentials, type KaggleRunResult,
+} from './kaggleClient.js';
 
 export type ComputePlatformId = 'kaggle' | 'huggingface' | 'local' | 'e2b';
 
@@ -191,41 +195,25 @@ export interface KaggleConfig {
   credentialsPath?: string;
 }
 
-const KAGGLE_QUOTA_FILE = '.kaggle_quota.json';
-
-interface KaggleQuotaState {
-  weekStart: number;
-  gpuHours: number;
-  tpuHours: number;
-  cpuHours: number;
+// Credentials, CLI addressing, status/log parsing and the quota ledger live in
+// kaggleClient.ts so they can be tested without Kaggle (see its header for what
+// the previous inline version got wrong).
+let kaggleCreds: KaggleCredentials | null = null;
+const kagglePollFailures = new Map<string, number>();
+const KAGGLE_MAX_POLL_FAILURES = 5;
+let kaggleSleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms));
+/** Test seam: replace the fetch-loop sleep. */
+export function setKaggleSleep(fn: ((ms: number) => Promise<void>) | null): void {
+  kaggleSleep = fn ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
 }
 
-function loadKaggleQuota(): KaggleQuotaState {
-  try {
-    const raw = fs.readFileSync(KAGGLE_QUOTA_FILE, 'utf-8');
-    return JSON.parse(raw);
-  } catch {
-    return { weekStart: weekStartMs(), gpuHours: 0, tpuHours: 0, cpuHours: 0 };
-  }
+function kaggleHwType(job: ComputeJob): 'gpu' | 'tpu' | 'cpu' {
+  return job.hardware?.type === 'gpu' ? 'gpu' : job.hardware?.type === 'tpu' ? 'tpu' : 'cpu';
 }
 
-function saveKaggleQuota(state: KaggleQuotaState): void {
-  fs.writeFileSync(KAGGLE_QUOTA_FILE, JSON.stringify(state, null, 2));
-}
-
-function weekStartMs(): number {
-  const now = new Date();
-  const day = now.getUTCDay(); // 0 = Sunday
-  const diff = now.getTime() - day * 24 * 60 * 60 * 1000;
-  return new Date(new Date(diff).setUTCHours(0, 0, 0, 0)).getTime();
-}
-
-function maybeResetKaggleQuota(state: KaggleQuotaState): KaggleQuotaState {
-  const ws = weekStartMs();
-  if (state.weekStart !== ws) {
-    return { weekStart: ws, gpuHours: 0, tpuHours: 0, cpuHours: 0 };
-  }
-  return state;
+function refreshKaggleQuota(self: ComputePlatform): void {
+  const doc = readQuota();
+  self.quota = { ...self.quota, consumed: committedHours(doc, 'gpu'), resetsAt: doc.weekStart + 7 * 24 * 60 * 60 * 1000 };
 }
 
 const kagglePlatform: ComputePlatform = {
@@ -242,123 +230,138 @@ const kagglePlatform: ComputePlatform = {
   configured: false,
 
   async initialize(config: KaggleConfig = {}): Promise<void> {
-    const credsPath = config.credentialsPath || path.join(process.env.HOME || '', '.kaggle', 'kaggle.json');
-    if (!fs.existsSync(credsPath)) {
+    // An explicit credentialsPath is authoritative (plus env); otherwise env,
+    // KAGGLE_CONFIG_DIR, then the OS home (os.homedir(): works on Windows).
+    kaggleCreds = config.credentialsPath
+      ? resolveKaggleCredentials({ credentialsPath: config.credentialsPath, home: '', env: { ...process.env, KAGGLE_CONFIG_DIR: '' } })
+      : resolveKaggleCredentials();
+    if (!kaggleCreds) {
       this.configured = false;
       return;
     }
     try {
-      execSync('kaggle --version', { stdio: 'ignore' });
+      await kaggleRun(['--version'], { timeoutMs: 15_000 });
       this.configured = true;
-      const quota = maybeResetKaggleQuota(loadKaggleQuota());
-      this.quota = { ...this.quota, consumed: quota.gpuHours, resetsAt: quota.weekStart + 7 * 24 * 60 * 60 * 1000 };
+      refreshKaggleQuota(this);
     } catch {
       this.configured = false;
     }
   },
 
   async submit(job: ComputeJob): Promise<ComputeJobHandle> {
-    if (!this.configured) throw new Error('Kaggle not configured (kaggle CLI + credentials)');
-    if (this.quota.consumed >= this.quota.weeklyLimit) throw new Error('Kaggle weekly GPU quota exhausted');
-
+    if (!this.configured || !kaggleCreds) throw new Error('Kaggle not configured (kaggle CLI + credentials)');
+    const type = kaggleHwType(job);
+    // Reserve the requested budget first (throws if the week's limit would be
+    // exceeded); the reservation is settled to actual usage when the job ends.
+    reserveQuota(job.id, type, job.maxRuntimeMs / 3_600_000);
+    const slug = kaggleSlug(String(job.meta?.kernelSlug ?? job.id));
+    const ref = kernelRef(kaggleCreds.username, slug);
     const notebook = job.payload as ComputeNotebook;
-    const filename = `recourse_${job.id}.ipynb`;
-    const nbContent = notebookToJson(notebook);
-
-    // Write notebook to a per-job temp dir (kernel metadata + cells). The dir is
-    // always removed, even when the CLI push fails, so no scratch is left behind.
-    const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'kaggle_'));
+    const filename = `${slug}.ipynb`;
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'recourse-kaggle-'));
     try {
-      const nbPath = path.join(tmpDir, filename);
-      fs.writeFileSync(nbPath, nbContent, 'utf-8');
-      // Kernel metadata sidecar the Kaggle CLI requires.
+      // A stable slug per task kind means a new push is a new VERSION of the same
+      // kernel (so Kaggle Secrets attached once keep working). Never push over a
+      // version that is still executing: status/output would conflate the two.
+      const prior = await kaggleRun(['kernels', 'status', ref], { timeoutMs: 30_000 }).catch(() => null);
+      if (prior) {
+        const st = parseKernelStatus(prior.stdout).state;
+        if (st === 'running' || st === 'queued') throw new Error(`Kaggle kernel ${ref} is still ${st}; not pushing a new version over it`);
+      }
+      fs.writeFileSync(path.join(tmpDir, filename), notebookToJson(notebook), 'utf-8');
       fs.writeFileSync(
         path.join(tmpDir, 'kernel-metadata.json'),
-        JSON.stringify(
-          {
-            id: job.id,
-            title: job.id,
-            code_file: filename,
-            language: 'python',
-            kernel_type: 'notebook',
-            is_private: true,
-            enable_gpu: job.hardware?.type === 'gpu',
-            enable_tpu: job.hardware?.type === 'tpu',
-            dataset_sources: [],
-            competition_sources: [],
-            kernel_sources: [],
-          },
-          null,
-          2,
-        ),
+        JSON.stringify(kernelMetadata({ username: kaggleCreds.username, slug, codeFile: filename, gpu: type === 'gpu', tpu: type === 'tpu', datasetSources: (job.meta?.datasetSources as string[] | undefined) }), null, 2),
         'utf-8',
       );
-
-      // `kaggle kernels push` submits the version; the CLI runs it remotely.
-      execSync(`kaggle kernels push -p "${tmpDir}"`, { stdio: 'pipe', timeout: 120000 });
+      const pushed = await kaggleRun(['kernels', 'push', '-p', tmpDir], { timeoutMs: 120_000 });
+      const out = `${pushed.stdout}\n${pushed.stderr}`;
+      // The CLI reports rejected pushes on stdout with exit code 0.
+      if (!/successfully pushed/i.test(out) && /error|invalid|could not|does not|not resolve|forbidden|unauthori[sz]ed/i.test(out)) {
+        throw new Error(`Kaggle rejected the push: ${out.trim().slice(0, 400)}`);
+      }
+    } catch (e) {
+      settleQuota(job.id, 0);
+      refreshKaggleQuota(this);
+      throw e;
     } finally {
       try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* best-effort */ }
     }
-
-    // Record the requested budget against the weekly quota only after a
-    // successful submission.
-    const budgetHours = job.maxRuntimeMs / 3_600_000;
-    const quotaState = maybeResetKaggleQuota(loadKaggleQuota());
-    if (job.hardware?.type === 'tpu') quotaState.tpuHours += budgetHours;
-    else if (job.hardware?.type === 'gpu') quotaState.gpuHours += budgetHours;
-    else quotaState.cpuHours += budgetHours;
-    saveKaggleQuota(quotaState);
-    this.quota = { ...this.quota, consumed: quotaState.gpuHours, resetsAt: quotaState.weekStart + 7 * 24 * 60 * 60 * 1000 };
-
-    return {
-      id: job.id,
-      platform: 'kaggle',
-      externalId: job.id,
-      submittedAt: Date.now(),
-      status: 'running',
-    };
+    refreshKaggleQuota(this);
+    return { id: job.id, platform: 'kaggle', externalId: ref, submittedAt: Date.now(), status: 'running' };
   },
 
   async poll(handle: ComputeJobHandle): Promise<ComputeJobStatus> {
+    let res: KaggleRunResult;
     try {
-      const output = execSync(`kaggle kernels output "${handle.externalId}"`, { encoding: 'utf-8', timeout: 30000 });
-      const lines = output.trim().split('\n');
-      const lastLine = lines[lines.length - 1];
-      if (lastLine.includes('complete') || lastLine.includes('success')) {
-        return { handle, state: 'completed', progress: 100, logs: lines };
-      }
-      if (lastLine.includes('error') || lastLine.includes('failed')) {
-        return { handle, state: 'failed', progress: 100, logs: lines, error: lastLine };
-      }
-      return { handle, state: 'running', progress: 50, logs: lines.slice(-20) };
+      res = await kaggleRun(['kernels', 'status', handle.externalId], { timeoutMs: 30_000 });
     } catch (e: any) {
-      return { handle, state: 'failed', progress: 0, logs: [], error: e.message };
+      // A transient CLI/network failure must not discard a job that is still
+      // burning (or has finished burning) quota: tolerate a few, then fail loudly.
+      const n = (kagglePollFailures.get(handle.id) ?? 0) + 1;
+      kagglePollFailures.set(handle.id, n);
+      if (n >= KAGGLE_MAX_POLL_FAILURES) {
+        return { handle, state: 'failed', progress: 0, logs: [], error: `status check failed ${n}x: ${e.message}` };
+      }
+      return { handle, state: 'running', progress: 0, logs: [`status check failed (${n}/${KAGGLE_MAX_POLL_FAILURES}): ${e.message}`] };
+    }
+    kagglePollFailures.delete(handle.id);
+    const st = parseKernelStatus(res.stdout);
+    const logs = res.stdout.trim().split(/\r?\n/).slice(-20);
+    switch (st.state) {
+      case 'complete': return { handle, state: 'completed', progress: 100, logs };
+      case 'error': return { handle, state: 'failed', progress: 100, logs, error: st.failure || `kernel ended with status "${st.raw}"` };
+      case 'cancelled': return { handle, state: 'cancelled', progress: 100, logs };
+      case 'queued': return { handle, state: 'pending', progress: 5, logs };
+      case 'running': return { handle, state: 'running', progress: 50, logs };
+      default: return { handle, state: 'failed', progress: 0, logs, error: `unrecognised kernel status output: ${res.stdout.trim().slice(0, 200)}` };
     }
   },
 
   async fetch(handle: ComputeJobHandle, timeoutMs = 3600000): Promise<ComputeJobResult> {
     const start = Date.now();
-    while (Date.now() - start < timeoutMs) {
-      const status = await this.poll(handle);
-      if (status.state === 'completed' || status.state === 'failed') {
-        const output = execSync(`kaggle kernels output "${handle.externalId}"`, { encoding: 'utf-8', timeout: 30000 });
-        return {
-          handle,
-          success: status.state === 'completed',
-          stdout: output,
-          stderr: '',
-          durationMs: Date.now() - start,
-          error: status.error,
-        };
-      }
-      await new Promise(r => setTimeout(r, 5000));
+    let status = await this.poll(handle);
+    while (status.state === 'running' || status.state === 'pending') {
+      if (Date.now() - start >= timeoutMs) throw new Error('Kaggle job timeout');
+      await kaggleSleep(5000);
+      status = await this.poll(handle);
     }
-    throw new Error('Kaggle job timeout');
+    const durationMs = Date.now() - handle.submittedAt;
+    settleQuota(handle.id, durationMs);
+    refreshKaggleQuota(this);
+    if (status.state === 'cancelled') {
+      return { handle, success: false, stdout: '', stderr: '', durationMs, error: 'kernel was cancelled' };
+    }
+    // The notebook's printed output is in the downloaded `<slug>.log`, NOT in the
+    // CLI's own stdout — and `kernels output` writes into -p, never the cwd.
+    const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'recourse-kaggle-out-'));
+    try {
+      let stdout = '';
+      let stderr = '';
+      let fetchError: string | undefined;
+      try {
+        await kaggleRun(['kernels', 'output', handle.externalId, '-p', outDir], { timeoutMs: 120_000 });
+        for (const f of fs.readdirSync(outDir).filter((n) => n.endsWith('.log'))) {
+          const parsed = parseKernelLog(fs.readFileSync(path.join(outDir, f), 'utf-8'));
+          stdout += parsed.stdout;
+          stderr += parsed.stderr;
+        }
+      } catch (e: any) {
+        fetchError = `could not download kernel output: ${e.message}`;
+      }
+      const success = status.state === 'completed' && !fetchError;
+      return { handle, success, stdout, stderr, durationMs, error: success ? undefined : (status.error || fetchError) };
+    } finally {
+      try { fs.rmSync(outDir, { recursive: true, force: true }); } catch { /* best-effort */ }
+    }
   },
 
   async cancel(handle: ComputeJobHandle): Promise<boolean> {
+    // Not every CLI version ships `kernels cancel`; when it is refused we say
+    // so (false) rather than pretending the kernel stopped. The quota
+    // reservation stays until the kernel is observed terminal.
     try {
-      execSync(`kaggle kernels cancel "${handle.externalId}"`, { stdio: 'ignore', timeout: 30000 });
+      await kaggleRun(['kernels', 'cancel', handle.externalId], { timeoutMs: 30_000 });
       return true;
     } catch {
       return false;

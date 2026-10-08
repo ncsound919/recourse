@@ -31,7 +31,6 @@
 import { readJsonFile, writeJsonFile } from './durableJson.js';
 import {
   createComputeClient,
-  selectPlatform,
   getAvailablePlatforms,
   listPlatforms,
   type ComputeJob,
@@ -43,9 +42,13 @@ import {
 
 export type RemoteTaskKind =
   | 'train_small_model'
+  | 'train_survival'
+  | 'meta_analysis'
   | 'forge_precompute'
   | 'learner_stress_eval'
-  | 'repair_diagnose';
+  | 'repair_diagnose'
+  | 'dream_candidates'
+  | 'science_experiment';
 
 export type RemoteTaskStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
 
@@ -200,6 +203,13 @@ export function buildSmallModelNotebook(payload: {
   task?: 'regression' | 'classification';
   model?: 'linear' | 'ridge' | 'mlp';
   testFraction?: number;
+  /**
+   * Optional candidate feature vectors to score with the TRAINED model. Their
+   * predictions come back in `result.predictions`, index-aligned with this
+   * array — this is how the trained model (on the remote box) ranks a freshly
+   * generated pool. Empty/absent means metrics-only (the original behaviour).
+   */
+  predictRows?: number[][];
 }): { notebook: ComputeNotebook; requirements: string[] } {
   const cfg = JSON.stringify({
     rows: payload.rows,
@@ -207,12 +217,14 @@ export function buildSmallModelNotebook(payload: {
     task: payload.task ?? 'regression',
     model: payload.model ?? 'linear',
     testFraction: payload.testFraction ?? 0.2,
+    predictRows: payload.predictRows ?? [],
   });
   const code =
     `from sklearn.model_selection import train_test_split\n` +
     `from sklearn.linear_model import LinearRegression, Ridge, LogisticRegression\n` +
     `from sklearn.neural_network import MLPRegressor, MLPClassifier\n` +
     `from sklearn.metrics import mean_squared_error, accuracy_score\n` +
+    `from sklearn.preprocessing import StandardScaler\n` +
     `import numpy as np\n` +
     `cfg = _rc_json.loads(${JSON.stringify(cfg)})\n` +
     `X = np.array(cfg["rows"], dtype=float)\n` +
@@ -229,12 +241,18 @@ export function buildSmallModelNotebook(payload: {
     `        clf = LogisticRegression(max_iter=500) if is_cls else Ridge(alpha=1.0)\n` +
     `    else:\n` +
     `        clf = LogisticRegression(max_iter=500) if is_cls else LinearRegression()\n` +
-    `    clf.fit(Xtr, ytr)\n` +
-    `    pred = clf.predict(Xte)\n` +
+    `    _scaler = StandardScaler().fit(Xtr)\n` +
+    `    Xtr_s, Xte_s = _scaler.transform(Xtr), _scaler.transform(Xte)\n` +
+    `    clf.fit(Xtr_s, ytr)\n` +
+    `    pred = clf.predict(Xte_s)\n` +
     `    metric = accuracy_score(yte, pred) if is_cls else -float(mean_squared_error(yte, pred))\n` +
     `    result = {"ok": True, "metric": round(float(metric), 6), "metricName": "accuracy" if is_cls else "neg_mse",\n` +
     `              "trainRows": int(Xtr.shape[0]), "testRows": int(Xte.shape[0]),\n` +
-    `              "model": cfg["model"], "task": cfg["task"]}`;
+    `              "model": cfg["model"], "task": cfg["task"]}\n` +
+    `    if cfg.get("predictRows"):\n` +
+    `        Xp = np.array(cfg["predictRows"], dtype=float)\n` +
+    `        result["predictions"] = [round(float(v), 4) for v in clf.predict(_scaler.transform(Xp))]\n` +
+    `        result["predictedRows"] = int(Xp.shape[0])`;
   return pythonNotebook(code, ['scikit-learn', 'numpy']);
 }
 
@@ -257,9 +275,18 @@ export function buildForgePrecomputeNotebook(payload: {
   const code =
     `import os, urllib.request\n` +
     `cfg = _rc_json.loads(${JSON.stringify(cfg)})\n` +
-    `base = os.environ.get("RECOURSE_FORGE_BASE_URL", "").rstrip("/")\n` +
-    `key = os.environ.get("RECOURSE_FORGE_API_KEY", "")\n` +
-    `model = os.environ.get("RECOURSE_FORGE_MODEL", "")\n` +
+    `def _rc_secret(name):\n` +
+    `    v = os.environ.get(name, "")\n` +
+    `    if v:\n` +
+    `        return v\n` +
+    `    try:\n` +
+    `        from kaggle_secrets import UserSecretsClient\n` +
+    `        return UserSecretsClient().get_secret(name)\n` +
+    `    except Exception:\n` +
+    `        return ""\n` +
+    `base = _rc_secret("RECOURSE_FORGE_BASE_URL").rstrip("/")\n` +
+    `key = _rc_secret("RECOURSE_FORGE_API_KEY")\n` +
+    `model = _rc_secret("RECOURSE_FORGE_MODEL")\n` +
     `if not base or not model:\n` +
     `    result = {"ok": False, "error": "remote forge env not configured (RECOURSE_FORGE_BASE_URL/RECOURSE_FORGE_MODEL)"}\n` +
     `else:\n` +
@@ -284,6 +311,83 @@ export function buildForgePrecomputeNotebook(payload: {
 }
 
 /**
+ * Dream-candidate notebook: asks a remote OpenAI-compatible model for several
+ * falsifiable micro-tool hypotheses (premise / hypothesis / plain-JS source /
+ * assert-style tests) per domain. This is breadth for the dream engine's REM
+ * phase. Nothing it returns is trusted: Recourse re-runs every candidate in the
+ * local sandbox before it can become a thought.
+ *
+ * The notebook only makes HTTP calls to a model API, so it needs NO accelerator
+ * (a GPU session would burn the 30h/week quota for nothing).
+ */
+export function buildDreamCandidatesNotebook(payload: {
+  domains: string[];
+  perDomain?: number;
+  avoid?: string[];
+  /** Recent verified experiment claims, offered to the dreamer as inspiration (never as facts to restate). */
+  context?: string[];
+}): { notebook: ComputeNotebook; requirements: string[] } {
+  const cfg = JSON.stringify({
+    domains: payload.domains,
+    perDomain: Math.max(1, Math.min(4, payload.perDomain ?? 2)),
+    avoid: (payload.avoid ?? []).slice(0, 12).map((s) => String(s).slice(0, 160)),
+    context: (payload.context ?? []).slice(0, 8).map((s) => String(s).slice(0, 300)),
+  });
+  const system =
+    'You are the dream layer of an autonomous code-discovery system. Propose ONE falsifiable hypothesis for a small, genuinely implementable micro-tool. ' +
+    'Return ONLY valid JSON: {"premise": "one sentence assumption", "hypothesis": "one sentence claim about the micro-tool", ' +
+    '"sourceCode": "PLAIN JAVASCRIPT, no TS, no imports, exported via export function", ' +
+    '"testSuiteCode": "multi-line string where EVERY line starts with the word assert followed by a space, then a boolean expression that calls the real function and fails if the implementation is wrong"}. ' +
+    'sourceCode MUST define the function testSuiteCode calls. The tests must pass against your own sourceCode and must be strong enough to fail if the code were subtly wrong (cover edge cases, not just one example). No placeholders, no Markdown fences.';
+  const code =
+    `import os, urllib.request\n` +
+    `cfg = _rc_json.loads(${JSON.stringify(cfg)})\n` +
+    `SYSTEM = ${JSON.stringify(system)}\n` +
+    `def _rc_secret(name):\n` +
+    `    v = os.environ.get(name, "")\n` +
+    `    if v:\n` +
+    `        return v\n` +
+    `    try:\n` +
+    `        from kaggle_secrets import UserSecretsClient\n` +
+    `        return UserSecretsClient().get_secret(name)\n` +
+    `    except Exception:\n` +
+    `        return ""\n` +
+    `base = _rc_secret("RECOURSE_FORGE_BASE_URL").rstrip("/")\n` +
+    `key = _rc_secret("RECOURSE_FORGE_API_KEY")\n` +
+    `model = _rc_secret("RECOURSE_FORGE_MODEL")\n` +
+    `if not base or not model:\n` +
+    `    result = {"ok": False, "error": "remote forge env not configured (RECOURSE_FORGE_BASE_URL/RECOURSE_FORGE_MODEL as Kaggle secrets)"}\n` +
+    `else:\n` +
+    `    thoughts, failed = [], 0\n` +
+    `    for domain in cfg["domains"]:\n` +
+    `        for i in range(int(cfg["perDomain"])):\n` +
+    `            user = 'Dream a micro-tool hypothesis for domain "' + domain + '".'\n` +
+    `            if cfg.get("context"):\n` +
+    `                user += " Recent measured lab results (inspiration only; propose a micro-tool that could help run, check or extend this kind of experiment): " + " | ".join(cfg["context"])\n` +
+    `            if cfg["avoid"]:\n` +
+    `                user += " Avoid repeating: " + " | ".join(cfg["avoid"])\n` +
+    `            body = _rc_json.dumps({"model": model, "temperature": 0.6 + 0.1 * i,\n` +
+    `                "messages": [{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}]}).encode()\n` +
+    `            req = urllib.request.Request(base + "/chat/completions", data=body,\n` +
+    `                headers={"Content-Type": "application/json", "Authorization": "Bearer " + key})\n` +
+    `            try:\n` +
+    `                with urllib.request.urlopen(req, timeout=180) as r:\n` +
+    `                    txt = _rc_json.loads(r.read().decode())["choices"][0]["message"]["content"]\n` +
+    `                lo, hi = txt.find("{"), txt.rfind("}")\n` +
+    `                obj = _rc_json.loads(txt[lo:hi + 1])\n` +
+    `                if isinstance(obj.get("sourceCode"), str) and isinstance(obj.get("testSuiteCode"), str):\n` +
+    `                    thoughts.append({"domain": domain, "premise": str(obj.get("premise", ""))[:300], "hypothesis": str(obj.get("hypothesis", ""))[:300], "sourceCode": obj["sourceCode"], "testSuiteCode": obj["testSuiteCode"]})\n` +
+    `                else:\n` +
+    `                    failed += 1\n` +
+    `            except Exception:\n` +
+    `                failed += 1\n` +
+    `    result = {"ok": len(thoughts) > 0, "thoughts": thoughts, "failed": failed}\n` +
+    `    if not thoughts:\n` +
+    `        result["error"] = "no usable candidates (" + str(failed) + " failed)"`;
+  return pythonNotebook(code, []);
+}
+
+/**
  * Generic evaluation notebook: runs the supplied Python body, which must set
  * `result` (a dict). Used for learner stress evaluation and repair diagnostics.
  */
@@ -294,6 +398,77 @@ export function buildEvalNotebook(payload: {
   return pythonNotebook(payload.script, payload.requirements ?? []);
 }
 
+/**
+ * Survival notebook — Cox proportional hazards + Harrell C-index (lifelines).
+ * Offloads a real survival fit (heavy on large cohorts); lifelines is pip-installed
+ * because Kaggle's base image does not ship it. `features` is a JSON row matrix,
+ * `durations`/`events` the outcome columns. Reports only the metric.
+ */
+export function buildSurvivalNotebook(payload: {
+  features: number[][];
+  durations: number[];
+  events: number[];
+}): { notebook: ComputeNotebook; requirements: string[] } {
+  const cfg = JSON.stringify(payload);
+  const code =
+    `import sys, subprocess, numpy as np, pandas as pd\n` +
+    `subprocess.run([sys.executable, "-m", "pip", "install", "-q", "lifelines"], check=False)\n` +
+    `from lifelines import CoxPHFitter\n` +
+    `from lifelines.utils import concordance_index\n` +
+    `cfg = _rc_json.loads(${JSON.stringify(cfg)})\n` +
+    `X = np.asarray(cfg["features"], dtype=float)\n` +
+    `df = pd.DataFrame(X, columns=[f"x{i}" for i in range(X.shape[1])])\n` +
+    `df["T"] = cfg["durations"]; df["E"] = cfg["events"]\n` +
+    `cph = CoxPHFitter().fit(df, "T", "E")\n` +
+    `c = concordance_index(df["T"], -cph.predict_partial_hazard(df), df["E"])\n` +
+    `result = {"ok": True, "model": "coxph", "cIndex": round(float(c), 4), "n": int(len(df)), "nEvents": int(np.sum(cfg["events"]))}`;
+  return pythonNotebook(code, ['lifelines']);
+}
+
+/**
+ * Random-effects meta-analysis notebook (DerSimonian-Laird + bootstrap CI).
+ * Accepts either effect sizes (`effect`+`se`) or counts (`conform`+`total`,
+ * pooled on the logit scale). This is the offload target for the weekly compiler
+ * when there are many cohorts. Pure numpy — deterministic, seedable.
+ */
+export function buildMetaAnalysisNotebook(payload: {
+  items: Array<Record<string, unknown>>;
+  seed?: number;
+  boot?: number;
+}): { notebook: ComputeNotebook; requirements: string[] } {
+  const cfg = JSON.stringify({ items: payload.items, seed: payload.seed ?? 42, boot: payload.boot ?? 1000 });
+  const code =
+    `import numpy as np\n` +
+    `from math import exp, sqrt\n` +
+    `cfg = _rc_json.loads(${JSON.stringify(cfg)})\n` +
+    `items = cfg["items"]\n` +
+    `if all(("effect" in it and "se" in it) for it in items):\n` +
+    `    yi = np.array([float(it["effect"]) for it in items]); sei = np.array([float(it["se"]) for it in items]); vi = sei ** 2; transform = None\n` +
+    `else:\n` +
+    `    k = np.array([float(it["conform"]) for it in items]); n = np.array([float(it["total"]) for it in items])\n` +
+    `    p = np.clip(k / n, 1.0 / (2 * n), 1 - 1.0 / (2 * n)); yi = np.log(p / (1 - p)); vi = 1.0 / (n * p * (1 - p)); transform = "logit"\n` +
+    `wi = 1.0 / vi; mu = float(np.sum(wi * yi) / np.sum(wi)); Q = float(np.sum(wi * (yi - mu) ** 2)); dfree = len(yi) - 1\n` +
+    `C = float(np.sum(wi) - np.sum(wi ** 2) / np.sum(wi)); tau2 = max(0.0, (Q - dfree) / C) if C > 0 else 0.0\n` +
+    `wr = 1.0 / (vi + tau2); mur = float(np.sum(wr * yi) / np.sum(wr)); se = sqrt(1.0 / float(np.sum(wr)))\n` +
+    `I2 = max(0.0, (Q - dfree) / Q * 100.0) if Q > 0 else 0.0\n` +
+    `lo, hi = mur - 1.96 * se, mur + 1.96 * se\n` +
+    `def inv(x):\n` +
+    `    return 1.0 / (1.0 + np.exp(-x)) if transform == "logit" else x\n` +
+    // Nonparametric bootstrap that REFITS the random-effects model (DerSimonian-
+    // Laird tau^2) on each resample, so the interval reflects between-study
+    // heterogeneity instead of a fixed-effect interval mislabeled as random.
+    `def _dl(yy, vv):\n` +
+    `    w = 1.0 / vv; m = float(np.sum(w * yy) / np.sum(w)); Q = float(np.sum(w * (yy - m) ** 2)); dfree = len(yy) - 1\n` +
+    `    C = float(np.sum(w) - np.sum(w ** 2) / np.sum(w)); t2 = max(0.0, (Q - dfree) / C) if C > 0 else 0.0\n` +
+    `    wr = 1.0 / (vv + t2); return float(np.sum(wr * yy) / np.sum(wr))\n` +
+    `rng = np.random.default_rng(int(cfg["seed"])); bs = []\n` +
+    `for _ in range(int(cfg["boot"])):\n` +
+    `    idx = rng.integers(0, len(yi), len(yi)); bs.append(_dl(yi[idx], vi[idx]))\n` +
+    `bs = np.array(bs)\n` +
+    `result = {"ok": True, "k": int(len(yi)), "pooled": round(float(inv(mur)), 4), "ci_lo": round(float(inv(lo)), 4), "ci_hi": round(float(inv(hi)), 4), "I2": round(I2, 2), "tau2": round(tau2, 6), "boot_lo": round(float(inv(np.percentile(bs, 2.5))), 4), "boot_hi": round(float(inv(np.percentile(bs, 97.5))), 4), "transform": transform}`;
+  return pythonNotebook(code, ['numpy']);
+}
+
 // ---------------------------------------------------------------------------
 // Job construction
 // ---------------------------------------------------------------------------
@@ -302,6 +477,10 @@ export interface RemoteJobOptions {
   platform?: ComputePlatformId;
   hardware?: { type: 'gpu' | 'cpu' | 'tpu'; spec?: string };
   maxRuntimeMs?: number;
+  /** Kaggle datasets (owner/slug) to mount read-only at /kaggle/input/<slug>: the analysis runs next to the data. */
+  datasetSources?: string[];
+  /** Own kernel slug instead of the per-kind one, so independent experiments run in parallel. */
+  kernelSlug?: string;
 }
 
 /** Build a ComputeJob for a kind. Returns null when the payload is unusable. */
@@ -324,6 +503,7 @@ export function buildRemoteJob(
         task: payload.task as 'regression' | 'classification' | undefined,
         model: payload.model as 'linear' | 'ridge' | 'mlp' | undefined,
         testFraction: payload.testFraction as number | undefined,
+        predictRows: Array.isArray(payload.predictRows) ? (payload.predictRows as number[][]) : undefined,
       });
       break;
     }
@@ -333,22 +513,45 @@ export function buildRemoteJob(
       built = buildForgePrecomputeNotebook({ specs, count: payload.count as number | undefined });
       break;
     }
+    case 'dream_candidates': {
+      const domains = payload.domains as string[] | undefined;
+      if (!Array.isArray(domains) || domains.length === 0) return null;
+      built = buildDreamCandidatesNotebook({ domains, perDomain: payload.perDomain as number | undefined, avoid: payload.avoid as string[] | undefined, context: payload.context as string[] | undefined });
+      break;
+    }
     case 'learner_stress_eval':
+    case 'science_experiment':
     case 'repair_diagnose': {
       const script = payload.script as string | undefined;
       if (!script || !script.trim()) return null;
       built = buildEvalNotebook({ script, requirements: payload.requirements as string[] | undefined });
       break;
     }
+    case 'train_survival': {
+      const features = payload.features as number[][] | undefined;
+      const durations = payload.durations as number[] | undefined;
+      const events = payload.events as number[] | undefined;
+      if (!Array.isArray(features) || !Array.isArray(durations) || !Array.isArray(events)
+        || features.length !== durations.length || durations.length !== events.length || features.length < 4) {
+        return null;
+      }
+      built = buildSurvivalNotebook({ features, durations, events });
+      break;
+    }
+    case 'meta_analysis': {
+      const items = payload.items as Array<Record<string, unknown>> | undefined;
+      if (!Array.isArray(items) || items.length < 2) return null;
+      built = buildMetaAnalysisNotebook({ items, seed: payload.seed as number | undefined, boot: payload.boot as number | undefined });
+      break;
+    }
     default:
       return null;
   }
 
-  const hardware = opts.hardware ?? (
-    kind === 'forge_precompute' || kind === 'train_small_model'
-      ? { type: 'gpu' as const }
-      : { type: 'cpu' as const }
-  );
+  // CPU unless the caller asks otherwise. forge_precompute / dream_candidates only
+  // make HTTP calls to a model API, and train_small_model is scikit-learn: none
+  // use an accelerator, and a GPU session is charged against the 30h/week quota.
+  const hardware = opts.hardware ?? { type: 'cpu' as const };
 
   return {
     id: `rc_${kind}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -356,8 +559,18 @@ export function buildRemoteJob(
     kind: 'notebook',
     payload: built.notebook,
     hardware,
-    maxRuntimeMs: Math.min(opts.maxRuntimeMs ?? 12 * 3_600_000, 12 * 3_600_000),
-    meta: { requirements: built.requirements },
+    // Kaggle ends accelerator sessions at ~9h and CPU-only sessions at ~12h
+    // (third-party reporting of the published limits; unverified against Kaggle's
+    // own docs). Asking for more just gets the kernel killed mid-run.
+    maxRuntimeMs: Math.min(opts.maxRuntimeMs ?? 12 * 3_600_000, (hardware.type === 'cpu' ? 12 : 9) * 3_600_000),
+    // Stable kernel per task kind: new pushes are versions of one kernel, so Kaggle
+    // Secrets attached to it once persist and the account does not accumulate a
+    // kernel per job.
+    meta: {
+      requirements: built.requirements,
+      kernelSlug: opts.kernelSlug ?? `recourse-${kind.replace(/_/g, '-')}`,
+      ...(opts.datasetSources?.length ? { datasetSources: opts.datasetSources } : {}),
+    },
   };
 }
 
@@ -374,7 +587,7 @@ export interface EnqueueResult {
 export async function enqueueRemoteTask(
   kind: RemoteTaskKind,
   payload: Record<string, unknown>,
-  opts: RemoteJobOptions & { meta?: Record<string, unknown> } = {},
+  opts: RemoteJobOptions & { meta?: Record<string, unknown>; persistPayload?: Record<string, unknown> } = {},
   deps: RemoteComputeDeps = {},
 ): Promise<EnqueueResult> {
   const client = deps.client ?? createComputeClient();
@@ -383,12 +596,22 @@ export async function enqueueRemoteTask(
 
   let platform = opts.platform;
   if (!platform) {
-    const selection = selectPlatform(job, { preferGpu: opts.hardware?.type === 'gpu' });
-    // Only offload when a REMOTE platform is chosen; local stays in-process.
-    if (!NOTEBOOK_PLATFORM_IDS.includes(selection.platform)) {
+    // This path is REMOTE compute, so choose among the notebook platforms
+    // directly. The generic `selectPlatform` scored a CPU job toward local/e2b
+    // (Kaggle only scored when a GPU was wanted), which silently refused every
+    // CPU offload — including every `train_small_model` and stress eval — even
+    // with Kaggle configured and free.
+    //
+    // The platform registry is initialized once at server boot (see server.ts),
+    // before any job runs, so this read is not racing initialization.
+    const remote = getAvailablePlatforms().filter((p) => NOTEBOOK_PLATFORM_IDS.includes(p.id));
+    if (remote.length === 0) {
       return { queued: false, reason: 'no remote platform available (local stays in-process)' };
     }
-    platform = selection.platform;
+    // NOTEBOOK_PLATFORM_IDS is ordered by preference (kaggle first — the only
+    // free backend that actually runs notebooks).
+    remote.sort((a, b) => NOTEBOOK_PLATFORM_IDS.indexOf(a.id) - NOTEBOOK_PLATFORM_IDS.indexOf(b.id));
+    platform = remote[0].id;
   }
   if (!NOTEBOOK_PLATFORM_IDS.includes(platform)) {
     return { queued: false, reason: `platform "${platform}" is not remote` };
@@ -405,7 +628,9 @@ export async function enqueueRemoteTask(
       status: 'queued',
       createdAt: now,
       updatedAt: now,
-      payload,
+      // persistPayload: a slim record stored instead of the submitted payload (e.g. drop a
+      // multi-MB embedded script) in the same write that adds the task.
+      payload: opts.persistPayload ?? payload,
       meta: opts.meta,
     };
     const doc = readRemoteQueue();

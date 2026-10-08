@@ -6,7 +6,9 @@ import { writeStatelessSelfHostedTool, verifySelfHostedEntry } from './selfHosti
 import { assessForgeCandidate } from './forgeQuality.js';
 import type { ToolDomain } from '../types.js';
 
-const AXIOM_URL = process.env.AXIOM_URL || 'http://127.0.0.1:3198';
+import { fleetBaseUrl } from './fleetRegistry.js';
+
+const AXIOM_URL = fleetBaseUrl('axiom');
 const TIMEOUT_MS = Number(process.env.AXIOM_TIMEOUT_MS || 180000);
 
 // ---------------------------------------------------------------------------
@@ -23,9 +25,7 @@ function axiomApiToken(): string {
 
   const keysFile = process.env.KEYWIRE_KEYS_FILE
     || process.env.AXIOM_KEYS_FILE
-    || (process.env.UPLIFT_ROOT
-      ? path.join(process.env.UPLIFT_ROOT, 'Keywire', 'data', 'keywire-keys.json')
-      : '');
+    || path.join(process.env.KEYWIRE_ROOT || path.join('C:', 'Users', 'User', 'Downloads', 'BUSINESS', 'INFRASTRUCTURE', 'Keywire'), 'data', 'keywire-keys.json');
   if (!keysFile || !fs.existsSync(keysFile)) return '';
   try {
     const parsed = JSON.parse(fs.readFileSync(keysFile, 'utf-8').replace(/^\uFEFF/, ''));

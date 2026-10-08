@@ -88,4 +88,15 @@ describe('tool consumption bindings', () => {
     expect(status.line).toBeGreaterThan(0);
     expect(binding.kind).toBe('load_bearing');
   });
+
+  it('survives a malformed registry entry with no name instead of crashing the forge', () => {
+    // Shape observed live 2026-10-06: one registry row lacked `name`, so the
+    // sort's `a.tool.localeCompare` threw and the whole forge scheduler job
+    // failed. The report must skip the nameless row and keep the good ones.
+    const nameless = { currentVersion: '1.0.0', versions: [], healthStatus: 'healthy' } as unknown as ToolEntry;
+    const report = consumptionReport([forgeTool('levenshteinDistance'), nameless]);
+    expect(report.rows.map((r) => r.tool)).toContain('levenshteinDistance');
+    expect(report.rows.some((r) => r.tool === undefined)).toBe(false);
+    expect(report.materialized).toBe(1);
+  });
 });

@@ -92,6 +92,11 @@ function extractArtifacts(result: unknown): ResearchArtifact[] {
   const r = result as { artifact?: unknown; artifacts?: unknown };
   push(r.artifact);
   if (Array.isArray(r.artifacts)) for (const a of r.artifacts) push(a);
+  // A job may return the artifact BARE (a documented shape above). Treat the
+  // result itself as the artifact only when it is not the {artifact}/{artifacts}
+  // envelope — otherwise the documented bare shape was silently uncredited and a
+  // job that DID produce a verifiable artifact read as unproductive.
+  if (!('artifact' in (result as object)) && !('artifacts' in (result as object))) push(result);
   return out;
 }
 

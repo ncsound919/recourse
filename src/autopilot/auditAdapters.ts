@@ -29,8 +29,8 @@ import type { AuditorSectionT } from './loopTypes';
 import { openHubPresetForDepth } from './auditDepth';
 import { createRequire } from 'node:module';
 import { recordStage } from '../lib/acceptance.js';
+import { fleetBaseUrl } from '../lib/fleetRegistry.js';
 
-const DEFAULT_OPENHUB_URL = 'http://127.0.0.1:3010';
 // A full suite spawns many tools. The first real run took 137s for a modest
 // repo, which is inside undici's DEFAULT 300s headers timeout — but that
 // timeout is independent of any AbortSignal we set, so a slower repo fails with
@@ -38,7 +38,7 @@ const DEFAULT_OPENHUB_URL = 'http://127.0.0.1:3010';
 const RUN_TIMEOUT_MS = 30 * 60 * 1000;
 
 export function openHubBase(env: NodeJS.ProcessEnv = process.env): string {
-  return (env.OPENHUB_URL || DEFAULT_OPENHUB_URL).replace(/\/+$/, '');
+  return fleetBaseUrl('openhub', env);
 }
 
 export function openHubSecret(env: NodeJS.ProcessEnv = process.env): string {

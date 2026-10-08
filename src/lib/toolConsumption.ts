@@ -224,6 +224,10 @@ export function consumptionReport(
   let unconsumed = 0;
 
   for (const tool of registry) {
+    // A malformed registry entry with no name cannot be addressed or bound, and
+    // its undefined `tool` used to crash the sort below — taking the whole forge
+    // job down. Skip it; one corrupt row must not fail the report.
+    if (!tool || typeof tool.name !== 'string' || !tool.name) continue;
     const version = tool.versions?.find((v) => v.promoted && v.version === tool.currentVersion);
     const materialized = isForgeMaterialized(tool);
     const binding = byTool.get(tool.name);
@@ -274,7 +278,7 @@ export function consumptionReport(
     notMaterialized: rows.length - materialized,
     calledShare: materialized > 0 ? Math.round((called / materialized) * 1000) / 1000 : 0,
     bindingsLive: bindings.every((b) => b.live),
-    rows: rows.sort((a, b) => a.tool.localeCompare(b.tool)),
+    rows: rows.sort((a, b) => (a.tool ?? '').localeCompare(b.tool ?? '')),
     bindings,
   };
 }

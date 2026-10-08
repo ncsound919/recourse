@@ -96,6 +96,7 @@
   "GET /api/recourse/fieldbridge/status",
   "GET /api/recourse/fleet-dashboard",
   "GET /api/recourse/fleet/draymond",
+  "GET /api/recourse/fleet/services",
   "GET /api/recourse/fleet/signal",
   "GET /api/recourse/fleet/voice",
   "GET /api/recourse/folding/run/:runId",

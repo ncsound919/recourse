@@ -16,7 +16,7 @@ export interface KeywireConfig {
 }
 
 export const DEFAULT_KEYWIRE_CONFIG: KeywireConfig = {
-  url: process.env.KEYWIRE_URL || 'http://localhost:3000',
+  url: process.env.KEYWIRE_URL || 'http://localhost:4700',
   apiKey: process.env.KEYWIRE_SERVICE_TOKEN || '',
   timeoutMs: 10_000,
 };
