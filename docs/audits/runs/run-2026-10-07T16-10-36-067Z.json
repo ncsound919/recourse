@@ -1,0 +1,26 @@
+{
+  "runId": "run-2026-10-07T16-10-36-067Z",
+  "generatedAt": "2026-10-07T16:13:22.477Z",
+  "profileSlug": "truck-buddy",
+  "gapsConsidered": 7,
+  "compositeGaps": 0,
+  "proposals": 0,
+  "skipped": {
+    "planner_unavailable": 1
+  },
+  "filesChanged": 0,
+  "locAdded": 0,
+  "gatesPassed": 0,
+  "gatesFailed": 0,
+  "laneA": false,
+  "laneB": false,
+  "fitnessDelta": null,
+  "forecastBrier": null,
+  "forecastEce": null,
+  "selfEce": null,
+  "directiveInfluence": [],
+  "compositePairs": [],
+  "outcome": "idle",
+  "significant": false,
+  "significanceNote": "not significant: filesChanged 0 < 2; gatesPassed 0 < 1; nothing merged, so no fitnessDelta exists"
+}
