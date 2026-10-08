@@ -1,0 +1,165 @@
+# Your patch layer for this dsh profile, applied after every bundle layer:
+# a top-level YAML array of loader patch entries (id-targeted config
+# overrides, disables, and insert lists; `!!js` expressions allowed).
+- id: ui-settings-general
+  name: "@deepseek-ai/dsh-client-ui-settings-general"
+  config:
+    welcomeNoticeVersion: 2026-09-28.1
+- id: ui-theme
+  name: "@deepseek-ai/dsh-client-ui-theme"
+  config:
+    preference: dark
+    fontSize: 16
+
+# ---------------------------------------------------------------------------
+# BUSINESS ecosystem MCP bridges.
+#
+# dsh-mcp-client is NOT part of the dsh-base bundle (only dsh-mcp-resources is),
+# so it must be inserted here. Each entry is one plugin instance = one MCP
+# server. Tools land on the model as mcp__<serverName>__<tool>.
+#
+# failOnStartupError stays false (default) on purpose: if a bridge cannot
+# connect, the harness still boots and only that server's tools are absent.
+# Set it true when you want a dead bridge to block activation instead.
+#
+# RECOURSE IS NO LONGER AN MCP BRIDGE. It used to be this block's first entry
+# (id: mcp-recourse, spawning recourse/mcp-server.ts). Those 46 tools are now
+# native plugins registered by `dsh-recourse`, which replaced it because:
+#   - DeepSeek's function-name contract allows only [A-Za-z0-9_-], so the
+#     bridge had to expose recourse.status as
+#     mcp__recourse__recourse_status_<12-hex-hash>. Native names are clean.
+#   - the bridge's blanket 30s toolCallTimeoutMs capped forge and evolve calls
+#     that legitimately run for minutes.
+#   - a stdio bridge pays a subprocess + JSON-RPC round trip per call and
+#     cannot see exec.signal, so harness cancellation never reached Recourse.
+# Parity is enforced, not assumed: `node scripts/parity.mjs` in
+# BUSINESS/INFRASTRUCTURE/dsh-recourse drives both sides and diffs them.
+# To go back, re-add the row below and drop `dsh-recourse` from the profile's
+# package.json bundles.
+# ---------------------------------------------------------------------------
+- insert:
+    # OpenHub: 12 audit tools (openhub_audit_run, _scorers, _core_run, _core_rules,
+    # _core_autofix, _ecosystem_state/list/refresh/audit, _service_status, ...).
+    - id: mcp-openhub
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: openhub
+        transport: stdio
+        command: node
+        args: [ 'node_modules/tsx/dist/cli.mjs', 'openhub-mcp.ts' ]
+        cwd: 'C:/Users/User/Downloads/BUSINESS/INFRASTRUCTURE/openhub'
+        toolCallTimeoutMs: 300000
+
+    # Dev Brain: 10 decision tools. Dev Brain ships no MCP server, so
+    # dev-brain-mcp.ts is a purpose-built stdio bridge over its HTTP API.
+    # The deterministic tools (decide, strategy_decide, repair_triage,
+    # governance_evaluate) are LLM-free — prefer them over the *_jev variants,
+    # which add a calibrated advisory from LocalJev :8080 or the TypeSafe gateway.
+    - id: mcp-devbrain
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: devbrain
+        transport: stdio
+        command: node
+        args: [ 'node_modules/tsx/dist/cli.mjs', 'dev-brain-mcp.ts' ]
+        cwd: 'C:/Users/User/Downloads/BUSINESS/INFRASTRUCTURE/Dev-Brain'
+        env:
+          # 3450, not Dev-Brain's own 3000 default. Matches start-dev-brain.ps1
+          # and Recourse's DEV_BRAIN_URL.
+          DEV_BRAIN_API_URL: !!js process.env.DEV_BRAIN_API_URL || 'http://127.0.0.1:3450'
+          # Only /api/decide/jev/raw enforces this; unset means the guarded
+          # endpoint is open, which is Dev Brain's own default.
+          DEV_BRAIN_API_SECRET: !!js process.env.DEV_BRAIN_API_SECRET || ''
+        toolCallTimeoutMs: 45000
+
+    # The `workflowEngine` service itself. dsh-base mounts only the provider
+    # (`dsh-workflow-ptc`) and the tool (`dsh-tool-workflow`), so without this
+    # row `tool-ralph` sits forever as "pending (waiting for service:
+    # workflowEngine)". This is the seam the Ralph loop executes through.
+    - id: workflow-engine
+      name: '@deepseek-ai/dsh-workflow'
+
+    # promote-gate: the closed loop. Recourse produces candidates, OpenHub's
+    # audit suite gates them, Dev-Brain's deterministic matrix and the local JEV
+    # model each choose independently, and a promotion only happens when the
+    # audit gate passed AND the two decisions agree.
+    # gate_promote re-runs the evaluation itself, so a forged "approved" cannot
+    # be replayed. It never mutates a live harness process: plugin rows land in
+    # this file under reversible markers and need a restart to activate.
+    - id: mcp-promotegate
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: promotegate
+        transport: stdio
+        command: node
+        args: [ 'node_modules/tsx/dist/cli.mjs', 'promote-gate-mcp.ts' ]
+        cwd: 'C:/Users/User/Downloads/BUSINESS/INFRASTRUCTURE/promote-gate'
+        env:
+          RECOURSE_URL: !!js process.env.RECOURSE_URL || 'http://127.0.0.1:3050'
+          RECOURSE_API_SECRET: !!js process.env.RECOURSE_API_SECRET || ''
+          OPENHUB_ROOT: 'C:/Users/User/Downloads/BUSINESS/INFRASTRUCTURE/openhub'
+          # Mirrors the openhub allowlist, so the gate cannot be aimed at
+          # arbitrary host directories.
+          OPENHUB_ALLOWED_ROOTS: 'C:/Users/User/Downloads/BUSINESS;C:/Users/User/Downloads/Uplift'
+          DSH_PROFILE_DIR: 'C:/Users/User/.dsh/profiles/web'
+        # An audit plus a local JEV decision is measured in minutes.
+        toolCallTimeoutMs: 900000
+
+    # Synthbook — cross-domain knowledge synthesis. Twelve tools.
+    # Eight are deterministic and import Synthbook's own engine directly
+    # (cosine similarity, Beta posteriors, decayed confidence, structural holes,
+    # citation verification, formula evaluation), so they need no server and no
+    # model; four drive the HTTP pipeline and report honestly when it is down.
+    #
+    # Port 3020, not 3000: Grafana owns 3000 here and also answers /api/health,
+    # so the bridge verifies Synthbook's `service: "synthbook"` marker rather
+    # than trusting any 200.
+    - id: mcp-synthbook
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: synthbook
+        transport: stdio
+        command: node
+        args: [ 'node_modules/tsx/dist/cli.mjs', 'synthbook-mcp.ts' ]
+        cwd: 'C:/Users/User/Downloads/BUSINESS/CREATIVE/Synthbook'
+        env:
+          SYNTHBOOK_ROOT: 'C:/Users/User/Downloads/BUSINESS/CREATIVE/Synthbook'
+          SYNTHBOOK_URL: 'http://127.0.0.1:3020'
+          SYNTHBOOK_TIMEOUT_MS: '600000'
+        # A unified_pipeline_run is minutes.
+        toolCallTimeoutMs: 660000
+
+# ---------------------------------------------------------------------------
+# Autonomy: Ralph loop.
+#
+# dsh-base ships `tool-ralph` with `disabled: true` on purpose — it iterates a
+# fresh agent over a build-time-fixed script with no human in the loop, and
+# completion is the worker's own self-report rather than an independent check.
+# This row opts in. A patch replaces the targeted row's whole `config`, so the
+# shipped values are restated here verbatim and `disabled` is flipped.
+#
+# maxRounds bounds one unattended run. Lower it if you want a tighter leash;
+# the loop still stops on a worker self-report of completion.
+# ---------------------------------------------------------------------------
+- id: tool-ralph
+  name: '@deepseek-ai/dsh-tool-ralph'
+  disabled: false
+  config:
+    subagentProvider: spawn
+    maxRounds: 64
+- id: llm-pi-ai
+  name: "@deepseek-ai/dsh-llm-pi-ai"
+  config:
+    providers:
+      opencode-go:
+        apiKeyEnv: OPENCODE_GO_API_KEY
+      vercel-ai-gateway:
+        apiKeyEnv: VERCEL_AI_GATEWAY_API_KEY
+      huggingface:
+        apiKeyEnv: HUGGINGFACE_API_KEY
+      google:
+        apiKeyEnv: GOOGLE_API_KEY
+      anthropic:
+        apiKeyEnv: ANTHROPIC_API_KEY
+
+

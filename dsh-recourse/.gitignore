@@ -1,0 +1,25 @@
+# Dependencies (75MB+; the harness profile junctions to this directory, so these
+# are resolved on the host, never vendored).
+node_modules/
+.pnpm-store/
+
+# Build output. The profile links this package with `link:`, so the harness
+# loads whatever `pnpm build` produced in this directory - the compiled tree is
+# generated, not authored. A fresh clone must run `pnpm build` before the
+# harness will load the plugin.
+lib/
+*.tsbuildinfo
+
+# Secrets. cordis.patch.yml names an env var (`apiSecretEnvVar`) rather than a
+# value precisely so nothing lands here; keep it that way.
+.env
+.env.*
+!.env.example
+
+# Local artifacts
+coverage/
+playwright-report/
+test-results/
+*.log
+.DS_Store
+Thumbs.db

@@ -1,0 +1,26 @@
+packages:
+  - .
+autoInstallPeers: false
+
+nodeLinker: hoisted
+
+# The community plugins installed here (dsh-autotier, dsh-checkpoint-rewind,
+# dsh-teams-x) declare a peer range on @deepseek-ai/dsh-tools that tops out
+# below 0.2.0, e.g. ">=0.1.2-rc.1 <0.2.0". This profile runs DSH 0.2.0-rc.2,
+# which no version in those ranges can satisfy, so pnpm resolved the peer to an
+# old 0.1.0-rc.6 and installed it at node_modules/@deepseek-ai/dsh-tools.
+#
+# That copy SHADOWS the real host copy, so the profile's `tools` plugin row
+# resolved to 0.1.0-rc.6, DSH judged it incompatible, and disabled the row.
+# With no `tools` service, 17 plugins starved -- agent-loop, timeout-policy,
+# spill-policy, session-checkpoint-policy, tool-ralph, and every MCP bridge
+# including mcp-recourse. That is why the harness appeared to boot while being
+# functionally empty, and why hand-junctioning the directory did not stick:
+# the next `pnpm install` (e.g. from `pnpm patch-commit`) restored it.
+#
+# The override makes the intent explicit and survives every install.
+overrides:
+  '@deepseek-ai/dsh-tools': 0.2.0-rc.2
+
+patchedDependencies:
+  dsh-teams-x@0.2.0: patches/dsh-teams-x@0.2.0.patch

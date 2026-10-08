@@ -1,0 +1,352 @@
+[
+  {
+    "name": "recourse_call",
+    "title": "Call any Recourse tool by name",
+    "description": "Call any Recourse tool by name. Use this for everything not already offered as its own tool; behaviour is identical to calling that tool directly, including argument validation. Pass the tool's arguments under `args`.\n\nAvailable tools:\n- recourse.status: Live system status, model, tool counts, readiness.\n- recourse.registry: List registered tools/genes and their current promoted state.\n- recourse.upgrade_report: How the upgraded system differs from the boot baseline.\n- recourse.nightly_report: The latest self-attested nightly upgrade report (dream -> forge -> benchmark delta). Empty until the first nightly cycle runs.\n- recourse.self_mod_status: Harness self-modification status: last nightly run, pending approvals, applied/reverted patches, and the protected-path policy.\n- recourse.capabilities: Which self-hosted tools Recourse adopted to back its own internal operations (dogfood).\n- recourse.selfhosted: List live self-hosted tools/artifacts and their kinds (function/cli/api/mcp/a2a/loop).\n- recourse.exportable: List verified registry tools that carry real source + suite and can therefore be exported as SKILL.md folders.\n- recourse.export_skill: Write a verified registry tool into the configured export root as an open SKILL.md folder (source + test suite embedded). Mutating: requires RECOURSE_API_SECRET.\n- recourse.import_skill: Import a skill from a configured skill library (rootId + rel) through the promotion gate. If it embeds code + suite in a code domain it is verified for real; prose-only skills are recorded as pending and never fabricated into the registry. Mutating: requires RECOURSE_API_SECRET.\n- recourse.inspect_gene: Read the full record for a named registry tool: domain, health, current version, score, pass state, verifier notes.\n- recourse.evolve: Ask the mutator to propose a new capability for a domain. Promotions only land if the produced code passes the real sandbox + lint gate. Mutating: requires RECOURSE_API_SECRET.\n- recourse.promote: Promote a pending gene by its id through the approval gate. Mutating: requires RECOURSE_API_SECRET.\n- recourse.compose: Generate an original \"in the vein of\" track (steely-dan | jasper-ballad | dangelo-glasper | airplane). Loop mode (default): a deterministic 4/8/16-bar loop -> .mid + a SoundLab .seq pocket. Mode \"arr\": a non-looping written-out arc (intro/A/bridge/final/outro, jasper final key-lift) -> .mid only. Mutating: requires RECOURSE_API_SECRET.\n- recourse.rate_track: Record your 1-5 rating for a reproducible composition so the composer learns to steer toward what you like. Same style+seed+rating updates the episode. Mutating: requires RECOURSE_API_SECRET.\n- recourse.learned: Read per-style learned quality biases, episodes, and leaderboard so you can see how ratings are shaping composition.\n- recourse.benchmark: Grade the composer on computed metrics (integrity, harmony, loop closure, style root-motion adherence, voice-leading, richness, nuance) across all styles. Does NOT grade taste/timbre — that needs your ears + recourse.rate_track.\n- recourse.benchmark_leaderboard: The hash-chained record of every external benchmark run, ranked by solved count, with per-run deltas and registry attestations. Read-only.\n- recourse.benchmark_ledger: Recent self-attested benchmark records and whether the hash chain is intact. Read-only.\n- recourse.wallet: Per-token spend budgets, remaining balances, and whether the hash-chained ledger is intact. Read-only.\n- recourse.telemetry: Machine load/memory and git state, plus the work-window decision used to schedule heavy jobs. Read-only.\n- recourse.audio_status: Whether the audio/video transcription sidecar is reachable and its ASR backend is available. Read-only.\n- recourse.compose_soundlab: Compose a style-driven piece and emit the SoundLab bridge contract. Feed the returned JSON to a running SoundLab via window.__recourse.load(piece), then __recourse.play(). Mutating: requires RECOURSE_API_SECRET.\n- recourse.axiom_status: Probe Axiom harness reachability and capability grid from Recourse.\n- recourse.kg_live_status: Probe Open Targets Platform and PubTator 3.0 availability for the live oncology evidence layer.\n- recourse.kg_live_graph: Query Open Targets + PubTator 3.0 and merge with the canonical curated KG into a grounded, provenance-tagged graph. Providers that are down are reported ok:false and simply contribute nothing.\n- recourse.ode_synthesize: Build the live graph and map Open Targets + PubTator evidence into a concrete OdeSimulationParams bundle (Overlay Oncology solveOdeTumorImmuneSystem contract) with per-parameter provenance. Parameters are labeled evidence-derived / literature-prior / canonical / calibrated.\n- recourse.dosing_optimize: Synthesize evidence-to-ODE params then sweep therapy modes × dose levels, computing per-arm cure-reachability and a seeded subclone-extinction probability. Arms are real deterministic ODE runs; extinctionProbability is an ensemble fraction, not a fitted clinical statistic.\n- recourse.pipeline_dossier: One call: live graph → ODE params → dosing optimization → SBML Level 3 + PhysiCell XML exports, then hash-chain every stage into a verifiable evidence dossier. Reads the real providers; a down provider contributes nothing.\n- recourse.axiom_build: Delegate tool synthesis to Axiom Agent harness, verify with Recourse executionSandbox, and materialize into .selfhosted/ manifest. Mutating: requires RECOURSE_API_SECRET.\n- recourse.sandbox_status: Whether the WASM capability sandbox runtime (QuickJS) is live, the warm guest-context count, and the effective default execution path.\n- recourse.memory_tiered: Durable episodic + semantic memory backend (SQLite/memory), DB path, episode count, fact count.\n- recourse.recall_memory: Semantic recall over Recourse vector memory for a query. Read-only.\n- recourse.inspect_learner: Learner status: episodes, gene beliefs, directives, and last report.\n- recourse.problems: The curated hard-math problem bank with acceptance tests and tier.\n- recourse.run_forge: Run the honest self-improvement forge loop (agenda -> model implementation -> sandbox verify -> promote). Promotions only land on a real green suite. Mutating: requires RECOURSE_API_SECRET.\n- recourse.execute_selfhosted: Call a self-hosted tool method. Execution goes through the WASM capability sandbox by default (default-deny grants); the response reports which mode actually ran. Mutating: requires RECOURSE_API_SECRET.\n- recourse.consolidate_memory: Fold episode clusters into durable semantic facts (idempotent). Mutating: requires RECOURSE_API_SECRET.\n- recourse.promote_skills: Run the skill auto-promotion pass: generalist genes -> backing tool re-verified in the sandbox -> lint gate -> SKILL.md export. Rejected/skipped outcomes are reported honestly. Mutating: requires RECOURSE_API_SECRET.\n- recourse.revert: Revert an applied patch by its revert token (as recorded in provenance). Mutating: requires RECOURSE_API_SECRET.\n- recourse.skills: The signed, versioned skill registry (id, version, license, author, signature presence). Read-only.\n- recourse.publish_skill: Publish a versioned skill to the registry (signed with the local skill secret when configured). Mutating: requires RECOURSE_API_SECRET.\n- recourse.connectors: Registered external connectors and their live health probes. Read-only.\n- recourse.validate_plugin: Validate a plugin manifest (schema + default-deny capabilities) and report its signature status. Read-only.\n- recourse.dsh_plugins: DeepSeek Harness cordis bundles generated by Recourse, with each manifest's signature state, plus the profiles the harness has. Read-only.\n- recourse.dsh_scaffold: Generate a DeepSeek Harness cordis bundle from a declarative spec (id, packageName, description, tools[]). dryRun renders the file list and signed manifest without touching disk. Mutating unless dryRun: requires RECOURSE_API_SECRET.\n- recourse.grounding_status: Grounding config, the trust registry (which providers may be quoted and why), and live reachability of both research services. Read-only.\n- recourse.grounding_ledger: The hash-chained record of what grounded a build: query, source ids with trust levels, and chain integrity. Answers \"what was this tool actually built from?\". Read-only.\n- recourse.dsh_scaffold_render: Generate a DeepSeek Harness cordis bundle from a declarative spec and return the file list plus the signed manifest WITHOUT writing to disk. Read-only.\n- recourse.research_ground: Gather real external literature for a tool idea before writing it, and return exactly what would be injected into the forge prompt. Only \"retrieved\" sources are quotable; others are returned as leads with their trust level and reason. Reports honestly when a research service is down.\n- recourse.traces: Recently finished spans with W3C trace context (name, ids, status, duration). Read-only.\n- recourse.tracing_status: Whether an OTLP exporter is configured, the service name, and the buffered span count. Read-only.\n- recourse.slopbench_status: Probe SlopCodeBench availability: CLI on PATH, Docker daemon, uv, and configured agent/model. Read-only.\n- recourse.slopbench_run: Run a SlopCodeBench iterative specification refinement benchmark. Measures code erosion, verbosity, and structural degradation across checkpoints. Requires Docker and an API key.\n- recourse.slopbench_eval: Evaluate a completed SlopCodeBench run directory: per-checkpoint pass rates, verbosity, structural erosion, and quality metrics. Read-only.\n- recourse.slopbench_metrics: Compute quality metrics (verbosity, erosion, LOC, cyclomatic complexity, maintainability) for a run directory or code snapshot. Read-only.\n- recourse.slopbench_list_runs: List completed SlopCodeBench run directories with their problem sets, agents, and timestamps. Read-only.\n- recourse.coding_pipelines: Discover all registered coding pipelines (opencode, deepseek, axiom, settlement, slopcodebench) with live availability and standings. Read-only.\n- recourse.coding_pipelines_ledger: Hash-chained history of pipeline benchmark runs with per-pipeline standings. Read-only.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "enum": [
+            "recourse.status",
+            "recourse.registry",
+            "recourse.upgrade_report",
+            "recourse.nightly_report",
+            "recourse.self_mod_status",
+            "recourse.capabilities",
+            "recourse.selfhosted",
+            "recourse.exportable",
+            "recourse.export_skill",
+            "recourse.import_skill",
+            "recourse.inspect_gene",
+            "recourse.evolve",
+            "recourse.promote",
+            "recourse.compose",
+            "recourse.rate_track",
+            "recourse.learned",
+            "recourse.benchmark",
+            "recourse.benchmark_leaderboard",
+            "recourse.benchmark_ledger",
+            "recourse.wallet",
+            "recourse.telemetry",
+            "recourse.audio_status",
+            "recourse.compose_soundlab",
+            "recourse.axiom_status",
+            "recourse.kg_live_status",
+            "recourse.kg_live_graph",
+            "recourse.ode_synthesize",
+            "recourse.dosing_optimize",
+            "recourse.pipeline_dossier",
+            "recourse.axiom_build",
+            "recourse.sandbox_status",
+            "recourse.memory_tiered",
+            "recourse.recall_memory",
+            "recourse.inspect_learner",
+            "recourse.problems",
+            "recourse.run_forge",
+            "recourse.execute_selfhosted",
+            "recourse.consolidate_memory",
+            "recourse.promote_skills",
+            "recourse.revert",
+            "recourse.skills",
+            "recourse.publish_skill",
+            "recourse.connectors",
+            "recourse.validate_plugin",
+            "recourse.dsh_plugins",
+            "recourse.dsh_scaffold",
+            "recourse.grounding_status",
+            "recourse.grounding_ledger",
+            "recourse.dsh_scaffold_render",
+            "recourse.research_ground",
+            "recourse.traces",
+            "recourse.tracing_status",
+            "recourse.slopbench_status",
+            "recourse.slopbench_run",
+            "recourse.slopbench_eval",
+            "recourse.slopbench_metrics",
+            "recourse.slopbench_list_runs",
+            "recourse.coding_pipelines",
+            "recourse.coding_pipelines_ledger"
+          ],
+          "description": "Which Recourse tool to call."
+        },
+        "args": {
+          "description": "Arguments for that tool, matching the tool's own parameters.",
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "recourse.benchmark",
+    "title": "Run the objective composer benchmark",
+    "description": "Grade the composer on computed metrics (integrity, harmony, loop closure, style root-motion adherence, voice-leading, richness, nuance) across all styles. Does NOT grade taste/timbre — that needs your ears + recourse.rate_track.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "recourse.coding_pipelines",
+    "title": "List coding pipelines",
+    "description": "Discover all registered coding pipelines (opencode, deepseek, axiom, settlement, slopcodebench) with live availability and standings. Read-only.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "recourse.dsh_plugins",
+    "title": "Scaffolded DSH bundles",
+    "description": "DeepSeek Harness cordis bundles generated by Recourse, with each manifest's signature state, plus the profiles the harness has. Read-only.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "recourse.evolve",
+    "title": "Evolve a new tool/gene",
+    "description": "Ask the mutator to propose a new capability for a domain. Promotions only land if the produced code passes the real sandbox + lint gate. Mutating: requires RECOURSE_API_SECRET.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "domain": {
+          "type": "string",
+          "enum": [
+            "coding",
+            "math",
+            "biotech",
+            "systemic",
+            "neuro_symbolic",
+            "cyber_defense",
+            "quantum_sim"
+          ],
+          "description": "Tool domain to evolve in"
+        },
+        "instructions": {
+          "type": "string",
+          "minLength": 4,
+          "description": "What capability to build / how to mutate"
+        },
+        "targetToolName": {
+          "description": "Optional existing tool name to target a mutation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "domain",
+        "instructions"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "recourse.grounding_status",
+    "title": "Research grounding configuration and trust registry",
+    "description": "Grounding config, the trust registry (which providers may be quoted and why), and live reachability of both research services. Read-only.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "recourse.inspect_gene",
+    "title": "Inspect one registry gene/tool in detail",
+    "description": "Read the full record for a named registry tool: domain, health, current version, score, pass state, verifier notes.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Exact registry tool/gene name"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "recourse.problems",
+    "title": "List hard/unsolved problems",
+    "description": "The curated hard-math problem bank with acceptance tests and tier.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "recourse.promote",
+    "title": "Approve / promote a pending gene",
+    "description": "Promote a pending gene by its id through the approval gate. Mutating: requires RECOURSE_API_SECRET.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "geneId": {
+          "type": "string",
+          "description": "Id of the pending gene to promote"
+        }
+      },
+      "required": [
+        "geneId"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "recourse.recall_memory",
+    "title": "Recall from Recourse memory",
+    "description": "Semantic recall over Recourse vector memory for a query. Read-only.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "q": {
+          "type": "string",
+          "description": "Query text"
+        },
+        "kind": {
+          "description": "Optional memory kind filter",
+          "type": "string"
+        },
+        "topK": {
+          "description": "Number of hits (default 5)",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        }
+      },
+      "required": [
+        "q"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "recourse.registry",
+    "title": "Recourse gene registry",
+    "description": "List registered tools/genes and their current promoted state.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "recourse.research_ground",
+    "title": "Ground a capability in external research",
+    "description": "Gather real external literature for a tool idea before writing it, and return exactly what would be injected into the forge prompt. Only \"retrieved\" sources are quotable; others are returned as leads with their trust level and reason. Reports honestly when a research service is down.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "idea": {
+          "type": "string",
+          "description": "The tool idea or contract, in one or two sentences"
+        },
+        "domain": {
+          "description": "coding | math | biotech | systemic | neuro_symbolic | cyber_defense | quantum_sim",
+          "type": "string"
+        },
+        "minRelevance": {
+          "description": "Query-term overlap a source must reach (default 0.34)",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "required": [
+        "idea"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "recourse.run_forge",
+    "title": "Run the capability forge",
+    "description": "Run the honest self-improvement forge loop (agenda -> model implementation -> sandbox verify -> promote). Promotions only land on a real green suite. Mutating: requires RECOURSE_API_SECRET.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "count": {
+          "description": "Forge cycles to run (default 1)",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3
+        }
+      },
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "recourse.selfhosted",
+    "title": "Recourse self-hosted artifacts",
+    "description": "List live self-hosted tools/artifacts and their kinds (function/cli/api/mcp/a2a/loop).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "recourse.status",
+    "title": "Recourse status",
+    "description": "Live system status, model, tool counts, readiness.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  }
+]
