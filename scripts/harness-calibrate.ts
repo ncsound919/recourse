@@ -104,7 +104,7 @@ async function calibrateTask(taskId: string, pipelines: string[]): Promise<Calib
 }
 
 async function main(): Promise<void> {
-  const outPath = arg('out') || path.join(os.homedir(), 'Downloads', 'Uplift', 'Benchmark Olympics', 'data', 'harness-calibration.json');
+  const outPath = arg('out') || path.join(os.homedir(), 'Downloads', 'BUSINESS', 'INFRASTRUCTURE', 'recourse', 'data', 'harness-calibration.json');
   const reposArg = arg('repos');
   const taskId = arg('task');
 

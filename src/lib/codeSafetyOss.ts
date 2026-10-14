@@ -4,7 +4,7 @@
 // screen in codeSafety.ts — uses Semgrep's pattern matching for robust
 // detection of dangerous code patterns (eval, process access, etc.).
 
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -110,8 +110,9 @@ export function screenCodeWithSemgrep(code: string): SafetyScreenResult {
     fs.writeFileSync(codeFile, code);
     fs.writeFileSync(rulesFile, SEMGREP_RULES);
 
-    const output = execSync(
-      `semgrep --config ${rulesFile} --json ${codeFile}`,
+    const output = execFileSync(
+      'semgrep',
+      ['--config', rulesFile, '--json', codeFile],
       { encoding: 'utf-8', timeout: semgrepTimeoutMs(), stdio: ['pipe', 'pipe', 'pipe'] },
     );
 
@@ -143,6 +144,6 @@ export function screenCodeWithSemgrep(code: string): SafetyScreenResult {
         : err?.message || 'semgrep execution failed',
     };
   } finally {
-    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* best-effort cleanup */ }
   }
 }

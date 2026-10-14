@@ -139,6 +139,56 @@ export function pruneDegraded<T extends RegistryToolLike>(tools: T[]): T[] {
   return tools.filter((tool) => !isDegraded(tool));
 }
 
+/**
+ * Failure-evidence classes for a gate-fail reason string.
+ *
+ * The registry used to label every gate-fail 'degraded', which lumps three
+ * unrepairable realities (an artifactless claim, an unrunnable experiment, a
+ * policy finding) with true behavioral regressions — measured 2026-10-12:
+ * 1140/1171 'degraded' tools were claim-only re-verification bookkeeping whose
+ * earlier version HAD passed, 17 had no entrypoint, 5 were Date.now policy
+ * findings, and only ~9 were real behavioral failures (powerMod pre-fix).
+ * This drove the repair driver to chase unfundable tickets.
+ */
+export type RecourseFailureClass = 'behavioral' | 'policy' | 'not-runnable' | 'claim-only' | 'unknown';
+
+export function classifyFailureFromReasons(reasons: string | string[] | undefined | null): RecourseFailureClass {
+  const s = Array.isArray(reasons) ? reasons.join('; ') : String(reasons ?? '');
+  if (/no_entrypoint/i.test(s)) return 'not-runnable';
+  if (/no_suite/i.test(s)) return 'claim-only';
+  if (/does not declare/i.test(s)) return 'claim-only';
+  if (/Date\.now/i.test(s)) return 'policy';
+  if (/precision|diverges|reference/i.test(s)) return 'behavioral';
+  return 'unknown';
+}
+
+/** Does ANY recorded version carry a verified pass? */
+export function everVerified(tool: Pick<RegistryToolLike, 'versions' | 'passed_verifier'>): boolean {
+  return Boolean(
+    tool.passed_verifier === true ||
+    (Array.isArray(tool.versions) && tool.versions.some((v) => v?.passed_verifier === true)),
+  );
+}
+
+/**
+ * The truthful healthStatus for a tool whose current version FAILED its gate.
+ * `degraded` is reserved for behavioral failures a repair pass could plausibly
+ * fix; everything else gets an honest, non-actionable label.
+ */
+export function failedHealthStatus<T extends Pick<RegistryToolLike, 'versions' | 'passed_verifier'>>(
+  tool: T,
+  reasons: string | string[] | undefined | null,
+): string {
+  const cls = classifyFailureFromReasons(reasons);
+  if (cls === 'behavioral') return 'degraded';
+  if (cls === 'policy') return 'policy-fail';
+  if (cls === 'not-runnable') return 'not-runnable';
+  if (cls === 'claim-only') return everVerified(tool) ? 'unverified-claim' : 'not-runnable';
+  // Unknown evidence: a tool that never verified was never real; one that did
+  // could have regressed — conservative choice stays actionable.
+  return everVerified(tool) ? 'degraded' : 'not-runnable';
+}
+
 export interface HygieneSample {
   duplicateKeys: Array<{ key: string; kept: string; dropped: string[] }>;
   degraded: string[];

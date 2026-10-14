@@ -5,6 +5,9 @@ import {
   dedupeRegistry,
   pruneDegraded,
   hygieneReport,
+  classifyFailureFromReasons,
+  everVerified,
+  failedHealthStatus,
   type RegistryToolLike,
 } from './registryHygiene';
 
@@ -101,6 +104,35 @@ describe('pruneDegraded', () => {
     });
 
     expect(pruneDegraded([regressed])).toHaveLength(0);
+  });
+});
+
+describe('failure-class taxonomy (failedHealthStatus)', () => {
+  const tool = (history: boolean[]) => ({
+    versions: history.map((passed, i) => ({ version: `1.0.0-${i}`, passed_verifier: passed, promoted: true })),
+    passed_verifier: undefined,
+  });
+
+  it('reason-classifies claim-only failures without erasing earlier passes', () => {
+    const t = tool([true]);
+    expect(failedHealthStatus(t, 'not audited: no_suite')).toBe('unverified-claim');
+    expect(failedHealthStatus(tool([]), 'not audited: no_suite')).toBe('not-runnable');
+    expect(classifyFailureFromReasons('stored source does not declare the artifact\'s behavior')).toBe('claim-only');
+  });
+
+  it('classifies unrunnable / policy / behavioral evidence', () => {
+    expect(failedHealthStatus(tool([true]), 'not audited: no_entrypoint')).toBe('not-runnable');
+    expect(failedHealthStatus(tool([true]), 'nondeterministic API use: Date.now')).toBe('policy-fail');
+    expect(failedHealthStatus(tool([true]), 'precision: powerMod(...[2,10,9007199254740991]) diverges')).toBe('degraded');
+  });
+
+  it('falls back conservatively on unknown evidence', () => {
+    // Unknown + a past verified pass -> plausibly regressed, stays actionable.
+    expect(failedHealthStatus(tool([true]), 'mystery reason')).toBe('degraded');
+    // Unknown + never verified -> could never run; not a repair ticket.
+    expect(failedHealthStatus(tool([]), 'mystery reason')).toBe('not-runnable');
+    // A real behavioral failure on a regressed tool IS degraded regardless.
+    expect(classifyFailureFromReasons('nothing recognizable here')).toBe('unknown');
   });
 });
 

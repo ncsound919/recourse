@@ -12,7 +12,7 @@
  * and Recourse's own dashboard read as the same product.
  */
 
-import type { CSSProperties } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 
 /** Panel background and border, from the spec's token table. */
 export const TOKENS = {
@@ -143,7 +143,7 @@ export function Button({
   tone = 'default',
   title,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
   onClick: () => void;
   disabled?: boolean;
   tone?: 'default' | 'primary';

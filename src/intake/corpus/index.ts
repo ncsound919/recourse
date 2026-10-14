@@ -111,7 +111,7 @@ export const DEFAULT_CORPUS_ROOTS: CorpusRoot[] = [
   },
   {
     project: 'axiom',
-    root: 'C:\\Users\\User\\Downloads\\Uplift\\06_Resources\\Axiom Agent',
+    root: 'C:\\Users\\User\\Downloads\\BUSINESS\\_archive\\from-uplift\\06_Resources\\Axiom Agent',
   },
   // Overlay Cheetah bridge.
   {
@@ -127,7 +127,7 @@ export const DEFAULT_CORPUS_ROOTS: CorpusRoot[] = [
   // supabase-mcp, math-x, Bobby-Breakdown, The-Beta-Team, Truth Chain.
   {
     project: 'skilltech',
-    root: 'C:\\Users\\User\\Downloads\\Uplift\\06_Resources\\Skilltech',
+    root: 'C:\\Users\\User\\Downloads\\BUSINESS\\SKILLS\\Skilltech',
   },
   // --- Supporting fleet tools ------------------------------------------------
   {
@@ -167,11 +167,11 @@ export const DEFAULT_CORPUS_ROOTS: CorpusRoot[] = [
   // --- Fleet docs / plans / skills ------------------------------------------
   {
     project: 'uplift-docs',
-    root: 'C:\\Users\\User\\Downloads\\Uplift\\docs',
+    root: 'C:\\Users\\User\\Downloads\\BUSINESS\\_archive\\from-uplift\\docs',
   },
   {
     project: 'uplift-plans',
-    root: 'C:\\Users\\User\\Downloads\\Uplift\\plans',
+    root: 'C:\\Users\\User\\Downloads\\BUSINESS\\_archive\\from-uplift\\plans',
   },
   {
     project: 'business-skills',
@@ -187,6 +187,55 @@ export const DEFAULT_CORPUS_ROOTS: CorpusRoot[] = [
     // dead — but the project itself is alive under TRUCKING\).
     project: 'truck-buddy',
     root: 'C:\\Users\\User\\Downloads\\BUSINESS\\TRUCKING\\Truck Buddy',
+  },
+  // --- Oncology ecosystem interconnection (2026-10-12) -----------------------
+  // KNOWLEDGE directories only. `platform/` and `orchestration/` hold 150k+
+  // files each (mostly node_modules) and would swamp the scanner; the corpus
+  // wants literature and evidence, not dependencies.
+  {
+    project: 'oncology-papers',
+    root: 'C:\\Users\\User\\Downloads\\BUSINESS\\SCIENCE\\Oncology Ecosystem\\papers',
+  },
+  {
+    project: 'oncology-evidence',
+    root: 'C:\\Users\\User\\Downloads\\BUSINESS\\SCIENCE\\Oncology Ecosystem\\evidence',
+  },
+  {
+    project: 'oncology-docs',
+    root: 'C:\\Users\\User\\Downloads\\BUSINESS\\SCIENCE\\Oncology Ecosystem\\docs',
+  },
+  {
+    project: 'oncology-notebook',
+    root: 'C:\\Users\\User\\Downloads\\BUSINESS\\SCIENCE\\Oncology Ecosystem\\notebook-inbox',
+  },
+  {
+    project: 'oncology-apps',
+    root: 'C:\\Users\\User\\Downloads\\BUSINESS\\SCIENCE\\Oncology Ecosystem\\apps',
+  },
+  // --- The science writing/verification lane ---------------------------------
+  {
+    project: 'scientific-paper-framework',
+    root: 'C:\\Users\\User\\Downloads\\BUSINESS\\SCIENCE\\scientific-paper-framework',
+  },
+  {
+    project: 'scientific-paper-templates',
+    root: 'C:\\Users\\User\\Downloads\\BUSINESS\\SCIENCE\\scientific-paper-templates',
+  },
+  {
+    project: 'scientific-paper-publisher',
+    root: 'C:\\Users\\User\\Downloads\\BUSINESS\\SCIENCE\\scientific-paper-publisher',
+  },
+  {
+    project: 'research-integrity',
+    root: 'C:\\Users\\User\\Downloads\\BUSINESS\\SCIENCE\\research-integrity',
+  },
+  {
+    project: 'open-notebook',
+    root: 'C:\\Users\\User\\Downloads\\BUSINESS\\SCIENCE\\open-notebook',
+  },
+  {
+    project: 'overlay-science',
+    root: 'C:\\Users\\User\\Downloads\\BUSINESS\\SCIENCE\\Overlay Science',
   },
 ];
 

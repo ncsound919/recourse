@@ -23,7 +23,7 @@ try:
     import unstructured  # noqa: F401
     UNSTRUCTURED_AVAILABLE = True
 except ImportError:
-    pass
+    pass  # optional dependency absent; service stays importable
 
 
 class IngestRequest(BaseModel):

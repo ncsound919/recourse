@@ -67,7 +67,7 @@ def _assert_public_url(url: str) -> None:
             raise HTTPException(status_code=400, detail="url host is a private/loopback/link-local address")
         return
     except ValueError:
-        pass
+        pass  # not an IP literal; not a private-range host
     try:
         infos = socket.getaddrinfo(host, None)
     except socket.gaierror:

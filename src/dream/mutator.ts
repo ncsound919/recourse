@@ -278,12 +278,15 @@ export function runSandboxVerification(candidate: MutationCandidate): SandboxVer
     const probe = `${cleanedCode};
       const candidateFn = typeof ${entryName} === 'function' ? ${entryName} : (typeof run === 'function' ? run : null);
       if (!candidateFn) throw new Error("Entrypoint function '${entryName}' not exported or defined");
+      // Vector shapes: [a,b,c] -> positional spread; {args:[..]} -> unpacked;
+      // any other value -> single-argument call (unary tools).
+      const __call = (args) => Array.isArray(args) ? candidateFn(...args) : (args && Object.prototype.hasOwnProperty.call(args, 'args') && Array.isArray(args.args) ? candidateFn(...args.args) : candidateFn(args));
       const __vectors = ${vectorsJson};
       const __res = [];
       for (const v of __vectors) {
         try {
-          const r1 = candidateFn(v);
-          const r2 = candidateFn(v);
+          const r1 = __call(v);
+          const r2 = __call(v);
           const s1 = JSON.stringify(r1);
           const s2 = JSON.stringify(r2);
           __res.push({ s1: s1 === undefined ? null : s1, s2: s2 === undefined ? null : s2, undef: r1 === undefined });
@@ -293,8 +296,7 @@ export function runSandboxVerification(candidate: MutationCandidate): SandboxVer
         }
       }
       return __res;`;
-    const run = runBodyInIsolate(probe, { timeoutMs: 2000, memoryLimitMb: 64 });
-    if (!run.ok) {
+    const run = runBodyInIsolate(probe, { timeoutMs: 2000, memoryLimitMb: 64 });    if (!run.ok) {
       const msg = run.error || 'isolate run failed';
       checks.push({ name: 'executable_syntax', passed: false, detail: `Execution error: ${msg}` });
       return { verified: false, summary: `Syntax / runtime error: ${msg}`, checks };
@@ -324,8 +326,14 @@ export function runSandboxVerification(candidate: MutationCandidate): SandboxVer
     }
     for (const v of vectors) {
       try {
-        const r1 = (fn as Function)(v);
-        const r2 = (fn as Function)(v);
+        // Same vector-shape contract as the isolate probe above.
+        const callIt = (args) => {
+          if (Array.isArray(args)) return (fn as Function)(...args);
+          if (args && Object.prototype.hasOwnProperty.call(args, 'args') && Array.isArray(args.args)) return (fn as Function)(...args.args);
+          return (fn as Function)(args);
+        };
+        const r1 = callIt(v);
+        const r2 = callIt(v);
         const s1 = JSON.stringify(r1);
         const s2 = JSON.stringify(r2);
         outcomes.push({ s1: s1 === undefined ? null : s1, s2: s2 === undefined ? null : s2, undef: r1 === undefined });

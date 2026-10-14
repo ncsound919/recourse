@@ -201,6 +201,7 @@ export function createReadoutRouter(deps: ReadoutRouterDeps): Router {
     const allDomains: Array<ToolEntry['domain']> = ['coding', 'math', 'biotech', 'systemic', 'neuro_symbolic', 'cyber_defense', 'quantum_sim'];
     let passTotal = 0;
     let passOk = 0;
+    let notAuditableTotal = 0;
     allDomains.forEach(d => {
       const domainTools = registry.filter(r => r.domain === d);
       const liveTools = domainTools.filter(t => {
@@ -212,8 +213,16 @@ export function createReadoutRouter(deps: ReadoutRouterDeps): Router {
         const cur = t.currentVersion;
         return t.versions.some(x => x.version === cur && x.promoted);
       }).length;
+      // Truthful denominator: unverified-claim / not-runnable tools have no
+      // re-executable path (no suite / no artifact), so counting them in the
+      // pass-rate denominator measures missing AUDITABILITY, not failure.
+      // They are reported separately as verifierNotAuditable instead.
+      const nonAuditableInDomain = domainTools.filter(t =>
+        t.healthStatus === 'unverified-claim' || t.healthStatus === 'not-runnable').length;
+      notAuditableTotal += nonAuditableInDomain;
+      const audited = Math.max(0, tried - nonAuditableInDomain);
       if (!status.domainCoverage) status.domainCoverage = {} as any;
-      const passRate = tried > 0 ? Math.round((liveTools / tried) * 100) / 100 : 0;
+      const passRate = audited > 0 ? Math.round((liveTools / audited) * 100) / 100 : 0;
       const health = domainHealth(liveTools, passRate);
       status.domainCoverage[d] = {
         activeGenes: liveTools,
@@ -222,10 +231,11 @@ export function createReadoutRouter(deps: ReadoutRouterDeps): Router {
         broken: health.broken,
         ...(health.note ? { note: health.note } : {}),
       };
-      passTotal += tried;
+      passTotal += audited;
       passOk += liveTools;
     });
     status.verifierPassRate = passTotal > 0 ? Math.round((passOk / passTotal) * 100) / 100 : 0;
+    status.verifierNotAuditable = notAuditableTotal;
 
     // P1.7: capability readiness — a number that can move. The existing
     // `readinessScore` is the recursive-math convergence, not capability; label

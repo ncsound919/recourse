@@ -73,19 +73,14 @@ export interface SkillContent {
 }
 
 export const DEFAULT_SKILL_ROOTS: SkillRoot[] = [
-  { id: 'fleet-skills', root: 'C:\\Users\\User\\Downloads\\Uplift\\Draymond-Orchestrator\\agents\\skills' },
-  { id: 'ecc', root: 'C:\\Users\\User\\Downloads\\Uplift\\Draymond-Orchestrator\\agents\\everything-claude-code-main' },
-  { id: 'hermes', root: 'C:\\Users\\User\\Downloads\\Uplift\\Draymond-Orchestrator\\agents\\hermes-agent-main\\skills' },
-  { id: 'deterministic-brain', root: 'C:\\Users\\User\\Downloads\\Uplift\\Draymond-Orchestrator\\agents\\deterministic-brain\\skills' },
-  { id: 'paperclip', root: 'C:\\Users\\User\\Downloads\\Uplift\\04_Integrations\\paperclip\\.agents\\skills' },
-  { id: 'paperclip-tools', root: 'C:\\Users\\User\\Downloads\\Uplift\\04_Integrations\\paperclip\\skills' },
+  { id: 'fleet-skills', root: 'C:\\Users\\User\\Downloads\\BUSINESS\\SKILLS\\skills' },
+  { id: 'ecc', root: 'C:\\Users\\User\\Downloads\\BUSINESS\\SKILLS\\ecc-skills' },
+  { id: 'deterministic-brain', root: 'C:\\Users\\User\\Downloads\\BUSINESS\\agents\\deterministic-brain\\skills' },
+  // Axiom is archived (Uplift teardown).
+  { id: 'axiom-opencode', root: 'C:\\Users\\User\\Downloads\\BUSINESS\\_archive\\from-uplift\\06_Resources\\Axiom Agent\\.opencode\\skills' },
+  // External bare harnesses (outside BUSINESS) — unchanged.
   { id: 'deepseek-harness', root: 'C:\\Users\\User\\Downloads\\bare-harnesses\\deepseek-harness\\.agents\\skills' },
-  { id: 'omnigent', root: 'C:\\Users\\User\\Downloads\\Uplift\\potential\\omnigent-main\\.claude\\skills' },
-  { id: 'browser-use', root: 'C:\\Users\\User\\Downloads\\Uplift\\04_Integrations\\integrations\\browser-use\\skills' },
-  { id: 'axiom-opencode', root: 'C:\\Users\\User\\Downloads\\Uplift\\Deepseek Harness\\Axiom Agent\\.opencode\\skills' },
-  { id: 'ownmem', root: 'C:\\Users\\User\\Downloads\\Uplift\\04_Integrations\\github-awesome\\ownmem\\skills' },
   { id: 'opencode', root: 'C:\\Users\\User\\Downloads\\bare-harnesses\\opencode\\.opencode\\skills' },
-  { id: 'supabase', root: 'C:\\Users\\User\\Downloads\\Uplift\\.agents\\skills' },
 ];
 
 /** Parse a `RECOURSE_SKILL_ROOTS` override: a JSON array of `{ id, root }`.

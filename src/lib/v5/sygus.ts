@@ -253,7 +253,7 @@ export async function propose(spec: SygusSpec): Promise<ProposeResult> {
     const candidates = parseSolutions(stdout, spec.maxSolutions);
     return { candidates, cvc5Version: version, seed, timedOut };
   } finally {
-    try { fs.rmSync(tmpDir, { recursive: true }); } catch {}
+      try { fs.rmSync(tmpDir, { recursive: true }); } catch { /* best-effort cleanup */ }
   }
 }
 

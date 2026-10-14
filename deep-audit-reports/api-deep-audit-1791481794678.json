@@ -1,0 +1,825 @@
+{
+  "target": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api",
+  "scannedFiles": 5,
+  "ranAt": "2026-10-08T17:49:54.669Z",
+  "counts": {
+    "static": 9,
+    "intent": 0,
+    "taxonomy": 36,
+    "total": 45,
+    "bySeverity": {
+      "high": 40,
+      "critical": 3,
+      "medium": 2
+    },
+    "bySource": {
+      "eslint": 9,
+      "bug-taxonomy": 36
+    },
+    "suppressedTsDiagnostics": 0
+  },
+  "engines": {
+    "eslint": {
+      "ran": true,
+      "findings": 9,
+      "rulesRun": 57,
+      "messages": 9,
+      "filesLinted": 5,
+      "filesSkipped": 0,
+      "unavailable": null
+    },
+    "typescript": {
+      "ran": true,
+      "findings": 0,
+      "filesChecked": 5,
+      "diagnostics": 0,
+      "suppressedDiagnostics": 0
+    },
+    "deepIntent": {
+      "findings": 0
+    },
+    "bugTaxonomy": {
+      "findings": 36
+    }
+  },
+  "verification": {
+    "ran": false,
+    "note": "Findings are unverified. Run the /api/v1/verify engine (or the suggested verification) before treating them as confirmed."
+  },
+  "findings": [
+    {
+      "ruleId": "sonarjs/cognitive-complexity",
+      "title": "[sonarjs/cognitive-complexity] Refactor this function to reduce its Cognitive Complexity from 19 to the 15 allowed.",
+      "category": "architecture",
+      "severity": "high",
+      "impact": "Increases coupling/debt and makes future changes riskier.",
+      "source": "eslint",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\dream\\[action].ts",
+      "line": 23,
+      "col": 31,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\dream\\[action].ts:23:31"
+      ],
+      "evidenceCount": 1,
+      "explanation": "ESLint rule \"sonarjs/cognitive-complexity\" detected: Refactor this function to reduce its Cognitive Complexity from 19 to the 15 allowed.",
+      "suggestedVerification": "Review the flagged line (C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\dream\\[action].ts:23) and confirm the pattern requires remediation.",
+      "verified": false
+    },
+    {
+      "ruleId": "sonarjs/cognitive-complexity",
+      "title": "[sonarjs/cognitive-complexity] Refactor this function to reduce its Cognitive Complexity from 22 to the 15 allowed.",
+      "category": "architecture",
+      "severity": "high",
+      "impact": "Increases coupling/debt and makes future changes riskier.",
+      "source": "eslint",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\learn\\[action].ts",
+      "line": 49,
+      "col": 31,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\learn\\[action].ts:49:31"
+      ],
+      "evidenceCount": 1,
+      "explanation": "ESLint rule \"sonarjs/cognitive-complexity\" detected: Refactor this function to reduce its Cognitive Complexity from 22 to the 15 allowed.",
+      "suggestedVerification": "Review the flagged line (C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\learn\\[action].ts:49) and confirm the pattern requires remediation.",
+      "verified": false
+    },
+    {
+      "ruleId": "no-await-in-loop",
+      "title": "[no-await-in-loop] Unexpected `await` inside a loop.",
+      "category": "performance",
+      "severity": "high",
+      "impact": "Can degrade latency/throughput or exhaust resources as load grows.",
+      "source": "eslint",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\learn\\[action].ts",
+      "line": 80,
+      "col": 57,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\learn\\[action].ts:80:57"
+      ],
+      "evidenceCount": 1,
+      "explanation": "ESLint rule \"no-await-in-loop\" detected: Unexpected `await` inside a loop.",
+      "suggestedVerification": "Review the flagged line (C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\learn\\[action].ts:80) and confirm the pattern requires remediation.",
+      "verified": false
+    },
+    {
+      "ruleId": "security/detect-non-literal-fs-filename",
+      "title": "[security/detect-non-literal-fs-filename] Found readFileSync from package \"node:fs\" with non literal argument at index 0",
+      "category": "security-logic",
+      "severity": "critical",
+      "impact": "Could expose or corrupt protected data or grant unauthorized access.",
+      "source": "eslint",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\math\\[action].ts",
+      "line": 49,
+      "col": 17,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\math\\[action].ts:49:17"
+      ],
+      "evidenceCount": 1,
+      "explanation": "ESLint rule \"security/detect-non-literal-fs-filename\" detected: Found readFileSync from package \"node:fs\" with non literal argument at index 0",
+      "suggestedVerification": "Review the flagged line (C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\math\\[action].ts:49) and confirm the pattern requires remediation.",
+      "verified": false
+    },
+    {
+      "ruleId": "security/detect-non-literal-fs-filename",
+      "title": "[security/detect-non-literal-fs-filename] Found writeFileSync from package \"node:fs\" with non literal argument at index 0",
+      "category": "security-logic",
+      "severity": "critical",
+      "impact": "Could expose or corrupt protected data or grant unauthorized access.",
+      "source": "eslint",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\math\\[action].ts",
+      "line": 61,
+      "col": 5,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\math\\[action].ts:61:5"
+      ],
+      "evidenceCount": 1,
+      "explanation": "ESLint rule \"security/detect-non-literal-fs-filename\" detected: Found writeFileSync from package \"node:fs\" with non literal argument at index 0",
+      "suggestedVerification": "Review the flagged line (C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\math\\[action].ts:61) and confirm the pattern requires remediation.",
+      "verified": false
+    },
+    {
+      "ruleId": "security/detect-non-literal-fs-filename",
+      "title": "[security/detect-non-literal-fs-filename] Found renameSync from package \"node:fs\" with non literal argument at index 0,1",
+      "category": "security-logic",
+      "severity": "critical",
+      "impact": "Could expose or corrupt protected data or grant unauthorized access.",
+      "source": "eslint",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\math\\[action].ts",
+      "line": 62,
+      "col": 5,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\math\\[action].ts:62:5"
+      ],
+      "evidenceCount": 1,
+      "explanation": "ESLint rule \"security/detect-non-literal-fs-filename\" detected: Found renameSync from package \"node:fs\" with non literal argument at index 0,1",
+      "suggestedVerification": "Review the flagged line (C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\math\\[action].ts:62) and confirm the pattern requires remediation.",
+      "verified": false
+    },
+    {
+      "ruleId": "require-await",
+      "title": "[require-await] Async arrow function has no 'await' expression.",
+      "category": "error-handling",
+      "severity": "high",
+      "impact": "Failures may be silently ignored, leaving the system in a partial state.",
+      "source": "eslint",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\math\\[action].ts",
+      "line": 80,
+      "col": 46,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\math\\[action].ts:80:46"
+      ],
+      "evidenceCount": 1,
+      "explanation": "ESLint rule \"require-await\" detected: Async arrow function has no 'await' expression.",
+      "suggestedVerification": "Review the flagged line (C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\math\\[action].ts:80) and confirm the pattern requires remediation.",
+      "verified": false
+    },
+    {
+      "ruleId": "@typescript-eslint/no-explicit-any",
+      "title": "[@typescript-eslint/no-explicit-any] Unexpected any. Specify a different type.",
+      "category": "architecture",
+      "severity": "high",
+      "impact": "Increases coupling/debt and makes future changes riskier.",
+      "source": "eslint",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\math\\[action].ts",
+      "line": 151,
+      "col": 17,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\math\\[action].ts:151:17"
+      ],
+      "evidenceCount": 1,
+      "explanation": "ESLint rule \"@typescript-eslint/no-explicit-any\" detected: Unexpected any. Specify a different type.",
+      "suggestedVerification": "Review the flagged line (C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\math\\[action].ts:151) and confirm the pattern requires remediation.",
+      "verified": false
+    },
+    {
+      "ruleId": "sonarjs/cognitive-complexity",
+      "title": "[sonarjs/cognitive-complexity] Refactor this function to reduce its Cognitive Complexity from 26 to the 15 allowed.",
+      "category": "architecture",
+      "severity": "high",
+      "impact": "Increases coupling/debt and makes future changes riskier.",
+      "source": "eslint",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\mutate\\[action].ts",
+      "line": 44,
+      "col": 31,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\mutate\\[action].ts:44:31"
+      ],
+      "evidenceCount": 1,
+      "explanation": "ESLint rule \"sonarjs/cognitive-complexity\" detected: Refactor this function to reduce its Cognitive Complexity from 26 to the 15 allowed.",
+      "suggestedVerification": "Review the flagged line (C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\mutate\\[action].ts:44) and confirm the pattern requires remediation.",
+      "verified": false
+    },
+    {
+      "ruleId": "BUG-TOCTOU",
+      "title": "TOCTOU (time-of-check to time-of-use) window [BUG-TOCTOU]",
+      "category": "concurrency",
+      "severity": "high",
+      "impact": "Can produce lost updates, double-spend, or deadlock under concurrent execution.",
+      "source": "bug-taxonomy",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\dream\\[action].ts",
+      "line": 29,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\dream\\[action].ts:29"
+      ],
+      "evidenceCount": 1,
+      "explanation": "The code checks a condition and then mutates state in a separate step without an atomic transaction or lock, leaving a race window. Detected in C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\dream\\[action].ts:29.",
+      "suggestedVerification": "Wrap check-and-act in a single transaction (e.g. SELECT ... FOR UPDATE) or a Mutex critical section.",
+      "verified": false
+    },
+    {
+      "ruleId": "BUG-TOCTOU",
+      "title": "TOCTOU (time-of-check to time-of-use) window [BUG-TOCTOU]",
+      "category": "concurrency",
+      "severity": "high",
+      "impact": "Can produce lost updates, double-spend, or deadlock under concurrent execution.",
+      "source": "bug-taxonomy",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\dream\\[action].ts",
+      "line": 38,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\dream\\[action].ts:38"
+      ],
+      "evidenceCount": 1,
+      "explanation": "The code checks a condition and then mutates state in a separate step without an atomic transaction or lock, leaving a race window. Detected in C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\dream\\[action].ts:38.",
+      "suggestedVerification": "Wrap check-and-act in a single transaction (e.g. SELECT ... FOR UPDATE) or a Mutex critical section.",
+      "verified": false
+    },
+    {
+      "ruleId": "BUG-TOCTOU",
+      "title": "TOCTOU (time-of-check to time-of-use) window [BUG-TOCTOU]",
+      "category": "concurrency",
+      "severity": "high",
+      "impact": "Can produce lost updates, double-spend, or deadlock under concurrent execution.",
+      "source": "bug-taxonomy",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\dream\\[action].ts",
+      "line": 44,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\dream\\[action].ts:44"
+      ],
+      "evidenceCount": 1,
+      "explanation": "The code checks a condition and then mutates state in a separate step without an atomic transaction or lock, leaving a race window. Detected in C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\dream\\[action].ts:44.",
+      "suggestedVerification": "Wrap check-and-act in a single transaction (e.g. SELECT ... FOR UPDATE) or a Mutex critical section.",
+      "verified": false
+    },
+    {
+      "ruleId": "BUG-TOCTOU",
+      "title": "TOCTOU (time-of-check to time-of-use) window [BUG-TOCTOU]",
+      "category": "concurrency",
+      "severity": "high",
+      "impact": "Can produce lost updates, double-spend, or deadlock under concurrent execution.",
+      "source": "bug-taxonomy",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\dream\\[action].ts",
+      "line": 50,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\dream\\[action].ts:50"
+      ],
+      "evidenceCount": 1,
+      "explanation": "The code checks a condition and then mutates state in a separate step without an atomic transaction or lock, leaving a race window. Detected in C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\dream\\[action].ts:50.",
+      "suggestedVerification": "Wrap check-and-act in a single transaction (e.g. SELECT ... FOR UPDATE) or a Mutex critical section.",
+      "verified": false
+    },
+    {
+      "ruleId": "BUG-TOCTOU",
+      "title": "TOCTOU (time-of-check to time-of-use) window [BUG-TOCTOU]",
+      "category": "concurrency",
+      "severity": "high",
+      "impact": "Can produce lost updates, double-spend, or deadlock under concurrent execution.",
+      "source": "bug-taxonomy",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\dream\\[action].ts",
+      "line": 61,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\dream\\[action].ts:61"
+      ],
+      "evidenceCount": 1,
+      "explanation": "The code checks a condition and then mutates state in a separate step without an atomic transaction or lock, leaving a race window. Detected in C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\dream\\[action].ts:61.",
+      "suggestedVerification": "Wrap check-and-act in a single transaction (e.g. SELECT ... FOR UPDATE) or a Mutex critical section.",
+      "verified": false
+    },
+    {
+      "ruleId": "BUG-TOCTOU",
+      "title": "TOCTOU (time-of-check to time-of-use) window [BUG-TOCTOU]",
+      "category": "concurrency",
+      "severity": "high",
+      "impact": "Can produce lost updates, double-spend, or deadlock under concurrent execution.",
+      "source": "bug-taxonomy",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\dream\\[action].ts",
+      "line": 63,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\dream\\[action].ts:63"
+      ],
+      "evidenceCount": 1,
+      "explanation": "The code checks a condition and then mutates state in a separate step without an atomic transaction or lock, leaving a race window. Detected in C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\dream\\[action].ts:63.",
+      "suggestedVerification": "Wrap check-and-act in a single transaction (e.g. SELECT ... FOR UPDATE) or a Mutex critical section.",
+      "verified": false
+    },
+    {
+      "ruleId": "STATE-PARAM-MUTATION",
+      "title": "Function mutates an input parameter it was handed [STATE-PARAM-MUTATION]",
+      "category": "state",
+      "severity": "high",
+      "impact": "Can leave persisted/derived state inconsistent with the intended state machine.",
+      "source": "bug-taxonomy",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\dream\\[action].ts",
+      "line": 23,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\dream\\[action].ts:23"
+      ],
+      "evidenceCount": 1,
+      "explanation": "Parameter \"res\" is reassigned/mutated inside the function — the caller's object is modified as a side effect. Detected in C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\dream\\[action].ts:23.",
+      "suggestedVerification": "Copy the parameter (const copy = { ...param }) before mutating, or return a new object instead.",
+      "verified": false
+    },
+    {
+      "ruleId": "BUG-TOCTOU",
+      "title": "TOCTOU (time-of-check to time-of-use) window [BUG-TOCTOU]",
+      "category": "concurrency",
+      "severity": "high",
+      "impact": "Can produce lost updates, double-spend, or deadlock under concurrent execution.",
+      "source": "bug-taxonomy",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\learn\\[action].ts",
+      "line": 60,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\learn\\[action].ts:60"
+      ],
+      "evidenceCount": 1,
+      "explanation": "The code checks a condition and then mutates state in a separate step without an atomic transaction or lock, leaving a race window. Detected in C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\learn\\[action].ts:60.",
+      "suggestedVerification": "Wrap check-and-act in a single transaction (e.g. SELECT ... FOR UPDATE) or a Mutex critical section.",
+      "verified": false
+    },
+    {
+      "ruleId": "BUG-TOCTOU",
+      "title": "TOCTOU (time-of-check to time-of-use) window [BUG-TOCTOU]",
+      "category": "concurrency",
+      "severity": "high",
+      "impact": "Can produce lost updates, double-spend, or deadlock under concurrent execution.",
+      "source": "bug-taxonomy",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\learn\\[action].ts",
+      "line": 66,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\learn\\[action].ts:66"
+      ],
+      "evidenceCount": 1,
+      "explanation": "The code checks a condition and then mutates state in a separate step without an atomic transaction or lock, leaving a race window. Detected in C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\learn\\[action].ts:66.",
+      "suggestedVerification": "Wrap check-and-act in a single transaction (e.g. SELECT ... FOR UPDATE) or a Mutex critical section.",
+      "verified": false
+    },
+    {
+      "ruleId": "BUG-TOCTOU",
+      "title": "TOCTOU (time-of-check to time-of-use) window [BUG-TOCTOU]",
+      "category": "concurrency",
+      "severity": "high",
+      "impact": "Can produce lost updates, double-spend, or deadlock under concurrent execution.",
+      "source": "bug-taxonomy",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\learn\\[action].ts",
+      "line": 74,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\learn\\[action].ts:74"
+      ],
+      "evidenceCount": 1,
+      "explanation": "The code checks a condition and then mutates state in a separate step without an atomic transaction or lock, leaving a race window. Detected in C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\learn\\[action].ts:74.",
+      "suggestedVerification": "Wrap check-and-act in a single transaction (e.g. SELECT ... FOR UPDATE) or a Mutex critical section.",
+      "verified": false
+    },
+    {
+      "ruleId": "BUG-TOCTOU",
+      "title": "TOCTOU (time-of-check to time-of-use) window [BUG-TOCTOU]",
+      "category": "concurrency",
+      "severity": "high",
+      "impact": "Can produce lost updates, double-spend, or deadlock under concurrent execution.",
+      "source": "bug-taxonomy",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\learn\\[action].ts",
+      "line": 85,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\learn\\[action].ts:85"
+      ],
+      "evidenceCount": 1,
+      "explanation": "The code checks a condition and then mutates state in a separate step without an atomic transaction or lock, leaving a race window. Detected in C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\learn\\[action].ts:85.",
+      "suggestedVerification": "Wrap check-and-act in a single transaction (e.g. SELECT ... FOR UPDATE) or a Mutex critical section.",
+      "verified": false
+    },
+    {
+      "ruleId": "BUG-TOCTOU",
+      "title": "TOCTOU (time-of-check to time-of-use) window [BUG-TOCTOU]",
+      "category": "concurrency",
+      "severity": "high",
+      "impact": "Can produce lost updates, double-spend, or deadlock under concurrent execution.",
+      "source": "bug-taxonomy",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\learn\\[action].ts",
+      "line": 91,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\learn\\[action].ts:91"
+      ],
+      "evidenceCount": 1,
+      "explanation": "The code checks a condition and then mutates state in a separate step without an atomic transaction or lock, leaving a race window. Detected in C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\learn\\[action].ts:91.",
+      "suggestedVerification": "Wrap check-and-act in a single transaction (e.g. SELECT ... FOR UPDATE) or a Mutex critical section.",
+      "verified": false
+    },
+    {
+      "ruleId": "DATA-QUERY-IN-LOOP",
+      "title": "N+1 data-access amplification (query inside loop) [DATA-QUERY-IN-LOOP]",
+      "category": "performance",
+      "severity": "medium",
+      "impact": "Can degrade latency/throughput or exhaust resources as load grows.",
+      "source": "bug-taxonomy",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\learn\\[action].ts",
+      "line": 51,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\learn\\[action].ts:51"
+      ],
+      "evidenceCount": 1,
+      "explanation": "A database/network query executes inside a loop body — O(N) round-trips instead of one batched fetch. Detected in C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\learn\\[action].ts:51.",
+      "suggestedVerification": "Batch the fetch outside the loop (WHERE id IN (...)) or use a collection query that returns all rows at once.",
+      "verified": false
+    },
+    {
+      "ruleId": "NUM-OVERFLOW",
+      "title": "Integer overflow beyond Number.MAX_SAFE_INTEGER [NUM-OVERFLOW]",
+      "category": "business-logic",
+      "severity": "high",
+      "impact": "Can produce results that violate the intended business rule.",
+      "source": "bug-taxonomy",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\learn\\[action].ts",
+      "line": 25,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\learn\\[action].ts:25"
+      ],
+      "evidenceCount": 1,
+      "explanation": "Arithmetic on a number-typed value can exceed 2^53-1 — precision silently lost for counters, ids, or large sums. Detected in C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\learn\\[action].ts:25.",
+      "suggestedVerification": "Use BigInt or a bignum library for values that can exceed MAX_SAFE_INTEGER, and validate bounds.",
+      "verified": false
+    },
+    {
+      "ruleId": "STATE-PARAM-MUTATION",
+      "title": "Function mutates an input parameter it was handed [STATE-PARAM-MUTATION]",
+      "category": "state",
+      "severity": "high",
+      "impact": "Can leave persisted/derived state inconsistent with the intended state machine.",
+      "source": "bug-taxonomy",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\learn\\[action].ts",
+      "line": 37,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\learn\\[action].ts:37"
+      ],
+      "evidenceCount": 1,
+      "explanation": "Parameter \"res\" is reassigned/mutated inside the function — the caller's object is modified as a side effect. Detected in C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\learn\\[action].ts:37.",
+      "suggestedVerification": "Copy the parameter (const copy = { ...param }) before mutating, or return a new object instead.",
+      "verified": false
+    },
+    {
+      "ruleId": "BUG-TOCTOU",
+      "title": "TOCTOU (time-of-check to time-of-use) window [BUG-TOCTOU]",
+      "category": "concurrency",
+      "severity": "high",
+      "impact": "Can produce lost updates, double-spend, or deadlock under concurrent execution.",
+      "source": "bug-taxonomy",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\math\\[action].ts",
+      "line": 93,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\math\\[action].ts:93"
+      ],
+      "evidenceCount": 1,
+      "explanation": "The code checks a condition and then mutates state in a separate step without an atomic transaction or lock, leaving a race window. Detected in C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\math\\[action].ts:93.",
+      "suggestedVerification": "Wrap check-and-act in a single transaction (e.g. SELECT ... FOR UPDATE) or a Mutex critical section.",
+      "verified": false
+    },
+    {
+      "ruleId": "BUG-TOCTOU",
+      "title": "TOCTOU (time-of-check to time-of-use) window [BUG-TOCTOU]",
+      "category": "concurrency",
+      "severity": "high",
+      "impact": "Can produce lost updates, double-spend, or deadlock under concurrent execution.",
+      "source": "bug-taxonomy",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\math\\[action].ts",
+      "line": 106,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\math\\[action].ts:106"
+      ],
+      "evidenceCount": 1,
+      "explanation": "The code checks a condition and then mutates state in a separate step without an atomic transaction or lock, leaving a race window. Detected in C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\math\\[action].ts:106.",
+      "suggestedVerification": "Wrap check-and-act in a single transaction (e.g. SELECT ... FOR UPDATE) or a Mutex critical section.",
+      "verified": false
+    },
+    {
+      "ruleId": "BUG-TOCTOU",
+      "title": "TOCTOU (time-of-check to time-of-use) window [BUG-TOCTOU]",
+      "category": "concurrency",
+      "severity": "high",
+      "impact": "Can produce lost updates, double-spend, or deadlock under concurrent execution.",
+      "source": "bug-taxonomy",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\math\\[action].ts",
+      "line": 118,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\math\\[action].ts:118"
+      ],
+      "evidenceCount": 1,
+      "explanation": "The code checks a condition and then mutates state in a separate step without an atomic transaction or lock, leaving a race window. Detected in C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\math\\[action].ts:118.",
+      "suggestedVerification": "Wrap check-and-act in a single transaction (e.g. SELECT ... FOR UPDATE) or a Mutex critical section.",
+      "verified": false
+    },
+    {
+      "ruleId": "BUG-TOCTOU",
+      "title": "TOCTOU (time-of-check to time-of-use) window [BUG-TOCTOU]",
+      "category": "concurrency",
+      "severity": "high",
+      "impact": "Can produce lost updates, double-spend, or deadlock under concurrent execution.",
+      "source": "bug-taxonomy",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\math\\[action].ts",
+      "line": 122,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\math\\[action].ts:122"
+      ],
+      "evidenceCount": 1,
+      "explanation": "The code checks a condition and then mutates state in a separate step without an atomic transaction or lock, leaving a race window. Detected in C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\math\\[action].ts:122.",
+      "suggestedVerification": "Wrap check-and-act in a single transaction (e.g. SELECT ... FOR UPDATE) or a Mutex critical section.",
+      "verified": false
+    },
+    {
+      "ruleId": "STATE-PARAM-MUTATION",
+      "title": "Function mutates an input parameter it was handed [STATE-PARAM-MUTATION]",
+      "category": "state",
+      "severity": "high",
+      "impact": "Can leave persisted/derived state inconsistent with the intended state machine.",
+      "source": "bug-taxonomy",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\math\\[action].ts",
+      "line": 70,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\math\\[action].ts:70"
+      ],
+      "evidenceCount": 1,
+      "explanation": "Parameter \"res\" is reassigned/mutated inside the function — the caller's object is modified as a side effect. Detected in C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\math\\[action].ts:70.",
+      "suggestedVerification": "Copy the parameter (const copy = { ...param }) before mutating, or return a new object instead.",
+      "verified": false
+    },
+    {
+      "ruleId": "BUG-TOCTOU",
+      "title": "TOCTOU (time-of-check to time-of-use) window [BUG-TOCTOU]",
+      "category": "concurrency",
+      "severity": "high",
+      "impact": "Can produce lost updates, double-spend, or deadlock under concurrent execution.",
+      "source": "bug-taxonomy",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\mutate\\[action].ts",
+      "line": 54,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\mutate\\[action].ts:54"
+      ],
+      "evidenceCount": 1,
+      "explanation": "The code checks a condition and then mutates state in a separate step without an atomic transaction or lock, leaving a race window. Detected in C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\mutate\\[action].ts:54.",
+      "suggestedVerification": "Wrap check-and-act in a single transaction (e.g. SELECT ... FOR UPDATE) or a Mutex critical section.",
+      "verified": false
+    },
+    {
+      "ruleId": "BUG-TOCTOU",
+      "title": "TOCTOU (time-of-check to time-of-use) window [BUG-TOCTOU]",
+      "category": "concurrency",
+      "severity": "high",
+      "impact": "Can produce lost updates, double-spend, or deadlock under concurrent execution.",
+      "source": "bug-taxonomy",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\mutate\\[action].ts",
+      "line": 65,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\mutate\\[action].ts:65"
+      ],
+      "evidenceCount": 1,
+      "explanation": "The code checks a condition and then mutates state in a separate step without an atomic transaction or lock, leaving a race window. Detected in C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\mutate\\[action].ts:65.",
+      "suggestedVerification": "Wrap check-and-act in a single transaction (e.g. SELECT ... FOR UPDATE) or a Mutex critical section.",
+      "verified": false
+    },
+    {
+      "ruleId": "BUG-TOCTOU",
+      "title": "TOCTOU (time-of-check to time-of-use) window [BUG-TOCTOU]",
+      "category": "concurrency",
+      "severity": "high",
+      "impact": "Can produce lost updates, double-spend, or deadlock under concurrent execution.",
+      "source": "bug-taxonomy",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\mutate\\[action].ts",
+      "line": 70,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\mutate\\[action].ts:70"
+      ],
+      "evidenceCount": 1,
+      "explanation": "The code checks a condition and then mutates state in a separate step without an atomic transaction or lock, leaving a race window. Detected in C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\mutate\\[action].ts:70.",
+      "suggestedVerification": "Wrap check-and-act in a single transaction (e.g. SELECT ... FOR UPDATE) or a Mutex critical section.",
+      "verified": false
+    },
+    {
+      "ruleId": "BUG-TOCTOU",
+      "title": "TOCTOU (time-of-check to time-of-use) window [BUG-TOCTOU]",
+      "category": "concurrency",
+      "severity": "high",
+      "impact": "Can produce lost updates, double-spend, or deadlock under concurrent execution.",
+      "source": "bug-taxonomy",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\mutate\\[action].ts",
+      "line": 82,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\mutate\\[action].ts:82"
+      ],
+      "evidenceCount": 1,
+      "explanation": "The code checks a condition and then mutates state in a separate step without an atomic transaction or lock, leaving a race window. Detected in C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\mutate\\[action].ts:82.",
+      "suggestedVerification": "Wrap check-and-act in a single transaction (e.g. SELECT ... FOR UPDATE) or a Mutex critical section.",
+      "verified": false
+    },
+    {
+      "ruleId": "BUG-TOCTOU",
+      "title": "TOCTOU (time-of-check to time-of-use) window [BUG-TOCTOU]",
+      "category": "concurrency",
+      "severity": "high",
+      "impact": "Can produce lost updates, double-spend, or deadlock under concurrent execution.",
+      "source": "bug-taxonomy",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\mutate\\[action].ts",
+      "line": 84,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\mutate\\[action].ts:84"
+      ],
+      "evidenceCount": 1,
+      "explanation": "The code checks a condition and then mutates state in a separate step without an atomic transaction or lock, leaving a race window. Detected in C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\mutate\\[action].ts:84.",
+      "suggestedVerification": "Wrap check-and-act in a single transaction (e.g. SELECT ... FOR UPDATE) or a Mutex critical section.",
+      "verified": false
+    },
+    {
+      "ruleId": "BUG-TOCTOU",
+      "title": "TOCTOU (time-of-check to time-of-use) window [BUG-TOCTOU]",
+      "category": "concurrency",
+      "severity": "high",
+      "impact": "Can produce lost updates, double-spend, or deadlock under concurrent execution.",
+      "source": "bug-taxonomy",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\mutate\\[action].ts",
+      "line": 92,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\mutate\\[action].ts:92"
+      ],
+      "evidenceCount": 1,
+      "explanation": "The code checks a condition and then mutates state in a separate step without an atomic transaction or lock, leaving a race window. Detected in C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\mutate\\[action].ts:92.",
+      "suggestedVerification": "Wrap check-and-act in a single transaction (e.g. SELECT ... FOR UPDATE) or a Mutex critical section.",
+      "verified": false
+    },
+    {
+      "ruleId": "BUG-TOCTOU",
+      "title": "TOCTOU (time-of-check to time-of-use) window [BUG-TOCTOU]",
+      "category": "concurrency",
+      "severity": "high",
+      "impact": "Can produce lost updates, double-spend, or deadlock under concurrent execution.",
+      "source": "bug-taxonomy",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\mutate\\[action].ts",
+      "line": 94,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\mutate\\[action].ts:94"
+      ],
+      "evidenceCount": 1,
+      "explanation": "The code checks a condition and then mutates state in a separate step without an atomic transaction or lock, leaving a race window. Detected in C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\mutate\\[action].ts:94.",
+      "suggestedVerification": "Wrap check-and-act in a single transaction (e.g. SELECT ... FOR UPDATE) or a Mutex critical section.",
+      "verified": false
+    },
+    {
+      "ruleId": "BUG-TOCTOU",
+      "title": "TOCTOU (time-of-check to time-of-use) window [BUG-TOCTOU]",
+      "category": "concurrency",
+      "severity": "high",
+      "impact": "Can produce lost updates, double-spend, or deadlock under concurrent execution.",
+      "source": "bug-taxonomy",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\_guard.ts",
+      "line": 21,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\_guard.ts:21"
+      ],
+      "evidenceCount": 1,
+      "explanation": "The code checks a condition and then mutates state in a separate step without an atomic transaction or lock, leaving a race window. Detected in C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\_guard.ts:21.",
+      "suggestedVerification": "Wrap check-and-act in a single transaction (e.g. SELECT ... FOR UPDATE) or a Mutex critical section.",
+      "verified": false
+    },
+    {
+      "ruleId": "BUG-TOCTOU",
+      "title": "TOCTOU (time-of-check to time-of-use) window [BUG-TOCTOU]",
+      "category": "concurrency",
+      "severity": "high",
+      "impact": "Can produce lost updates, double-spend, or deadlock under concurrent execution.",
+      "source": "bug-taxonomy",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\_guard.ts",
+      "line": 29,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\_guard.ts:29"
+      ],
+      "evidenceCount": 1,
+      "explanation": "The code checks a condition and then mutates state in a separate step without an atomic transaction or lock, leaving a race window. Detected in C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\_guard.ts:29.",
+      "suggestedVerification": "Wrap check-and-act in a single transaction (e.g. SELECT ... FOR UPDATE) or a Mutex critical section.",
+      "verified": false
+    },
+    {
+      "ruleId": "BUG-TOCTOU",
+      "title": "TOCTOU (time-of-check to time-of-use) window [BUG-TOCTOU]",
+      "category": "concurrency",
+      "severity": "high",
+      "impact": "Can produce lost updates, double-spend, or deadlock under concurrent execution.",
+      "source": "bug-taxonomy",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\_guard.ts",
+      "line": 34,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\_guard.ts:34"
+      ],
+      "evidenceCount": 1,
+      "explanation": "The code checks a condition and then mutates state in a separate step without an atomic transaction or lock, leaving a race window. Detected in C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\_guard.ts:34.",
+      "suggestedVerification": "Wrap check-and-act in a single transaction (e.g. SELECT ... FOR UPDATE) or a Mutex critical section.",
+      "verified": false
+    },
+    {
+      "ruleId": "BUG-TOCTOU",
+      "title": "TOCTOU (time-of-check to time-of-use) window [BUG-TOCTOU]",
+      "category": "concurrency",
+      "severity": "high",
+      "impact": "Can produce lost updates, double-spend, or deadlock under concurrent execution.",
+      "source": "bug-taxonomy",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\_guard.ts",
+      "line": 45,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\_guard.ts:45"
+      ],
+      "evidenceCount": 1,
+      "explanation": "The code checks a condition and then mutates state in a separate step without an atomic transaction or lock, leaving a race window. Detected in C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\_guard.ts:45.",
+      "suggestedVerification": "Wrap check-and-act in a single transaction (e.g. SELECT ... FOR UPDATE) or a Mutex critical section.",
+      "verified": false
+    },
+    {
+      "ruleId": "BUG-TOCTOU",
+      "title": "TOCTOU (time-of-check to time-of-use) window [BUG-TOCTOU]",
+      "category": "concurrency",
+      "severity": "high",
+      "impact": "Can produce lost updates, double-spend, or deadlock under concurrent execution.",
+      "source": "bug-taxonomy",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\_guard.ts",
+      "line": 48,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\_guard.ts:48"
+      ],
+      "evidenceCount": 1,
+      "explanation": "The code checks a condition and then mutates state in a separate step without an atomic transaction or lock, leaving a race window. Detected in C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\_guard.ts:48.",
+      "suggestedVerification": "Wrap check-and-act in a single transaction (e.g. SELECT ... FOR UPDATE) or a Mutex critical section.",
+      "verified": false
+    },
+    {
+      "ruleId": "BUG-TOCTOU",
+      "title": "TOCTOU (time-of-check to time-of-use) window [BUG-TOCTOU]",
+      "category": "concurrency",
+      "severity": "high",
+      "impact": "Can produce lost updates, double-spend, or deadlock under concurrent execution.",
+      "source": "bug-taxonomy",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\_guard.ts",
+      "line": 73,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\_guard.ts:73"
+      ],
+      "evidenceCount": 1,
+      "explanation": "The code checks a condition and then mutates state in a separate step without an atomic transaction or lock, leaving a race window. Detected in C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\_guard.ts:73.",
+      "suggestedVerification": "Wrap check-and-act in a single transaction (e.g. SELECT ... FOR UPDATE) or a Mutex critical section.",
+      "verified": false
+    },
+    {
+      "ruleId": "CANON-VALIDATE-BEFORE-NORMALIZE",
+      "title": "Validation before canonicalization (CWE-179/180/181) [CANON-VALIDATE-BEFORE-NORMALIZE]",
+      "category": "security-logic",
+      "severity": "high",
+      "impact": "Could expose or corrupt protected data or grant unauthorized access.",
+      "source": "bug-taxonomy",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\_guard.ts",
+      "line": 30,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\_guard.ts:30"
+      ],
+      "evidenceCount": 1,
+      "explanation": "Validation runs on raw input before trim/decode/normalization — encoded variants bypass the check and are then canonicalized into dangerous form. Detected in C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\_guard.ts:30.",
+      "suggestedVerification": "Normalize (trim/decode/lowercase) FIRST, then validate the canonical value.",
+      "verified": false
+    },
+    {
+      "ruleId": "CANON-VALIDATE-BEFORE-NORMALIZE",
+      "title": "Validation before canonicalization (CWE-179/180/181) [CANON-VALIDATE-BEFORE-NORMALIZE]",
+      "category": "security-logic",
+      "severity": "high",
+      "impact": "Could expose or corrupt protected data or grant unauthorized access.",
+      "source": "bug-taxonomy",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\_guard.ts",
+      "line": 48,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\_guard.ts:48"
+      ],
+      "evidenceCount": 1,
+      "explanation": "Validation runs on raw input before trim/decode/normalization — encoded variants bypass the check and are then canonicalized into dangerous form. Detected in C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\_guard.ts:48.",
+      "suggestedVerification": "Normalize (trim/decode/lowercase) FIRST, then validate the canonical value.",
+      "verified": false
+    },
+    {
+      "ruleId": "BUG-CROSS-MODULE",
+      "title": "Cross-module signature drift [BUG-CROSS-MODULE]",
+      "category": "api-contract",
+      "severity": "medium",
+      "impact": "Callers and callees may disagree on shape/behavior, breaking at runtime.",
+      "source": "bug-taxonomy",
+      "file": "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\dream\\[action].ts",
+      "line": 30,
+      "evidenceRefs": [
+        "C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\dream\\[action].ts:30"
+      ],
+      "evidenceCount": 1,
+      "explanation": "requireCronSecret is defined in C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\_guard.ts with 3 param(s) but called in C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\dream\\[action].ts with 2 — callers will break at runtime. Detected in C:\\Users\\User\\Downloads\\BUSINESS\\INFRASTRUCTURE\\recourse\\api\\recourse\\dream\\[action].ts:30.",
+      "suggestedVerification": "Synchronize the caller to pass 3 argument(s), or update the signature.",
+      "verified": false
+    }
+  ]
+}

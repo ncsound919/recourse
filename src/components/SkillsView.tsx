@@ -66,7 +66,9 @@ export const SkillsView: React.FC<SkillsViewProps> = ({ onNotify }) => {
         setLib(res.skills);
         setDigest(res.digest ?? null);
       }
-    } catch {}
+    } catch (e) {
+      console.error('[SkillsView] skills status fetch failed', e);
+    }
   }, []);
 
   useEffect(() => {
@@ -98,7 +100,9 @@ export const SkillsView: React.FC<SkillsViewProps> = ({ onNotify }) => {
       const res = await fetch(`/api/recourse/skills/skill?${params.toString()}`).then(r => r.json());
       if (res?.success) setOpenSkill({ skill: s, text: res.text, truncated: res.truncated });
       else if (onNotify) onNotify(`Could not read skill: ${res.error}`);
-    } catch {}
+    } catch (e) {
+      console.error('[SkillsView] skill fetch failed', e);
+    }
   };
 
   const summary = lib?.summary;

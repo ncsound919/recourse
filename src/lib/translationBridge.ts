@@ -26,12 +26,12 @@ export interface TranslationEngineConfig {
 
 const DEFAULT_ENGINES: Record<TranslationEngineId, TranslationEngineConfig> = {
   'bbtech': {
-    moduleFile: 'C:\\Users\\User\\Downloads\\Uplift\\02_Pillars\\Overlay Science\\Shared\\bb_tech_core\\translation_engine.py',
+    moduleFile: 'C:\\Users\\User\\Downloads\\BUSINESS\\SCIENCE\\Overlay Science\\Shared\\bb_tech_core\\translation_engine.py',
     className: 'BBTechTranslationEngine',
     label: 'BB-Tech (basketball → biotech)',
   },
   'golf-surgery': {
-    moduleFile: 'C:\\Users\\User\\Downloads\\Uplift\\02_Pillars\\Overlay Science\\Shared\\golf_surgery_core\\golf_surgery_translation_engine.py',
+    moduleFile: 'C:\\Users\\User\\Downloads\\BUSINESS\\SCIENCE\\Overlay Science\\Shared\\golf_surgery_core\\golf_surgery_translation_engine.py',
     className: 'GolfSurgeryTranslationEngine',
     label: 'Golf-surgery',
   },

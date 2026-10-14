@@ -94,7 +94,7 @@ export function benchmarkGapSpecs(run: Pick<BenchmarkRun, 'solvedIds'> | null | 
       name: p.functionName,
       domain: p.domain,
       title: p.title,
-      prompt: `${p.description}\n\nDefine and export exactly one function named "${p.functionName}" that satisfies the contract. Return only the code.`,
+      prompt: `${p.description}\n\nDefine and export exactly one function named "${p.functionName}" that satisfies the contract. Return only the code — do not wrap it in markdown fences and do not include any explanation.`,
       refSuite: p.hiddenSuite,
       ...(p.referenceSource ? { reference: p.referenceSource } : {}),
       ...(p.sampleArgs ? { vectors: p.sampleArgs } : {}),

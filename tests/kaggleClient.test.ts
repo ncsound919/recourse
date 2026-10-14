@@ -36,6 +36,20 @@ describe('credentials', () => {
   it('null when nothing is configured', () => {
     expect(resolveKaggleCredentials({ env: {}, home: dir })).toBeNull();
   });
+  it('a v2 access token (KAGGLE_API_TOKEN) beats the on-disk kaggle.json (second account stays isolated)', () => {
+    fs.mkdirSync(path.join(dir, '.kaggle'));
+    fs.writeFileSync(path.join(dir, '.kaggle', 'kaggle.json'), JSON.stringify({ username: 'primary', key: 'pk' }));
+    const c = resolveKaggleCredentials({ env: { KAGGLE_API_TOKEN: 'KGAT_x', KAGGLE_USERNAME: 'second' }, home: dir });
+    expect(c).toEqual({ username: 'second', key: 'KGAT_x', source: 'env-token' });
+  });
+  it('user+key still wins over the token when both are present (primary lane unaffected)', () => {
+    const c = resolveKaggleCredentials({ env: { KAGGLE_USERNAME: 'u', KAGGLE_KEY: 'k', KAGGLE_API_TOKEN: 'KGAT_x' }, home: dir });
+    expect(c).toEqual({ username: 'u', key: 'k', source: 'env' });
+  });
+  it('a token with no username resolves with an empty username (callers must refuse it)', () => {
+    const c = resolveKaggleCredentials({ env: { KAGGLE_API_TOKEN: 'KGAT_x' }, home: dir });
+    expect(c).toEqual({ username: '', key: 'KGAT_x', source: 'env-token' });
+  });
 });
 
 describe('addressing + metadata', () => {

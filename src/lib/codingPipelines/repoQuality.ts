@@ -10,12 +10,12 @@
  *
  * Why a JWT and a gateway: RepoRank gates /api behind JWT auth and needs a
  * daily plan tier (enterprise = unlimited), and both RepoRank and Grader expect
- * an OpenAI-compatible gateway on :4100 (see Uplift/_gateway/server.cjs).
+ * an OpenAI-compatible gateway on :4100 (see BUSINESS/INFRASTRUCTURE/_gateway/server.cjs).
  *
  * Env:
  *   REPORANK_URL         default http://127.0.0.1:3200
  *   REPORANK_JWT_SECRET  explicit secret (else read from REPORANK_ENV_FILE)
- *   REPORANK_ENV_FILE    RepoRank apps/api/.env (default under UPLIFT_ROOT)
+ *   REPORANK_ENV_FILE    RepoRank apps/api/.env (default: BUSINESS\INFRASTRUCTURE\reporank\apps\api\.env)
  *   REPORANK_JWT_USER    synthetic userId (default "harness-lab")
  */
 
@@ -31,8 +31,8 @@ export function reporankUrl(): string {
 }
 
 function defaultReporankEnvFile(): string | undefined {
-  const root = process.env.UPLIFT_ROOT?.trim() || path.join(os.homedir(), 'Downloads', 'Uplift');
-  const p = path.join(root, 'Draymond-Orchestrator', 'agents', 'reporank', 'apps', 'api', '.env');
+  const root = process.env.BUSINESS_ROOT?.trim() || path.join(os.homedir(), 'Downloads', 'BUSINESS');
+  const p = path.join(root, 'INFRASTRUCTURE', 'reporank', 'apps', 'api', '.env');
   return fs.existsSync(p) ? p : undefined;
 }
 

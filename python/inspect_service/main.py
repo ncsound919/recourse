@@ -23,7 +23,7 @@ try:
     import inspect_evals  # noqa: F401
     INSPECT_AVAILABLE = True
 except ImportError:
-    pass
+    pass  # optional dependency absent; service stays importable
 
 
 class EvalRequest(BaseModel):

@@ -100,7 +100,7 @@
           OPENHUB_ROOT: 'C:/Users/User/Downloads/BUSINESS/INFRASTRUCTURE/openhub'
           # Mirrors the openhub allowlist, so the gate cannot be aimed at
           # arbitrary host directories.
-          OPENHUB_ALLOWED_ROOTS: 'C:/Users/User/Downloads/BUSINESS;C:/Users/User/Downloads/Uplift'
+          OPENHUB_ALLOWED_ROOTS: 'C:/Users/User/Downloads/BUSINESS'
           DSH_PROFILE_DIR: 'C:/Users/User/.dsh/profiles/web'
         # An audit plus a local JEV decision is measured in minutes.
         toolCallTimeoutMs: 900000

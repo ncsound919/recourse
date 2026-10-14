@@ -342,7 +342,7 @@ def run_analysis(raw: bytes, filename: str, timeout_sec: int) -> dict[str, Any]:
     try:
         os.chmod(sample, EXEC_MODE)
     except OSError:
-        pass
+        pass  # best-effort: sample may reside on a read-only mount
 
     cmd = [
         state["analyze_headless"],
@@ -377,7 +377,7 @@ def run_analysis(raw: bytes, filename: str, timeout_sec: int) -> dict[str, Any]:
                 try:
                     proc.wait(timeout=15)
                 except subprocess.TimeoutExpired:
-                    pass
+                    pass  # best-effort: proceed to kill/cleanup below
                 shutil.rmtree(workdir, ignore_errors=True)
                 return {"ok": False, "available": True, "timed_out": True,
                         "error": f"Ghidra headless timed out after {timeout_sec + 120}s (process tree killed)"}

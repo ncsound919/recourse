@@ -28,6 +28,7 @@ import type { ToolEntry, ToolVersion } from '../types.js';
 import { assessForgeCandidate, type ForgeQualityReport } from './forgeQuality.js';
 import { FORGE_AGENDA } from './capabilityForge.js';
 import { verifyCodingCode } from './verifiers.js';
+import { failedHealthStatus } from './registryHygiene.js';
 
 /** Why a version could not be judged, when it could not. */
 export type AuditSkipReason =
@@ -421,7 +422,11 @@ function applyVerdict(
   version.score = version.quality_audit?.score ?? 0;
   version.verifier_notes =
     `GENESIS RE-VERIFIED: suite passed, QUALITY GATE FAILED — ${q.reasons.slice(0, 3).join('; ')}`;
-  if (tool.currentVersion === version.version) tool.healthStatus = 'degraded';
+  // Truthful-health split (registryHygiene.failedHealthStatus): gate-fails are
+  // NOT one phenomenon. Claim-only / not-runnable / policy-fail are honest dead
+  // ends the repair driver must not chase; 'degraded' is reserved for
+  // behavioral failures with a plausible repair path (e.g. powerMod).
+  tool.healthStatus = failedHealthStatus(tool, q.reasons + ' ' + (version.verifier_notes ?? '')) as typeof tool.healthStatus;
 }
 
 /** One-line human summary for the ledger and /status. */

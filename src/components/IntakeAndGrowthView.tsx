@@ -69,7 +69,9 @@ export const IntakeAndGrowthView: React.FC<IntakeAndGrowthViewProps> = ({ onNoti
       if (r?.status?.providerStatus?.online !== undefined) {
         setModelOnline(r.status.providerStatus.online);
       }
-    } catch {}
+    } catch (e) {
+      console.error('[IntakeAndGrowthView] status fetch failed', e);
+    }
   }, []);
 
   useEffect(() => {
@@ -155,7 +157,9 @@ export const IntakeAndGrowthView: React.FC<IntakeAndGrowthViewProps> = ({ onNoti
         setAutopilotOn(res.autopilot);
         if (onNotify) onNotify(res.autopilot ? 'Autopilot ON' : 'Autopilot OFF');
       }
-    } catch {}
+    } catch (e) {
+      console.error('[IntakeAndGrowthView] autopilot toggle failed', e);
+    }
   };
 
   const pct = benchmark?.lastRun

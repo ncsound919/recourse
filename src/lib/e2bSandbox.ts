@@ -62,6 +62,21 @@ export async function executeInSandbox(
     const sandbox = await Sandbox.create();
 
     if (opts.packages && opts.packages.length > 0) {
+      // Validate package specs before interpolating into a shell command:
+      // a spec is a dist-name plus an optional version constraint, nothing else.
+      const PKG_SPEC = /^[A-Za-z0-9][A-Za-z0-9._-]*(?:\[[A-Za-z0-9,._-]+\])?(?:[=<>!~]=?[A-Za-z0-9._*+-]+)?$/;
+      const unsafe = opts.packages.find((p) => !PKG_SPEC.test(p));
+      if (unsafe) {
+        await sandbox.kill();
+        return {
+          ok: false,
+          stdout: '',
+          stderr: '',
+          exitCode: -1,
+          error: `invalid package spec rejected: ${unsafe}`,
+          durationMs: Date.now() - started,
+        };
+      }
       await sandbox.commands.run(`pip install ${opts.packages.join(' ')}`, { timeoutMs: 60000 });
     }
 

@@ -67,10 +67,20 @@ export function kaggleRun(args: string[], opts?: { timeoutMs?: number; cwd?: str
 export interface KaggleCredentials {
   username: string;
   key: string;
-  source: 'env' | 'file';
+  source: 'env' | 'env-token' | 'file';
 }
 
-/** env (KAGGLE_USERNAME + KAGGLE_KEY) wins; else kaggle.json from an explicit path, KAGGLE_CONFIG_DIR, or the OS home. */
+/**
+ * env (KAGGLE_USERNAME + KAGGLE_KEY) wins; then a Kaggle v2 access token
+ * (KAGGLE_API_TOKEN, e.g. `KGAT_…`) with its username from KAGGLE_USERNAME;
+ * else kaggle.json from an explicit path, KAGGLE_CONFIG_DIR, or the OS home.
+ *
+ * The token is checked BEFORE the on-disk kaggle.json on purpose: a second
+ * account running in its own process must not be silently hijacked back to the
+ * primary account's stored credentials. Username stays required (kernel refs
+ * are `username/slug`); a token without KAGGLE_USERNAME is returned with an
+ * empty username and the platform refuses to configure rather than guessing.
+ */
 export function resolveKaggleCredentials(
   opts: { credentialsPath?: string; env?: NodeJS.ProcessEnv; home?: string } = {},
 ): KaggleCredentials | null {
@@ -78,6 +88,8 @@ export function resolveKaggleCredentials(
   const u = (env.KAGGLE_USERNAME ?? '').trim();
   const k = (env.KAGGLE_KEY ?? '').trim();
   if (u && k) return { username: u, key: k, source: 'env' };
+  const tok = (env.KAGGLE_API_TOKEN ?? '').trim();
+  if (tok) return { username: u, key: tok, source: 'env-token' };
   const home = opts.home ?? os.homedir();
   const candidates = [
     opts.credentialsPath,

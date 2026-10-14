@@ -30,7 +30,7 @@ import path from 'node:path';
 
 export const FIELDBRIDGE_DEFAULT_DIR =
   process.env.FIELDBRIDGE_DIR ||
-  'C:\\Users\\User\\Downloads\\Uplift\\02_Pillars\\Overlay Science\\fieldbridge';
+  'C:\\Users\\User\\Downloads\\BUSINESS\\SCIENCE\\Overlay Science\\fieldbridge';
 
 export const FIELDBRIDGE_DEFAULT_ARTIFACT_DIR =
   process.env.FIELDBRIDGE_ARTIFACT_DIR || path.join(FIELDBRIDGE_DEFAULT_DIR, 'public');

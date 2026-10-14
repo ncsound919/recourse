@@ -7,6 +7,7 @@
  */
 import { Router } from 'express';
 import { getSelfRepairKnowledge } from '../lib/componentTemplates.js';
+import { requireMutationAuth } from '../lib/mutationAuth.js';
 import type { SystemStatus, AnomalyReport, ToolEntry } from '../types.js';
 
 export interface RepairRouterDeps {
@@ -15,6 +16,24 @@ export interface RepairRouterDeps {
   executeSelfRepair(
     toolName: string,
     brokenCode: string,
+    faultHint?: string,
+    testSuite?: string,
+  ): {
+    success: boolean;
+    healedTool: ToolEntry;
+    anomaly: AnomalyReport;
+    version: string;
+    outcome: 'healed' | 'smoke-only' | 'failed';
+  };
+  /**
+   * The administered lane: a caller-supplied EXACT source verified by the same
+   * gates executeSelfRepair uses. It may waive the autonomous-repair attempt
+   * CEILING (executeSelfRepair enforces that); the enhanced quality gate and
+   * the suite still run unconditionally, so this can never launder junk.
+   */
+  executeAdministeredRepair?(
+    toolName: string,
+    sourceCode: string,
     faultHint?: string,
     testSuite?: string,
   ): {
@@ -109,6 +128,39 @@ export function createRepairRouter(deps: RepairRouterDeps): Router {
       healResult,
       selfRepairStatus: deps.selfRepairStatus(),
     });
+  });
+
+  /**
+   * Operator-administered repair (ceiling backstop escape).
+   *
+   * WHY: repairAttemptCount counts the `-repaired.` markers in the version
+   * string, so a tool with a long failed chain (powerMod: ~99) is quarantined
+   * FOREVER even when an exact verified source exists — a stuck-upgrade loop
+   * itself. This route is the operator-supervised exit: FAIL-CLOSED on the
+   * mutation secret, only here can the ceiling be waived for one shot, and the
+   * source still faces the same suite + enhanced-gate verification as any
+   * autonomous repair. Refusals are recorded as refusals.
+   */
+  router.post('/repair/administered', (req, res) => {
+    if (!requireMutationAuth(req, res)) return;
+    if (!deps.executeAdministeredRepair) {
+      return res.status(501).json({ success: false, error: 'administered repair not wired on this host' });
+    }
+    const { toolName, sourceCode, faultHint, testSuiteCode } = req.body ?? {};
+    if (typeof toolName !== 'string' || !/^[A-Za-z0-9_$.:-]+$/.test(toolName)) {
+      return res.status(400).json({ success: false, error: 'toolName is required' });
+    }
+    if (typeof sourceCode !== 'string' || sourceCode.trim().length < 20) {
+      return res.status(400).json({ success: false, error: 'sourceCode (>=20 chars) is required — the administered lane promotes EXACT supplied source, never a synthesized one' });
+    }
+    const healResult = deps.executeAdministeredRepair(
+      toolName,
+      sourceCode,
+      typeof faultHint === 'string' ? faultHint : undefined,
+      typeof testSuiteCode === 'string' && testSuiteCode ? testSuiteCode : undefined,
+    );
+    deps.saveState();
+    res.json({ success: true, administered: true, healResult, selfRepairStatus: deps.selfRepairStatus() });
   });
 
   // Self-Repair Knowledge Base & Telemetry

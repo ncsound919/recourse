@@ -29,7 +29,7 @@ const REGISTRY_RE = /^initiatives\/registry\/P\d{2}_[A-Z_]+\.json$/;
 export function ecosRepoRoot(): string {
   return path.resolve(
     process.env.ECOS_REPO ??
-      'C:/Users/User/Downloads/Uplift/01_Platforms/ECOS-Environmental-Initiatives',
+      'C:/Users/User/Downloads/BUSINESS/PLATFORMS/ECOS-Environmental-Initiatives',
   );
 }
 

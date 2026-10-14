@@ -36,6 +36,18 @@ import {
   verifyBiotechClaim,
   diagnoseAndRepairCode
 } from './src/lib/verifiers.js';
+import { failedHealthStatus } from './src/lib/registryHygiene.js';
+import { normalizeGeneratedModule } from './src/lib/moduleContract.js';
+import {
+  markIdeaOutcome, pickIdeasForForge as exPickIdeasForForge, pickScaffoldIdeas as exPickScaffoldIdeas,
+  specFromIdea, summarizeIdeas as exSummarizeIdeas, type ExternalStateIdea,
+} from './src/lib/externalIdeas.js';
+import { emitFactoryEvent, factoryStreamStats } from './src/lib/factoryStream.js';
+import { createIdeasRouter } from './src/routes/ideas.js';
+import { createFactoryRouter } from './src/routes/factory.js';
+import { runScaffoldOnSieve, scaffoldEngineStatus } from './src/lib/sieveScaffold.js';
+import type { FactoryArtifactRecord } from './src/lib/factory.js';
+import { spawnSync } from 'node:child_process';
 import { executeToolFunction, executeTestSuite } from './src/lib/executionSandbox.js';
 import { MerkleTree, auditCodeSecurity } from './src/lib/cyberDefenseEngine.js';
 import { transformSync } from 'esbuild';
@@ -1175,6 +1187,9 @@ function pushForgeLedger(entry: ForgeLedgerEntry): void {
 }
 let forgeAutopilotOn = false;
 let forgeBusy = false;
+// Published by registerAllSchedulerJobs() so the module-scope factory router
+// (POST /factory/consume-next) can reach the drain helper without a ReferenceError.
+let consumeNextAgendaItemImpl: (() => Promise<Record<string, unknown>>) | null = null;
 let forgeTimer: NodeJS.Timeout | null = null;
 const FORGE_AUTOPILOT_MS = Math.max(5000, Number(process.env.FORGE_AUTOPILOT_MS) || 5000);
 // Quarantine: dream/backfill specs that fail live re-verify are retried only
@@ -1868,7 +1883,17 @@ if (vr) {
         verifiedCurrent = true;
       }
     }
-    tool.healthStatus = !verifiedCurrent ? 'unverified' : currentPassed ? 'healthy' : 'degraded';
+    // Truthful-health split (registryHygiene.failedHealthStatus): a failed
+    // current version is not automatically a behavioral regression. The stored
+    // failure evidence decides between degraded / policy-fail / claim-only /
+    // not-runnable, so the repair driver only chases plausibly-repairable ones.
+    if (!verifiedCurrent) tool.healthStatus = 'unverified';
+    else if (currentPassed) tool.healthStatus = 'healthy';
+    else {
+      const cur = tool.versions.find((x) => x.version === tool.currentVersion);
+      const evid = [cur?.verifier_notes ?? '', JSON.stringify(cur?.quality_audit?.reasons ?? [])].join(' ');
+      tool.healthStatus = failedHealthStatus(tool, evid) as typeof tool.healthStatus;
+    }
   }
 status.registeredToolsCount = registry.length;
   status.registryExecutability = registryExecutablePair();
@@ -2014,6 +2039,15 @@ let lastPollResults: SourcePollResult[] = [];
 let lastGroundAt: number | null = null;
 let lastGroundSummary: string | null = null;
 let benchmarkHistory: BenchmarkRun[] = [];
+// Fleet-partner TELEMETRY ideas (externalIdeas.ts): cards from systems like
+// SIEVE whose NEW signal should become a real forge capability. Cards carry
+// their own refSuite so the built tool faces the standard gates. Consumed by
+// nextForgeSpec before the learner mint (operator-sourced beats generated).
+let externalIdeas: ExternalStateIdea[] = [];
+// SOFTWARE-FACTORY artifacts (factory.ts): deterministic full-stack builds
+// (Cheetah 4 via SIEVE) — components, hooks, services, whole features/projects
+// — with their verification verdicts. Distinct from micro-tool genes.
+let factoryArtifacts: FactoryArtifactRecord[] = [];
 // Most recent real benchmark result, cached so the learner reward (which runs
 // every tick) can read it without re-running the hidden suites on every tick.
 let latestBenchmark: BenchmarkRun | null = null;
@@ -2109,6 +2143,8 @@ function loadStateFromDisk() {
         status.selfRepair = { ...INITIAL_STATUS.selfRepair, ...persistedSelfRepair };
       }
       if (data.intakeSignals) intakeSignals = data.intakeSignals;
+      if (Array.isArray(data.externalIdeas)) externalIdeas = data.externalIdeas;
+      if (Array.isArray(data.factoryArtifacts)) factoryArtifacts = data.factoryArtifacts;
       if (data.benchmarkHistory) benchmarkHistory = data.benchmarkHistory;
       if (Array.isArray(data.benchmarkAppendedProblems)) restoreBenchmarkProblems(data.benchmarkAppendedProblems);
       if (data.lastGroundAt) lastGroundAt = data.lastGroundAt;
@@ -2122,12 +2158,24 @@ if (typeof data.intakeAutopilotOn === 'boolean') intakeAutopilotOn = data.intake
         globalLensLastPublish = data.globalLensLastPublish as GlobalLensPublishRecord;
       }
       if (Array.isArray(data.corpusRoots) && data.corpusRoots.length) {
-        corpusRoots = data.corpusRoots;
-        // Merge in new default roots (e.g. local cancer library) without
-        // duplicating or dropping user-configured roots.
-        for (const d of DEFAULT_CORPUS_ROOTS) {
-          if (!corpusRoots.some((r: any) => r && r.project === d.project)) corpusRoots.push({ ...d });
+        // Same self-healing rule as skillRoots: a persisted root pointing at the
+        // torn-down `Uplift` tree must not shadow the corrected default.
+        const healed: typeof corpusRoots = [];
+        for (const r of data.corpusRoots as typeof corpusRoots) {
+          if (!r || typeof r.project !== 'string' || typeof r.root !== 'string') continue;
+          let rootExists = false;
+          try { rootExists = fs.existsSync(r.root); } catch { rootExists = false; }
+          if (rootExists) { healed.push(r); continue; }
+          const replacement = DEFAULT_CORPUS_ROOTS.find((d) => d.project === r.project);
+          if (replacement) {
+            healed.push({ ...replacement });
+            try { console.log(`[corpus] healed stale root ${r.project}: ${r.root} -> ${replacement.root}`); } catch { /* best-effort */ }
+          }
         }
+        for (const d of DEFAULT_CORPUS_ROOTS) {
+          if (!healed.some((r) => r.project === d.project)) healed.push({ ...d });
+        }
+        corpusRoots = healed;
       }
       if (Array.isArray(data.corpusArtifacts)) corpusArtifacts = data.corpusArtifacts;
       if (typeof data.corpusLastScan === 'number') corpusLastScan = data.corpusLastScan;
@@ -2135,12 +2183,29 @@ if (typeof data.intakeAutopilotOn === 'boolean') intakeAutopilotOn = data.intake
       if (typeof data.corpusDispatched === 'number') corpusDispatched = data.corpusDispatched;
       if (Array.isArray(data.corpusRefilledHashes)) corpusRefilledHashes = data.corpusRefilledHashes;
       if (Array.isArray(data.skillRoots) && data.skillRoots.length) {
-        skillRoots = data.skillRoots;
-        // Merge in new default skill libraries (e.g. newly added roots) without
-        // duplicating or dropping user-configured roots.
-        for (const d of defaultSkillRoots()) {
-          if (!skillRoots.some((r: any) => r && r.id === d.id)) skillRoots.push({ ...d });
+        // SELF-HEALING ROOTS. The persisted roots were captured when the fleet
+        // lived under `Downloads\Uplift\...`; that tree was torn down and the
+        // ecosystem moved to `Downloads\BUSINESS`. A persisted root whose path
+        // no longer exists must NOT shadow the corrected default — the old code
+        // kept it whenever the id matched, so every scan read a dead directory
+        // and reported "0 skills" as if that were the truth.
+        const defaults = defaultSkillRoots();
+        const healed: typeof skillRoots = [];
+        for (const r of data.skillRoots as typeof skillRoots) {
+          if (!r || typeof r.id !== 'string' || typeof r.root !== 'string') continue;
+          let rootExists = false;
+          try { rootExists = fs.existsSync(r.root); } catch { rootExists = false; }
+          if (rootExists) { healed.push(r); continue; }
+          const replacement = defaults.find((d) => d.id === r.id);
+          if (replacement) {
+            healed.push({ ...replacement });
+            try { console.log(`[skills] healed stale root ${r.id}: ${r.root} -> ${replacement.root}`); } catch { /* best-effort */ }
+          }
         }
+        for (const d of defaults) {
+          if (!healed.some((r) => r.id === d.id)) healed.push({ ...d });
+        }
+        skillRoots = healed;
       }
       if (Array.isArray(data.skillCatalog)) skillCatalog = data.skillCatalog;
       if (typeof data.skillLastScan === 'number') skillLastScan = data.skillLastScan;
@@ -2256,6 +2321,8 @@ function ensureStateStore(): ReturnType<typeof createStateStore> {
       // UI; both are persisted by their owners (dream store, top-level
       // swarmStatus), so persisting them again here re-wrote ~1.3MB per save.
       status: (({ dreamState: _d, swarmStatus: _s, ...rest }) => rest)(status),
+      externalIdeas,
+      factoryArtifacts,
       mathAutopilotOn,
       intakeSignals,
       benchmarkHistory,
@@ -2534,6 +2601,7 @@ function executeSelfRepair(
   brokenCode: string,
   faultHint?: string,
   testSuite?: string,
+  opts: { operatorCode?: string; suppressCeiling?: boolean; suppressReason?: string } = {},
 ): {
   success: boolean;
   healedTool: ToolEntry;
@@ -2545,12 +2613,29 @@ function executeSelfRepair(
   let tool = registry.find(t => t.name === toolName);
   const domain: ToolDomain = tool?.domain || 'coding';
 
-  // Step 0 ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â re-verify the CURRENT promoted source before synthesizing
+  // Step 0 — re-verify the CURRENT promoted source before synthesizing
   // anything. An anomaly can be stale (the tool works now), and a template
   // must never overwrite verified code. If the live source passes its
   // suite/claim, that IS the honest heal: record it and skip synthesis.
+  //
+  // EXCEPTION, measured 2026-10-12: the recheck runs the weak suite, so a tool
+  // whose current version is BROKEN-AT-SCALE (powerMod: wrong above 2^53 while
+  // its 4-assert suite passes) reads as "already passing" and an operator's
+  // administered repair never engages. An explicit administration bypasses the
+  // not-reproducible shortcut AND runs the enhanced gate on the operator
+  // source itself — the strong gate, not this shortcut, decides.
   const recheck = verifyCurrentSource(tool);
-  const alreadyPassing = recheck?.vr.passed === true;
+  const usesOperatorSource = Boolean(opts.operatorCode);
+  const alreadyPassing = !usesOperatorSource && recheck?.vr.passed === true;
+
+  // Operator-administered exit (used by POST /repair/administered): the caller
+  // supplied the exact source (verified against the enhanced gate below like
+  // any repair), so tree-diagnosis synthesis is skipped. It can never weaken
+  // the gates - only the autonomous attempt CEILING is waivable, and only
+  // here.
+  const administeredNotice = usesOperatorSource
+    ? `ADMINISTERED REPAIR (operator-supplied source${opts.suppressReason ? ` - ${opts.suppressReason}` : ''})`
+    : '';
 
   const { repairedCode, rootCause, errorType, patchSummary, templateApplied, confidence, preventativeMeasures } = alreadyPassing
     ? {
@@ -2562,7 +2647,17 @@ function executeSelfRepair(
         confidence: 1,
         preventativeMeasures: ['Re-verified current promoted source', 'Reconciled open anomaly without template injection'],
       }
-    : diagnoseAndRepairCode(domain, brokenCode, faultHint);
+    : usesOperatorSource
+      ? {
+          repairedCode: opts.operatorCode!,
+          rootCause: 'Operator-administered repair: exact source supplied through the gated route',
+          errorType: 'administered',
+          patchSummary: 'Operator-supplied source replaces model synthesis; all verification gates still applied',
+          templateApplied: undefined,
+          confidence: 1,
+          preventativeMeasures: ['Operator-administered repair', 'Enhanced gate + suite verified'],
+        }
+      : diagnoseAndRepairCode(domain, brokenCode, faultHint);
 
   // 1. Verify the repaired code honestly.
   //
@@ -2622,7 +2717,12 @@ function executeSelfRepair(
     suitePassed: verifierResult?.passed === true,
     verificationDepth,
     gateVerdict: repairGate,
-    bounds: { maxAttempts: SELF_REPAIR_MAX_ATTEMPTS },
+    bounds: {
+      maxAttempts: SELF_REPAIR_MAX_ATTEMPTS,
+      // The administered lane may waive the quarantine ceiling — its source was
+      // supplied by an operator and the enhanced gate above still decides.
+      ...(usesOperatorSource ? { suppressCeiling: opts.suppressCeiling !== false, suppressReason: opts.suppressReason } : {}),
+    },
   });
   const healed = repairDecision.healed;
   const gateBlockReason = repairDecision.blockReason;
@@ -2644,11 +2744,13 @@ function executeSelfRepair(
     isRepaired: true,
     test_suite_code: repairSuite,
     verifier_notes: healed
-      ? `AUTONOMOUSLY HEALED & RE-VERIFIED: ${verifierResult?.summary}${repairGate ? ' [enhanced gate: pass]' : ''}${templateApplied ? ` [Template: ${templateApplied}, Conf: ${(confidence * 100).toFixed(0)}%]` : ''}`
+      ? `AUTONOMOUSLY HEALED & RE-VERIFIED: ${verifierResult?.summary}${repairGate ? ' [enhanced gate: pass]' : ''}${administeredNotice ? ` [${administeredNotice}]` : ''}${templateApplied ? ` [Template: ${templateApplied}, Conf: ${(confidence * 100).toFixed(0)}%]` : ''}`
+      : administeredNotice
+        ? `ADMINISTERED REPAIR REFUSED — NOT PROMOTED: ${gateBlockReason || (verifierResult?.summary ?? 'no verifier available')}`
       : gateBlockReason
         ? `REPAIR BLOCKED - NOT PROMOTED: ${gateBlockReason}`
         : smokeOnlyPass
-          ? `SMOKE-ONLY REPAIR Ã¢â‚¬â€ NOT VERIFIED: ${verifierResult?.summary}. No regression suite on file, so this is recorded as an attempt, not a heal.`
+          ? `SMOKE-ONLY REPAIR Ã¢â‚¬â€ NOT VERIFIED: ${verifierResult?.summary}. No regression suite on file, so this is recorded as an attempt, not a heal.`
           : `REPAIR ATTEMPT DID NOT PASS VERIFIER: ${verifierResult?.summary ?? 'no verifier available'}`,
     source_code: repairedCode
   };
@@ -2796,6 +2898,7 @@ function executeSelfRepair(
     templateApplied,
     confidence,
     healed,
+    ...(usesOperatorSource ? { administered: true, suppressReason: opts.suppressReason } : {}),
     verifierSummary: verifierResult?.summary,
     verifierScore: verifierResult?.score,
     preventativeMeasures,
@@ -3250,6 +3353,15 @@ app.use(
     selfRepairStatus: () => status.selfRepair,
     anomalies: () => anomalies,
     executeSelfRepair,
+    // The administered lane: caller-supplied exact source through the same gate
+    // chain, with the autonomous attempt-CEILING waived (operator-supervised;
+    // the enhanced gate still runs unconditionally inside executeSelfRepair).
+    executeAdministeredRepair: (toolName, sourceCode, faultHint, testSuite) =>
+      executeSelfRepair(toolName, sourceCode, faultHint, testSuite, {
+        operatorCode: sourceCode,
+        suppressCeiling: true,
+        suppressReason: 'operator-administered via POST /repair/administered',
+      }),
     registry: () => registry,
     saveState: saveStateToDisk,
   }),
@@ -3276,6 +3388,166 @@ app.use('/api/recourse/kg', createKgRouter());
 // src/routes/tools.ts (stateless proxies over lib modules).
 // ---------------------------------------------------------------------------
 app.use('/api/recourse', createToolsRouter());
+  // TELEMETRY IDEAS LANE (Sieve → forge), on a fast cadence of its own.
+  //
+  // The Capability Forge job above is hour-scale and gated on the general
+  // autopilot; a pending telemetry card must not wait an hour for it. This job
+  // exists for one purpose: when a fleet-partner idea is pending, build exactly
+  // one (runForgeCycle selects a card priority-1), then report the real
+  // outcome. It is a no-op when nothing is pending, so an idle system costs
+  // nothing, and RECOURSE_IDEAS_AUTOFORGE=0 turns it off.
+  /**
+   * THE DRAIN — consume the next unconsumed agenda item, exposed so an operator
+   * (or the autonomy envelope's reversible-AUTO class) can release the admission
+   * gate without re-enabling the auto-evolve loop that was halting the service.
+   *
+   * Deliberately a thin reflection of the factory lane below: one pick, one
+   * `idea.consumed` emit, one gated scaffold call, one honest outcome. An empty
+   * queue is `nothing_to_consume` — the idle state the gate exists to produce —
+   * and a failed build is `failed` with its reason; neither is padded.
+   */
+  async function consumeNextAgendaItem(): Promise<Record<string, unknown>> {
+    const ideas = exPickScaffoldIdeas(externalIdeas, { limit: 1 });
+    if (!ideas.length) {
+      // Fall back to the forge lane: a pending spec that only the model-driven
+      // forge can build. Reported as the same drain outcome so a caller does
+      // not have to learn two vocabularies.
+      if (forgeBusy) return { status: 'busy', reason: 'forge is already running' };
+      const pending = exPickIdeasForForge(externalIdeas, {
+        built: new Set([
+          ...forgeLedger.filter((l) => l.status === 'materialized').map((l) => l.name),
+          ...listSelfHostedEntries().map((e) => e.name),
+        ]),
+        quarantine: forgeQuarantine,
+        limit: 1,
+      });
+      if (!pending.length) return { status: 'nothing_to_consume', queue: externalIdeas.length };
+      emitFactoryEvent('idea.consumed', { lane: 'forge', id: pending[0].id, toolName: pending[0].toolName, title: pending[0].title });
+      forgeBusy = true;
+      try {
+        const entry = await runForgeCycle();
+        const built = entry && 'status' in entry && (entry.status === 'materialized' || entry.status === 'exists');
+        return {
+          status: built ? 'consumed' : 'failed',
+          lane: 'forge',
+          idea: pending[0].id,
+          tool: entry && 'name' in entry ? entry.name : null,
+          ...(built ? {} : { note: 'cycle did not materialize' }),
+          queue: externalIdeas.length,
+        };
+      } finally {
+        forgeBusy = false;
+      }
+    }
+
+    const idea = ideas[0];
+    // `ideas` came from pickScaffoldIdeas, which already guarantees `scaffold`, but
+    // stay honest rather than widening to `{}` (which erased the field types).
+    const s = idea.scaffold;
+    if (!s) return { status: 'failed', lane: 'factory', idea: idea.id, error: 'scaffold spec missing' };
+    emitFactoryEvent('idea.consumed', { lane: 'factory', id: idea.id, factoryKind: s.factoryKind, title: idea.title });
+    const secret = process.env.RECOURSE_API_SECRET ?? '';
+    try {
+      const r = await fetch(`http://127.0.0.1:${PORT}/api/recourse/factory/scaffold`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...(secret ? { authorization: `Bearer ${secret}`, 'x-api-secret': secret } : {}) },
+        body: JSON.stringify({
+          kind: s.factoryKind, name: s.name, recipe: s.recipe, fields: s.fields,
+          spec: s.spec, cwd: s.cwd, args: s.args, requestedBy: idea.id,
+        }),
+        signal: AbortSignal.timeout(200000),
+      });
+      const j = (await r.json().catch(() => ({}))) as Record<string, unknown>;
+      const art = (j.artifact ?? {}) as Record<string, unknown>;
+      const ok = j.success === true && art.engineOk === true;
+      markIdeaOutcome(externalIdeas, idea.id, {
+        status: ok ? 'built' : 'failed',
+        toolName: typeof art.command === 'string' ? art.command : idea.toolName,
+        versionHash: typeof art.hash === 'string' ? art.hash : undefined,
+        failureReason: ok ? undefined : String(j.error ?? 'factory build failed'),
+        at: Date.now(),
+      });
+      saveStateToDisk();
+      return {
+        status: ok ? 'consumed' : 'failed',
+        lane: 'factory',
+        idea: idea.id,
+        title: idea.title,
+        files: Array.isArray(art.files) ? art.files.length : 0,
+        ...(ok ? {} : { error: String(j.error ?? 'factory build failed') }),
+        queue: externalIdeas.length,
+      };
+    } catch (e) {
+      markIdeaOutcome(externalIdeas, idea.id, { status: 'failed', failureReason: `factory call failed: ${(e as Error)?.message ?? e}` });
+      saveStateToDisk();
+      return { status: 'failed', lane: 'factory', idea: idea.id, error: (e as Error)?.message ?? String(e), queue: externalIdeas.length };
+    }
+  }
+
+  // Hand the drain to the module-scope factory router (see the holder above).
+  consumeNextAgendaItemImpl = consumeNextAgendaItem;
+
+app.use('/api/recourse', createFactoryRouter({
+  artifactsRef: () => factoryArtifacts,
+  scaffold: (request) => runScaffoldOnSieve(request),
+  // Layer-2 verification: the target project's OWN TypeScript, when installed.
+  // Self-contained and deterministic (no remote auditor); a project without
+  // node_modules reports ok:null with the reason rather than a fake pass.
+  verifyDir: (dir) => {
+    const tsc = path.join(dir, 'node_modules', 'typescript', 'bin', 'tsc');
+    if (!fs.existsSync(tsc) && !fs.existsSync(`${tsc}.js`)) {
+      return Promise.resolve({ ok: null, method: 'tsc --noEmit', detail: 'typescript is not installed in the target project (run npm install there first)' });
+    }
+    try {
+      const r = spawnSync(process.execPath, [fs.existsSync(tsc) ? tsc : `${tsc}.js`, '--noEmit'], { cwd: dir, encoding: 'utf8', timeout: 120000, windowsHide: true });
+      return Promise.resolve({
+        ok: r.status === 0,
+        method: 'tsc --noEmit',
+        detail: r.status === 0 ? 'clean' : String(r.stdout || r.stderr || '').split('\n').filter(Boolean).slice(0, 3).join(' | ') || `exit ${r.status}`,
+      });
+    } catch (e) {
+      return Promise.resolve({ ok: null, method: 'tsc --noEmit', detail: String((e as Error)?.message ?? e) });
+    }
+  },
+    // THE DRAIN. Reflects the telemetry_ideas job's own factory lane rather than
+    // reimplementing it: same pick, same emit, same gated scaffold call, same
+    // outcome marking. Kept as one function because both the operator route and
+    // the scheduler use it — two paths to drain means two places to diverge.
+    // NOTE: `consumeNextAgendaItem` is declared inside registerAllSchedulerJobs(),
+    // which runs *after* this deps object is built, so it is not in scope here. It
+    // is published into this module-scope holder on scheduler registration; until
+    // then we reject honestly rather than throwing ReferenceError.
+    consumeNext: () =>
+      consumeNextAgendaItemImpl
+        ? consumeNextAgendaItemImpl()
+        : Promise.reject(new Error('consume-next not wired yet (scheduler not registered)')),
+    engineStatus: () => scaffoldEngineStatus(),
+    saveState: saveStateToDisk,
+  appendProvenance: (event, detail) => appendProvenanceEvent(event as never, detail as never),
+  defaultCwd: () => process.env.RECOURSE_FACTORY_ROOT || path.join(process.cwd(), '..', 'factory-sandbox'),
+  // Durable extras for the dashboard snapshot: the loop's own state next to the
+  // factory's, so one screen shows cause (ideas) and effect (artifacts).
+  stateExtra: async () => ({
+    ideas: exSummarizeIdeas(externalIdeas),
+    ideasList: externalIdeas.slice(-20).map((i) => ({ id: i.id, kind: i.kind ?? 'tool', title: i.title, status: i.status, toolName: i.toolName, score: i.score ?? null })),
+    jobs: listScheduledJobs()
+      .filter((j) => ['forge', 'telemetry_ideas', 'server_tick'].includes(j.id))
+      .map((j) => ({ id: j.id, enabled: j.enabled, runCount: j.runCount, skipCount: j.skipCount, lastOutcome: j.lastOutcome ?? null, detail: j.lastOutcomeDetail ?? null })),
+    forgeRecent: forgeLedger.slice(-10).map((l) => ({ name: l.name, status: l.status, at: l.at, domain: l.domain })),
+    registry: { tools: registry.length, healthy: registry.filter((t) => t.healthStatus === 'healthy').length },
+    stream: factoryStreamStats(),
+  }),
+}));
+app.use('/api/recourse', createIdeasRouter({
+  ideasRef: () => externalIdeas,
+  builtNames: () => new Set<string>([
+    ...forgeLedger.filter((l) => l.status === 'materialized').map((l) => l.name),
+    ...listSelfHostedEntries().map((e) => e.name),
+  ]),
+  quarantine: () => forgeQuarantine,
+  saveState: saveStateToDisk,
+  requireMutationAuth: requireMutationAuth,
+}));
 
 // ---------------------------------------------------------------------------
 // BioSim sidecar proxy (Monte Carlo tumor/CAR-T + sequencing detection).
@@ -7298,6 +7570,16 @@ async function materializeForgeOutcome(outcome: ForgeAttemptOutcome, spec: Forge
 
   // 1a. Quality gate (P1.4): reject sub-substance implementations before lint.
   // A trivial stub that passes a trivial suite is not a capability.
+  //
+  // Reply normalization first (moduleContract.ts): models fence code, prefix
+  // prose, or omit `export` even when the prompt forbids it — the published
+  // remedy is to strip/normalize in the parsing layer, so a correct body is
+  // never discarded over formatting. The gates below still judge it.
+  const normalized = normalizeGeneratedModule(outcome.source, spec.name);
+  if (normalized.changes.length) {
+    outcome.source = normalized.source;
+    base.failures = [...(base.failures || []), { attempt: 0, note: `normalized: ${normalized.changes.join('; ')}` }];
+  }
   const substance = assessSourceSubstance(outcome.source);
   if (!substance.ok) {
     base.status = 'failed';
@@ -7730,10 +8012,33 @@ function openEndedSnapshot() {
 }
 
 async function runForgeCycle(): Promise<ForgeLedgerEntry | { skipped: boolean; reason: string }> {
-  // The learner's generation plan orders the agenda so the next tool targets its
-  // weakest domain; when the whole agenda is exhausted, mint a fresh spec from
-  // the learner's top unmet synthesize/refine target.
-  let spec = nextForgeSpec(await forgeSpecOrder());
+  // PRIORITY 1 — OPERATOR-SOURCED TELEMETRY. Fleet-partner ideas (Sieve live
+  // observation, operator evidence) outrank the static agenda: a card exists
+  // because something is happening TODAY, not because the 2,200-spec agenda is
+  // long. One card per cycle, consumed on materialization, so the agenda
+  // resumes the moment the actionable signal has been built. When no card is
+  // pending this branch is a no-op and the existing selection runs unchanged.
+  let spec: ForgeSpec | null = null;
+  {
+    const builtNow = new Set<string>([
+      ...forgeLedger.filter((l) => l.status === 'materialized').map((l) => l.name),
+      ...listSelfHostedEntries().map((e) => e.name),
+    ]);
+    const ideas = exPickIdeasForForge(externalIdeas, {
+      built: builtNow,
+      quarantine: forgeQuarantine,
+      limit: 1,
+    });
+    if (ideas.length) {
+      spec = specFromIdea(ideas[0]) as unknown as ForgeSpec;
+      appendProvenanceEvent('external_idea_consumed', {
+        externalIdea: ideas[0].id, tool: ideas[0].toolName, source: ideas[0].source ?? 'fleet',
+        title: ideas[0].title.slice(0, 120),
+      });
+    }
+  }
+  // PRIORITY 2 — the learner-ordered generation agenda, then the learner mint.
+  if (!spec) spec = nextForgeSpec(await forgeSpecOrder());
   if (!spec) {
     const minted = await mintForgeSpecFromLearnerPlan();
     if (minted > 0) spec = nextForgeSpec(await forgeSpecOrder());
@@ -7833,6 +8138,29 @@ const entry = await materializeForgeOutcome(outcome, spec, literature);
   // learner's domain beliefs so the next generation plan reflects it.
   await learnFromForgeOutcome(outcome, spec, entry.status);
   recordForgeEpisode(outcome, spec, entry);
+  // EXTERNAL-IDEA LOOP CLOSURE: a spec minted from Sieve telemetry carries
+  // externalIdeaId; the card's status mirrors the real materialization result.
+  // An OFFLINE provider is NOT a failed idea — no evidence was produced, so the
+  // card stays pending and resumes when the model returns (scoring it a failure
+  // would burn the card's 3-attempt budget on an outage).
+  const extIdeaId = (spec as unknown as { externalIdeaId?: string }).externalIdeaId;
+  if (extIdeaId && entry.status !== 'offline') {
+    const ok = entry.status === 'materialized' || entry.status === 'exists';
+    // `failures` are objects ({attempt, note}) — joining them directly produced
+    // "[object Object]" in the closed-loop reason. Surface the note text.
+    const reasonText = (entry.failures ?? [])
+      .slice(0, 2)
+      .map((f) => (typeof f === 'string' ? f : (f as { note?: string }).note ?? JSON.stringify(f)))
+      .join('; ');
+    markIdeaOutcome(externalIdeas, extIdeaId, {
+      status: ok ? 'built' : 'failed',
+      toolName: outcome.name,
+      versionHash: entry.hash,
+      failureReason: ok ? undefined : `${entry.status}: ${reasonText || entry.status}`,
+      at: Date.now(),
+    });
+    saveStateToDisk();
+  }
   return entry;
 }
 
@@ -9346,7 +9674,24 @@ function registerAllSchedulerJobs(): void {
     cadenceMs: FORGE_AUTOPILOT_MS,
     enabledByDefault: true,
     run: async () => {
-      if (!forgeAutopilotOn) return { skipped: 'autopilot disabled' };
+      // AUTONOMOUS TELEMETRY LANE. The forge is the engine that turns fleet
+      // telemetry ideas (Sieve live observation) into real tools, so the job
+      // runs when EITHER the general forge autopilot is on OR an external idea
+      // card is pending. Without the second clause the idea bridge is inert:
+      // cards would sit in `externalIdeas` forever (forgeAutopilotOn defaults
+      // off). Selecting a card is priority-1 inside runForgeCycle, so this
+      // spends model budget on the telemetry objective, not the static agenda,
+      // unless the autopilot is also on. RECOURSE_IDEAS_AUTOFORGE=0 disables.
+      if (!forgeAutopilotOn) {
+        const autoforge = (process.env.RECOURSE_IDEAS_AUTOFORGE ?? '1') !== '0';
+        if (!autoforge) return { skipped: 'autopilot disabled (telemetry autoforge off)' };
+        const builtNow = new Set<string>([
+          ...forgeLedger.filter((l) => l.status === 'materialized').map((l) => l.name),
+          ...listSelfHostedEntries().map((e) => e.name),
+        ]);
+        const pendingIdeas = exPickIdeasForForge(externalIdeas, { built: builtNow, quarantine: forgeQuarantine, limit: 1 });
+        if (!pendingIdeas.length) return { skipped: 'autopilot disabled and no telemetry ideas pending' };
+      }
       if (forgeBusy) return { skipped: 'forge busy (overlap)' };
       // Snapshot tool names before the cycle so the `evolving` stage only fires
       // when the forge replaces an EXISTING tool, not when it appends a new one.
@@ -9408,6 +9753,81 @@ function registerAllSchedulerJobs(): void {
       }
     },
   });
+
+
+  register({
+    id: 'telemetry_ideas',
+    name: 'Telemetry Ideas (Sieve → forge)',
+    group: 'autonomy',
+    cadenceMs: Math.max(15_000, Number(process.env.RECOURSE_IDEAS_CADENCE_MS) || 60_000),
+    enabledByDefault: true,
+    maintenance: true, // "nothing pending" is the correct idle outcome
+    run: async () => {
+      if ((process.env.RECOURSE_IDEAS_AUTOFORGE ?? '1') === '0') return { skipped: 'telemetry autoforge disabled' };
+
+      // FULL-STACK FIRST. A scaffold card is deterministic (no model): build it
+      // through the SAME gated factory route the operator uses, so there is one
+      // implementation of the build + verify + record path. One card per pass.
+      const scaffoldIdeas = exPickScaffoldIdeas(externalIdeas, { limit: 1 });
+      if (scaffoldIdeas.length) {
+        const idea = scaffoldIdeas[0];
+        const s = idea.scaffold;
+        if (!s) { markIdeaOutcome(externalIdeas, idea.id, { status: 'failed', failureReason: 'scaffold spec missing' }); return { lane: 'factory', idea: idea.id, status: 'skipped', error: 'scaffold spec missing' }; }
+        emitFactoryEvent('idea.consumed', { lane: 'factory', id: idea.id, factoryKind: s.factoryKind, title: idea.title });
+        const secret = process.env.RECOURSE_API_SECRET ?? '';
+        try {
+          const r = await fetch(`http://127.0.0.1:${PORT}/api/recourse/factory/scaffold`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', ...(secret ? { authorization: `Bearer ${secret}`, 'x-api-secret': secret } : {}) },
+            body: JSON.stringify({
+              kind: s.factoryKind, name: s.name, recipe: s.recipe, fields: s.fields,
+              spec: s.spec, cwd: s.cwd, args: s.args, requestedBy: idea.id,
+            }),
+            signal: AbortSignal.timeout(200000),
+          });
+          const j = (await r.json().catch(() => ({}))) as Record<string, unknown>;
+          const art = (j.artifact ?? {}) as Record<string, unknown>;
+          const ok = j.success === true && art.engineOk === true;
+          markIdeaOutcome(externalIdeas, idea.id, {
+            status: ok ? 'built' : 'failed',
+            toolName: typeof art.command === 'string' ? art.command : idea.toolName,
+            versionHash: typeof art.hash === 'string' ? art.hash : undefined,
+            failureReason: ok ? undefined : String(j.error ?? 'factory build failed'),
+            at: Date.now(),
+          });
+          saveStateToDisk();
+          return { lane: 'factory', idea: idea.id, status: ok ? 'built' : 'failed', files: Array.isArray(art.files) ? art.files.length : 0 };
+        } catch (e) {
+          markIdeaOutcome(externalIdeas, idea.id, { status: 'failed', failureReason: `factory call failed: ${(e as Error)?.message ?? e}` });
+          saveStateToDisk();
+          return { lane: 'factory', idea: idea.id, status: 'failed', error: (e as Error)?.message ?? String(e) };
+        }
+      }
+
+      if (forgeBusy) return { skipped: 'forge busy (overlap)' };
+      const builtNow = new Set<string>([
+        ...forgeLedger.filter((l) => l.status === 'materialized').map((l) => l.name),
+        ...listSelfHostedEntries().map((e) => e.name),
+      ]);
+      const pending = exPickIdeasForForge(externalIdeas, { built: builtNow, quarantine: forgeQuarantine, limit: 1 });
+      if (!pending.length) return { skipped: 'no telemetry ideas pending' };
+      emitFactoryEvent('idea.consumed', { lane: 'forge', id: pending[0].id, toolName: pending[0].toolName, title: pending[0].title });
+      forgeBusy = true;
+      try {
+        const entry = await runForgeCycle();
+        const built = entry && 'status' in entry && (entry.status === 'materialized' || entry.status === 'exists');
+        return {
+          idea: pending[0].id,
+          tool: entry && 'name' in entry ? entry.name : null,
+          status: entry && 'status' in entry ? entry.status : 'unknown',
+          ...(built ? {} : { note: 'cycle did not materialize' }),
+        };
+      } finally {
+        forgeBusy = false;
+      }
+    },
+  });
+
 
   register({
     id: 'open-ended',

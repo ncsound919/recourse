@@ -145,6 +145,23 @@ describe('evaluateRepair — the attempt ceiling (backstop)', () => {
     expect(evaluateRepair({ ...args, bounds: { maxAttempts: 4 } }).healed).toBe(true);
   });
 
+  it('the administered lane waives ONLY the ceiling — and never the gate', () => {
+    const args = { tool: churned(99), suitePassed: true, verificationDepth: 'suite' as const, gateVerdict: PASSING_GATE };
+    // Ceiling waived for an administered repair: healed, with an auditable reason.
+    const waived = evaluateRepair({ ...args, bounds: { maxAttempts: DEFAULT_MAX_REPAIR_ATTEMPTS, suppressCeiling: true, suppressReason: 'operator-administered' } });
+    expect(waived.healed).toBe(true);
+    expect(waived.ceilingWaived).toBe(true);
+    expect(waived.overrideReason).toMatch(/operator-administered/);
+    // ...but a FAILING enhanced gate still refuses, waiver or not.
+    const refused = evaluateRepair({ ...args, gateVerdict: FAILING_GATE, bounds: { maxAttempts: DEFAULT_MAX_REPAIR_ATTEMPTS, suppressCeiling: true, suppressReason: 'operator-administered' } });
+    expect(refused.healed).toBe(false);
+    expect(refused.blockReason).toMatch(/enhanced quality gate rejected/);
+    // ...and a smoke-only depth cannot ride the waiver into a heal either.
+    const smoke = evaluateRepair({ tool: churned(99), suitePassed: true, verificationDepth: 'smoke', gateVerdict: PASSING_GATE, bounds: { maxAttempts: DEFAULT_MAX_REPAIR_ATTEMPTS, suppressCeiling: true } });
+    expect(smoke.healed).toBe(false);
+    expect(smoke.smokeOnly).toBe(true);
+  });
+
   it('the ceiling is finite — the runaway cannot be unbounded', () => {
     expect(DEFAULT_MAX_REPAIR_ATTEMPTS).toBeGreaterThan(0);
     expect(Number.isFinite(DEFAULT_MAX_REPAIR_ATTEMPTS)).toBe(true);

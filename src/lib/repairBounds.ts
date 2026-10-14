@@ -47,6 +47,15 @@ export interface RepairBoundsOptions {
   maxAttempts?: number;
   /** Historical versions to retain (the live one is always kept). */
   keepVersions?: number;
+  /**
+   * Operator-administered escape (see evaluateRepair): waives ONLY the attempt
+   * ceiling. Call it exclusively from an explicitly gated route whose caller
+   * supplied the exact source — never from the autonomous loop. The enhanced
+   * quality gate runs unconditionally regardless.
+   */
+  suppressCeiling?: boolean;
+  /** Recorded so the waiver is auditable in the version notes. */
+  suppressReason?: string;
 }
 
 export const DEFAULT_MAX_REPAIR_ATTEMPTS = 12;
@@ -86,7 +95,7 @@ export function evaluateRepair(opts: {
   verificationDepth: 'suite' | 'claim' | 'smoke';
   gateVerdict?: RepairGateVerdict | null;
   bounds?: RepairBoundsOptions;
-}): { healed: boolean; smokeOnly: boolean; blockReason?: string; attempts: number } {
+}): { healed: boolean; smokeOnly: boolean; blockReason?: string; attempts: number; ceilingWaived?: boolean; overrideReason?: string } {
   const { tool, suitePassed, verificationDepth, gateVerdict, bounds } = opts;
   const maxAttempts = bounds?.maxAttempts ?? DEFAULT_MAX_REPAIR_ATTEMPTS;
   const smokeOnly = verificationDepth === 'smoke' && suitePassed;
@@ -104,6 +113,20 @@ export function evaluateRepair(opts: {
   }
   const attempts = repairAttemptCount(tool);
   if (attempts >= maxAttempts) {
+    // OPERATOR-ADMINISTERED ESCAPE. When the caller supplies the exact source
+    // and explicitly waives the ceiling (an administered repair, not an
+    // autonomous loop attempt), the backstop does not apply. The enhanced
+    // quality gate still runs above — this escape can never launder junk.
+    if (opts.bounds?.suppressCeiling) {
+      return {
+        healed: true,
+        smokeOnly: false,
+        attempts,
+        ceilingWaived: true,
+        blockReason: undefined,
+        overrideReason: opts.bounds.suppressReason ?? 'operator-administered repair',
+      };
+    }
     return {
       healed: false,
       smokeOnly: false,

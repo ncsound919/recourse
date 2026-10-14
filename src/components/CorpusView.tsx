@@ -67,7 +67,9 @@ export const CorpusView: React.FC<CorpusViewProps> = ({ onNotify }) => {
         setCorpus(res.corpus);
         setDigest(res.digest ?? null);
       }
-    } catch {}
+    } catch (e) {
+      console.error('[CorpusView] corpus status fetch failed', e);
+    }
   }, []);
 
   useEffect(() => {
@@ -99,7 +101,9 @@ export const CorpusView: React.FC<CorpusViewProps> = ({ onNotify }) => {
       const res = await fetch(`/api/recourse/corpus/artifact?${params.toString()}`).then(r => r.json());
       if (res?.success) setOpenArtifact({ project, rel, text: res.text, truncated: res.truncated });
       else if (onNotify) onNotify(`Could not read artifact: ${res.error}`);
-    } catch {}
+    } catch (e) {
+      console.error('[CorpusView] artifact fetch failed', e);
+    }
   };
 
   const summary = corpus?.summary;

@@ -1,4 +1,5 @@
 import type { MemoryKind } from './vectorMemory.js';
+import { deriveTrustLevel, promotionGate, TRUST_NAMES } from './trustLevels.js';
 
 /**
  * Fleet memory intake — pure normalization for the guarded
@@ -40,6 +41,12 @@ export interface FleetMemoryBody {
   topic?: unknown;
   /** Structured payload preserved (bounded) for downstream readers. */
   data?: unknown;
+  /** AEF trust inputs. `declaredTrust` can only LOWER the derived tier. */
+  declaredTrust?: unknown;
+  corroboratingSource?: unknown;
+  deterministicCheck?: unknown;
+  checkEvidence?: unknown;
+  attestedBy?: unknown;
 }
 
 export interface FleetMemoryEntry {
@@ -104,6 +111,20 @@ export function buildFleetMemoryEntry(body: FleetMemoryBody, now: number = Date.
   const id = asString(body.id).slice(0, 200) || `fleet:${source}:${now.toString(36)}`;
   const goal = asString(body.goal);
   const status = asString(body.status);
+  // AEF trust tier. Derived, never taken at face value: an agent's account of
+  // its own work is T1 unless the caller supplies the corroborating artifact
+  // (a deterministic check with evidence, an independent source, or an
+  // operator attestation). The gate is recorded alongside so a reader can see
+  // whether this fact may justify a promotion.
+  const trust = deriveTrustLevel({
+    source,
+    declaredTrust: body.declaredTrust,
+    corroboratingSource: body.corroboratingSource,
+    deterministicCheck: body.deterministicCheck === true,
+    checkEvidence: body.checkEvidence,
+    attestedBy: body.attestedBy,
+  });
+  const gate = promotionGate(trust);
   return {
     ok: true,
     kind,
@@ -111,6 +132,14 @@ export function buildFleetMemoryEntry(body: FleetMemoryBody, now: number = Date.
     text,
     meta: {
       source,
+      trust: {
+        level: trust.level,
+        name: TRUST_NAMES[trust.level],
+        reason: trust.reason,
+        ...(trust.claimed !== undefined ? { claimed: trust.claimed } : {}),
+        ...(trust.downgraded ? { claim_refused: true } : {}),
+        may_justify_promotion: gate.allowed,
+      },
       ...(externalTopic ? { topic: externalTopic } : {}),
       ...(dataMeta ? { data: dataMeta } : {}),
       ...(goal ? { goal: goal.slice(0, 300) } : {}),

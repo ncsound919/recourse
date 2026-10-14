@@ -52,3 +52,6 @@ scripts/kw-import-phoenix.js
 # OpenHub audit-tooling runtime state (not source)
 .openhub/
 .openhub/
+
+# Storage dumps / backups (68MB regression state, not source)
+*.bak-taxonomy

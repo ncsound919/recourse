@@ -283,8 +283,8 @@ class AgingWorker:
                         elif cmd.get('action') == 'pause':
                             print(json.dumps({'action': 'paused'}))
                             break
-                except:
-                    pass
+                except Exception as e:
+                    print(f"[aging_worker] control-channel read failed: {e}", file=sys.stderr)
                 
                 # Run iteration
                 result = self.run_iteration()

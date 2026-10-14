@@ -51,7 +51,10 @@ export interface ToolEntry {
   versions: ToolVersion[];
   currentVersion?: string;
   pendingVersions?: ToolVersion[];
-  healthStatus?: 'healthy' | 'degraded' | 'corrupted' | 'healing' | 'unverified';
+  // failureClass taxonomy (registryHygiene.failedHealthStatus): 'degraded' is
+  // reserved for behavioral regressions a repair can plausibly fix;
+  // 'unverified-claim' / 'not-runnable' / 'policy-fail' are honest dead ends.
+  healthStatus?: 'healthy' | 'degraded' | 'corrupted' | 'healing' | 'unverified' | 'unverified-claim' | 'not-runnable' | 'policy-fail';
   anomalyCount?: number;
 }
 
@@ -116,6 +119,10 @@ export type ProvenanceEventType =
   | 'dream_registry_reconciled'
   | 'tool_registry_reverified'
   | 'v5_synthesis_succeeded'
+  /** A fleet-partner telemetry idea (Sieve) selected for forge generation. */
+  | 'external_idea_consumed'
+  /** A deterministic full-stack artifact was built by the software factory. */
+  | 'factory_artifact_built'
   | 'v5_synthesis_failed'
   | 'v5_synthesis_unverified'
   | 'v5_benchmark_run'
@@ -602,6 +609,8 @@ export interface SystemStatus {
   autoIntervalSeconds: number;
   totalUpgrades: number;
   verifierPassRate: number;
+  /** Tools with no re-executable path (unverified-claim / not-runnable), reported so the pass rate's denominator stays honest. */
+  verifierNotAuditable?: number;
   hashChainIntegrity: boolean;
   /**
    * True when the provenance chain holds zero events, so `hashChainIntegrity`
@@ -677,8 +686,10 @@ otExecutable must trend to zero.
     forgeMaterialized: number;
     healedTools: number;
     benchmarkSolved: number;
-benchmarkTotal: number;
+    benchmarkTotal: number;
     verifierPassRate: number;
+    /** Non-auditable tools (claim-only / not-runnable), excluded from verifierPassRate's denominator. */
+    verifierNotAuditable?: number;
     openAnomalies: number;
   };
   /** Promoted-tool quality audit coverage. `pending` is the honest number:

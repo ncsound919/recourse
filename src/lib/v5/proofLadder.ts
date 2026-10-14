@@ -76,7 +76,7 @@ export async function checkEntailment(
   } catch {
     return { entails: false, reason: "Solver error — downgraded (never pass)" };
   } finally {
-    try { fs.rmSync(tmpDir, { recursive: true }); } catch {}
+      try { fs.rmSync(tmpDir, { recursive: true }); } catch { /* best-effort cleanup */ }
   }
 }
 
@@ -209,7 +209,7 @@ async function proveProperty(
   } catch {
     return { tier: "tested", reason: "Solver error — downgraded" };
   } finally {
-    try { fs.rmSync(tmpDir, { recursive: true }); } catch {}
+      try { fs.rmSync(tmpDir, { recursive: true }); } catch { /* best-effort cleanup */ }
   }
 }
 

@@ -47,7 +47,7 @@ export class EcoShorthandClient {
     const response = await fetch(`${this.api.baseUrl}/api/eco`, {
       method: "POST",
       headers,
-      body: this.binary ? encoded : encoded,
+      body: encoded as unknown as BodyInit,
     });
 
     if (!response.ok) {
@@ -79,7 +79,7 @@ export class EcoShorthandClient {
     const response = await fetch(`${this.api.baseUrl}/api/eco/batch`, {
       method: "POST",
       headers,
-      body: encoded,
+      body: encoded as unknown as BodyInit,
     });
 
     if (!response.ok) {

@@ -19,9 +19,21 @@ const API = process.env.RECOURSE_API_URL || 'http://localhost:3050';
 const SECRET = process.env.RECOURSE_API_SECRET || '';
 const VERSION = '0.2.0';
 
-async function apiGet(path: string): Promise<any> {
+// Recourse's read routes are model- and DB-heavy and its event loop blocks
+// periodically (node-cron logs "missed execution / possible blocking IO"):
+// /api/recourse/status measured 21s, then 34.6s on the same node on 2026-10-12.
+// The previous hard-coded 8s cap - plus opencode's own per-server
+// `timeout: 60000` - sat BELOW that latency, so the flagship status tool
+// aborted on a healthy service and was reported as an outage.
+// These defaults must stay under the opencode server timeout in
+// ~/.config/opencode/opencode.jsonc (recourse.timeout).
+const GET_TIMEOUT_MS = Number(process.env.RECOURSE_MCP_GET_TIMEOUT_MS || 150_000);
+const POST_TIMEOUT_MS = Number(process.env.RECOURSE_MCP_POST_TIMEOUT_MS || 120_000);
+
+async function apiGet(path: string, opts: { timeoutMs?: number } = {}): Promise<any> {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 8000);
+  const budget = opts.timeoutMs ?? GET_TIMEOUT_MS;
+  const timer = setTimeout(() => ctrl.abort(), budget);
   try {
     // Send the secret when configured so config-gated GET routes authenticate
     // (open when RECOURSE_API_SECRET is unset, enforced when it is set).
@@ -39,10 +51,10 @@ async function apiGet(path: string): Promise<any> {
  *  and the Express guard). A missing secret => honest failure, never a fake. */
 async function apiPost(path: string, body: unknown): Promise<{ ok: boolean; status: number; data: any }> {
   if (!SECRET) {
-    return { ok: false, status: 503, data: { success: false, error: `RECOURSE_API_SECRET is not set in the MCP environment â€” cannot authenticate a write (server is fail-closed)` } };
+    return { ok: false, status: 503, data: { success: false, error: `RECOURSE_API_SECRET is not set in the MCP environment — cannot authenticate a write (server is fail-closed)` } };
   }
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 15000);
+  const timer = setTimeout(() => ctrl.abort(), POST_TIMEOUT_MS);
   try {
     const res = await fetch(`${API}${path}`, {
       method: 'POST',

@@ -235,7 +235,9 @@ const kagglePlatform: ComputePlatform = {
     kaggleCreds = config.credentialsPath
       ? resolveKaggleCredentials({ credentialsPath: config.credentialsPath, home: '', env: { ...process.env, KAGGLE_CONFIG_DIR: '' } })
       : resolveKaggleCredentials();
-    if (!kaggleCreds) {
+    // A token without a username cannot address a kernel (`username/slug`):
+    // refuse to configure rather than guess or fall back to another account.
+    if (!kaggleCreds || !kaggleCreds.username) {
       this.configured = false;
       return;
     }
@@ -349,8 +351,24 @@ const kagglePlatform: ComputePlatform = {
       } catch (e: any) {
         fetchError = `could not download kernel output: ${e.message}`;
       }
+      // Collect the non-log files the kernel produced (generated media, JSONL,
+      // checkpoints-as-files). Kaggle's own __notebook__.ipynb / __results__.html
+      // are boilerplate; per-file size is capped so a runaway output cannot OOM
+      // the caller.
+      const BOILERPLATE = new Set(['__notebook__.ipynb', '__results__.html', '__output__.json']);
+      const MAX_ARTIFACT_BYTES = 12 * 1024 * 1024;
+      const outputFiles: ComputeFile[] = [];
+      try {
+        for (const rel of fs.readdirSync(outDir, { recursive: true }) as string[]) {
+          if (rel.endsWith('.log') || BOILERPLATE.has(path.basename(rel))) continue;
+          const full = path.join(outDir, rel);
+          const st = fs.statSync(full);
+          if (!st.isFile() || st.size === 0 || st.size > MAX_ARTIFACT_BYTES) continue;
+          outputFiles.push({ path: rel.replace(/\\/g, '/'), content: fs.readFileSync(full).toString('base64'), encoding: 'base64' });
+        }
+      } catch { /* best-effort artifact collection */ }
       const success = status.state === 'completed' && !fetchError;
-      return { handle, success, stdout, stderr, durationMs, error: success ? undefined : (status.error || fetchError) };
+      return { handle, success, stdout, stderr, outputFiles, durationMs, error: success ? undefined : (status.error || fetchError) };
     } finally {
       try { fs.rmSync(outDir, { recursive: true, force: true }); } catch { /* best-effort */ }
     }
@@ -593,7 +611,9 @@ const hfPlatform: ComputePlatform = {
         const data = await res.json();
         return data.name || data.user?.name || null;
       }
-    } catch {}
+    } catch (e) {
+      console.error('[computePlatforms] HuggingFace whoami lookup failed', e);
+    }
     return null;
   },
 
