@@ -8,8 +8,8 @@ const json = (body: unknown, status = 200) =>
 describe('fleetRegistry', () => {
   it('defaults to the canonical loopback ports', () => {
     expect(fleetBaseUrl('draymond', {})).toBe('http://127.0.0.1:3444');
-    expect(fleetBaseUrl('keywire', {})).toBe('http://127.0.0.1:3000');
-    expect(fleetBaseUrl('openhub', {})).toBe('http://127.0.0.1:3010');
+    expect(fleetBaseUrl('keywire', {})).toBe('http://127.0.0.1:4700');
+    expect(fleetBaseUrl('openhub', {})).toBe('http://127.0.0.1:3011'); // was 3010 — the old fleet's port (measured 2026-10-15)
     expect(fleetBaseUrl('axiom', {})).toBe('http://127.0.0.1:3198');
   });
 

@@ -104,7 +104,10 @@ describe('skill roots config', () => {
     vi.unstubAllEnvs();
     const roots = defaultSkillRoots();
     expect(roots.map((r) => r.id)).toEqual(
-      expect.arrayContaining(['fleet-skills', 'ecc', 'hermes', 'deterministic-brain', 'deepseek-harness', 'supabase']),
+      // Current DEFAULT_SKILL_ROOTS (src/skills/index.ts:75-83). `hermes` and
+      // `supabase` were retired from the list; `axiom-opencode` and `opencode`
+      // replaced them.
+      expect.arrayContaining(['fleet-skills', 'ecc', 'deterministic-brain', 'axiom-opencode', 'deepseek-harness', 'opencode']),
     );
     roots[0].root = 'mutated';
     expect(defaultSkillRoots()[0].root).not.toBe('mutated');

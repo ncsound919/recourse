@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import path from 'node:path';
+import os from 'node:os';
 import { axiomBridgeStatus, dispatchAxiomRepair, launchAxiomLoop, waitForAxiomLoop } from '../src/lib/axiomBridge.js';
 
 const BRIDGE = 'http://127.0.0.1:3198/api/recourse/bridge/repair';
@@ -24,6 +26,13 @@ describe('axiomBridgeStatus', () => {
 
   it('reports honest offline + auth none', async () => {
     vi.stubEnv('AXIOM_API_TOKEN', '');
+    // The Keywire lane is the second auth source (axiomBridge.ts:22-77 reads
+    // KEYWIRE_KEYS_FILE → jwtSecret). On a host where that file exists, an
+    // empty env still resolves a token and auth is 'keywire', which is the
+    // code being correct — so this test must point the Keywire lane at an
+    // absent file to exercise the genuine "no token anywhere" posture.
+    vi.stubEnv('KEYWIRE_KEYS_FILE', path.join(os.tmpdir(), `absent-keystore-${Date.now()}.json`));
+    vi.stubEnv('AXIOM_KEYS_FILE', '');
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')));
     const s = await axiomBridgeStatus();
     expect(s.online).toBe(false);

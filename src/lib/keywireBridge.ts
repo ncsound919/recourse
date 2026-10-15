@@ -2,6 +2,16 @@
  * Keywire ecosystem command-plane bridge — stateless HTTP client for the
  * Keywire zero-trust vault's `/api/v1/ecosystem/*` routes.
  *
+ * RETIREMENT STATUS (2026-10-15): this is the ONE coupling Keywire's retirement
+ * does not have a replacement for. Recourse's secret dependencies (keywireSecret,
+ * the Jev toggle, the autopilot GitHub token) now resolve from Infisical via
+ * `src/lib/infisicalLane.ts`, and `fleetRegistry` carries Infisical as a fleet
+ * node. This bridge's routes — fleet summary, bringing a service up, pm2 status,
+ * the server manifest, brain tasks, the Axiom probe — have no Infisical
+ * equivalent at any tier. When Keywire is stopped these calls degrade per the
+ * honesty contract below (`ok:false` with the reason), and the fleet-dashboard
+ * panel they feed goes dark. Re-home them deliberately or accept the loss.
+ *
  * Keywire is an EXTERNAL process (default http://127.0.0.1:4700). This module
  * never owns fleet state and never invents it: every fetch is guarded by a
  * timeout and returns `ok:false` with the underlying error when Keywire is
@@ -24,6 +34,8 @@
 import { fleetBaseUrl } from './fleetRegistry.js';
 
 export const KEYWIRE_DEFAULT_URL = fleetBaseUrl('keywire');
+/** OpenHub's registry is the current fleet's source of truth (see fleetRegistryHealth). */
+export const OPENHUB_REGISTRY_DEFAULT_URL = fleetBaseUrl('openhub');
 
 // ---------------------------------------------------------------------------
 // Shapes (mirror Keywire/src/ecosystem.ts response payloads).
@@ -100,19 +112,37 @@ export interface KeywireEcosystemServer {
 // Result envelopes (every fn returns one of these — never throws).
 // ---------------------------------------------------------------------------
 
+/** Which system answered a fleet-state call (2026-10-15: OpenHub's registry is
+ *  the current fleet's source of truth; Keywire's manifest describes the
+ *  pre-Uplift fleet, so it is the fallback, not the primary). */
+export type FleetStateSource = 'openhub' | 'keywire';
+
+/** OpenHub registry snapshot (totals + ranking), passed through unreshaped. */
+export interface FleetRegistrySnapshot {
+  totals?: unknown;
+  ranking?: unknown;
+  summary?: string;
+}
+
 export interface KeywireHealthResult {
   ok: boolean;
+  source?: FleetStateSource;
   summary?: KeywireSummaryPayload;
+  /** Present only when OpenHub answered (`source: 'openhub'`). */
+  registry?: FleetRegistrySnapshot;
   error?: string;
   latencyMs: number;
 }
 
 export interface KeywireSummaryResult {
   ok: boolean;
+  source?: FleetStateSource;
   servers?: KeywireServersSummary;
   sync?: KeywireSyncSummary;
   tasks?: KeywireTasksSummary;
   health?: string;
+  /** Present only when OpenHub answered (`source: 'openhub'`). */
+  registry?: FleetRegistrySnapshot;
   error?: string;
   latencyMs: number;
 }
@@ -430,35 +460,90 @@ export function keywireAuthStatus(): { configured: boolean; jwtCached: boolean; 
   };
 }
 
+/** OpenHub's machine-surface credential — same convention as auditAdapters.ts. */
+export function openHubInternalSecret(env: NodeJS.ProcessEnv = process.env): string {
+  return (env.RECOURSE_OPENHUB_SECRET || env.OPENHUB_INTERNAL_SECRET || '').trim();
+}
+
 /**
- * GET /api/v1/ecosystem/summary. `ok:true` only when Keywire answered 2xx with
- * a JSON object; the summary is parsed defensively (never fabricated).
+ * The CURRENT fleet view: OpenHub's machine surface
+ * (`GET /api/internal/ecosystem/registry/summary`, Bearer = the shared internal
+ * secret — the interactive registry routes are session-guarded and answer 403 to
+ * a machine). Never throws.
+ */
+export async function fleetRegistryHealth(
+  base: string = OPENHUB_REGISTRY_DEFAULT_URL,
+  timeoutMs = 5000,
+): Promise<{ ok: boolean; latencyMs: number; registry?: FleetRegistrySnapshot; error?: string }> {
+  const started = Date.now();
+  const secret = openHubInternalSecret();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${base}/api/internal/ecosystem/registry/summary`, {
+      headers: secret ? { Authorization: `Bearer ${secret}` } : {},
+      signal: controller.signal,
+    });
+    const latencyMs = Date.now() - started;
+    if (!res.ok) {
+      const detail = res.status === 503 ? 'internal surface disabled (OPENHUB_INTERNAL_SECRET unset)' : `HTTP ${res.status}`;
+      return { ok: false, error: `registry summary ${detail}`, latencyMs };
+    }
+    const d = (await res.json().catch(() => null)) as { ok?: unknown; summary?: unknown; totals?: unknown; ranking?: unknown } | null;
+    if (!d || d.ok !== true) return { ok: false, error: 'registry summary returned no JSON object', latencyMs };
+    return {
+      ok: true,
+      latencyMs,
+      registry: { totals: d.totals, ranking: d.ranking, summary: typeof d.summary === 'string' ? d.summary : undefined },
+    };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'unreachable', latencyMs: Date.now() - started };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Fleet state. OpenHub's registry first (the current fleet); Keywire's
+ * `/api/v1/ecosystem/summary` only as a fallback. The OpenHub attempt is skipped
+ * when a caller passes an explicit non-default `base` — so tests and deliberate
+ * overrides keep their deterministic direct path.
  */
 export async function keywireHealth(
   base: string = KEYWIRE_DEFAULT_URL,
   timeoutMs = 5000,
 ): Promise<KeywireHealthResult> {
+  if (base === KEYWIRE_DEFAULT_URL) {
+    const reg = await fleetRegistryHealth(OPENHUB_REGISTRY_DEFAULT_URL, timeoutMs);
+    if (reg.ok && reg.registry) return { ok: true, source: 'openhub', registry: reg.registry, latencyMs: reg.latencyMs };
+  }
   const call = await request('GET', '/api/v1/ecosystem/summary', base, timeoutMs);
-  if (!call.ok) return { ok: false, error: call.error, latencyMs: call.latencyMs };
+  if (!call.ok) return { ok: false, source: 'keywire', error: call.error, latencyMs: call.latencyMs };
   const summary = parseSummary(call.data);
-  if (!summary) return { ok: false, error: 'keywire summary returned no JSON object', latencyMs: call.latencyMs };
-  return { ok: true, summary, latencyMs: call.latencyMs };
+  if (!summary) return { ok: false, source: 'keywire', error: 'keywire summary returned no JSON object', latencyMs: call.latencyMs };
+  return { ok: true, source: 'keywire', summary, latencyMs: call.latencyMs };
 }
 
 /**
- * Same route as `keywireHealth` but with the summary flattened into the
- * result envelope (`servers` / `sync` / `tasks` / `health`).
+ * Same state, flattened. OpenHub first (registry snapshot instead of the Keywire
+ * server/sync/task shape, because those numbers do not exist in the registry and
+ * are not invented here); Keywire's flattened shape when it is the answering lane.
  */
 export async function keywireSummary(
   base: string = KEYWIRE_DEFAULT_URL,
   timeoutMs = 5000,
 ): Promise<KeywireSummaryResult> {
+  if (base === KEYWIRE_DEFAULT_URL) {
+    const reg = await fleetRegistryHealth(OPENHUB_REGISTRY_DEFAULT_URL, timeoutMs);
+    if (reg.ok && reg.registry) return { ok: true, source: 'openhub', registry: reg.registry, latencyMs: reg.latencyMs };
+  }
   const call = await request('GET', '/api/v1/ecosystem/summary', base, timeoutMs);
-  if (!call.ok) return { ok: false, error: call.error, latencyMs: call.latencyMs };
+  if (!call.ok) return { ok: false, source: 'keywire', error: call.error, latencyMs: call.latencyMs };
   const summary = parseSummary(call.data);
-  if (!summary) return { ok: false, error: 'keywire summary returned no JSON object', latencyMs: call.latencyMs };
+  if (!summary) return { ok: false, source: 'keywire', error: 'keywire summary returned no JSON object', latencyMs: call.latencyMs };
   return {
     ok: true,
+    source: 'keywire',
     servers: summary.servers,
     sync: summary.sync,
     tasks: summary.tasks,

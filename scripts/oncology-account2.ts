@@ -132,7 +132,7 @@ async function main() {
       meta: { kernelSlug: `onco2-${laneId}`.slice(0, 50), datasetSources: datasets },
     };
     log(`${laneId}: submitting (${hw}, datasets=[${datasets.join(', ')}])`);
-    let handle: { externalId: string };
+    let handle: Awaited<ReturnType<typeof kaggle.submit>>;
     try { handle = await kaggle.submit(job); }
     catch (e) { log(`${laneId}: SUBMIT FAIL ${e instanceof Error ? e.message : String(e)}`); continue; }
     const res = await kaggle.fetch(handle, Math.min(exp.maxRuntimeMs + 900_000, 1_800_000));

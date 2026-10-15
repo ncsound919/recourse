@@ -84,7 +84,14 @@ export function semgrepTimeoutMs(): number {
 export function isSemgrepAvailable(): boolean {
   if (semgrepAvailable !== null) return semgrepAvailable;
   try {
-    execSync('semgrep --version', { stdio: 'pipe', timeout: semgrepTimeoutMs() });
+    // execFileSync, not execSync: this module imports execFileSync (line 6) and
+    // never imported execSync, so the bare `execSync` was a ReferenceError that
+    // the catch below swallowed into `false` — semgrep screening was therefore
+    // permanently dead AND reported "semgrep not installed" (measured
+    // 2026-10-15: semgrep IS installed at
+    // %AppData%\Roaming\Python\Python312\Scripts\semgrep.exe). Calling the
+    // imported function, the same way the scan below does, is the fix.
+    execFileSync('semgrep', ['--version'], { stdio: 'pipe', timeout: semgrepTimeoutMs() });
     semgrepAvailable = true;
   } catch {
     semgrepAvailable = false;

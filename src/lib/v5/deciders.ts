@@ -145,7 +145,13 @@ export class JevDecider implements Decider {
 // Dev-Brain strategy advisor
 // ==========================================
 
-const DEV_BRAIN_URL_DEFAULT = 'http://127.0.0.1:8722';
+// 3450, not 8722. Every other Dev-Brain reference in this repo defaults to
+// :3450 (fleetDevelopment.ts:263/812, fleetRegistry.ts:41, intelSources.ts:15)
+// and Dev-Brain binds 3450; 8722 had no listener on this host (measured
+// 2026-10-15). planner.ts:212 constructs `new DevBrainAdvisor()` with no URL,
+// so the default is the live path — the strategy advisor was aimed at a dead
+// port.
+const DEV_BRAIN_URL_DEFAULT = 'http://127.0.0.1:3450';
 
 /**
  * Dev-Brain triages a task and recommends a synthesis strategy.

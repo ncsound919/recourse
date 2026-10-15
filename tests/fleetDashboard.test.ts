@@ -142,8 +142,17 @@ describe('computeDashboardSections — real aggregation', () => {
     expect(o04.verification.targetValue).toBe(10);
     expect(o04.status).toBe('at_risk');
 
-    expect(sections.agenda.filter((m: { status: string }) => m.status === 'met')).toHaveLength(1);
-    expect(sections.agenda.filter((m: { status: string }) => m.status === 'at_risk')).toHaveLength(12);
+    const countBy = (s: string) => sections.agenda.filter((m: { status: string }) => m.status === s).length;
+    expect(countBy('met')).toBe(1);
+    // Date-robust, not date-frozen. A non-met milestone is 'at_risk' until its
+    // targetDate passes, then 'overdue' (breakthroughAgenda.ts
+    // computeMilestoneStatus), and 'on_track' can never fire because
+    // pacePerDay is pinned to 0 (line 339). The old 12 was only true before
+    // 2026-09-30/2026-10-15 arrived; assert the invariant so the test survives
+    // the calendar.
+    expect(countBy('on_track')).toBe(0);
+    expect(countBy('at_risk') + countBy('overdue')).toBe(12);
+    expect(countBy('met') + countBy('at_risk') + countBy('overdue')).toBe(13);
   });
 
   it('reports offline keywire and conductor state honestly', async () => {
@@ -206,11 +215,15 @@ describe('renderDashboard — real markdown assembly', () => {
     expect(content).toContain('| oncology | 0 | 0 novel findings |');
     expect(content).toContain('**Science conductor:** STOPPED (0 cycles)');
     expect(content).toContain('**Math conductor:** STOPPED (0 cycles)');
+    // Derive the expected split from `sections` so the render assertion tracks
+    // the same calendar-dependent truth as the data test above.
+    const atRisk = sections.agenda.filter((m: { status: string }) => m.status === 'at_risk').length;
+    const overdue = sections.agenda.filter((m: { status: string }) => m.status === 'overdue').length;
 
     expect(content).toContain('- ✅ Met: **1**');
     expect(content).toContain('- 🟢 On track: **0**');
-    expect(content).toContain('- 🟡 At risk: **12**');
-    expect(content).toContain('- 🔴 Overdue: **0**');
+    expect(content).toContain('- 🟡 At risk: **' + atRisk + '**');
+    expect(content).toContain('- 🔴 Overdue: **' + overdue + '**');
 
     expect(content).toMatch(
       /^\| ✅ \| Solve Collatz total-stopping time for n up to 1,000 \| 2026-09-30 \| -?\d+\.\d \| ████████████████ 100% \| metric 1 >= target 1: 1 passing attempt\(s\) out of 1 for Collatz total-stopping time for n up to N \(best score=1\.00\) \|$/m,

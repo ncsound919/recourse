@@ -12,10 +12,10 @@
 import { describe, it, expect } from 'vitest';
 import {
   ingestIdeas, markIdeaOutcome, pickIdeasForForge, pickScaffoldIdeas, specFromIdea, summarizeIdeas,
-  ideaSpecId, type ExternalStateIdea,
+  ideaSpecId, type ExternalStateIdea, type ExternalIdeaCard,
 } from './externalIdeas.js';
 
-const base = {
+const base: ExternalIdeaCard = {
   id: 'sieve:idea:canary-routes',
   source: 'sieve',
   domain: 'systemic',

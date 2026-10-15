@@ -67,24 +67,35 @@ export async function readJevPublicFromKeywire(
   }
 }
 
-/** Resolved toggle: static env override wins; otherwise the (cached) Keywire
- *  vault value; otherwise undefined (CLOSED). */
+/** Resolved toggle: static env override wins; otherwise Infisical (primary since
+ *  2026-10-15), otherwise the legacy Keywire vault; otherwise undefined (CLOSED).
+ *  The injected fetchImpl is threaded into the lane so tests stay hermetic. */
 export async function resolveJevPublic(
   env: NodeJS.ProcessEnv = process.env,
   fetchImpl: typeof fetch = fetch,
 ): Promise<string | undefined> {
   const envValue = (env.RECOURSE_JEV_PUBLIC || '').trim();
   if (envValue === '1' || envValue === '0') return envValue;
+  const { resolveInfisicalSecret } = await import('./infisicalLane.js');
+  const viaLane = await resolveInfisicalSecret(TOGGLE_KEY, { env, fetchImpl });
+  if (viaLane !== undefined) return viaLane;
   return readJevPublicFromKeywire(env, fetchImpl);
 }
 
-/** Write the toggle into the Keywire vault so operators flip it "as needed".
- *  Returns ok:false honestly when Keywire is down or the write is rejected. */
+/** Write the toggle so operators flip it "as needed". Infisical first (primary
+ *  lane), then the legacy Keywire write. Honest ok:false when both fail. */
 export async function setJevPublic(
   value: '1' | '0',
   env: NodeJS.ProcessEnv = process.env,
   fetchImpl: typeof fetch = fetch,
 ): Promise<{ ok: boolean; error?: string; status?: number }> {
+  const { setInfisicalSecret } = await import('./infisicalLane.js');
+  const lane = await setInfisicalSecret(TOGGLE_KEY, value, { env, fetchImpl, comment: 'Recourse Jev public/closed toggle' });
+  if (lane.ok) {
+    cache = { value, at: Date.now() };
+    return { ok: true };
+  }
+
   const c = config(env);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8000);
@@ -104,7 +115,7 @@ export async function setJevPublic(
     }
     return { ok: false, status: res.status, error: `HTTP ${res.status}: ${text.slice(0, 160)}` };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'unreachable' };
+    return { ok: false, error: lane.error ? `infisical: ${lane.error}; keywire: ${err instanceof Error ? err.message : 'unreachable'}` : err instanceof Error ? err.message : 'unreachable' };
   } finally {
     clearTimeout(timer);
   }

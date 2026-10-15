@@ -1,13 +1,20 @@
 /**
- * keywireClient.ts — fetches a GitHub token from the Keywire zero-trust vault
- * at PR-create time.
+ * keywireClient.ts — the autopilot's GitHub token.
  *
- * The token is fetched once, used immediately by the caller, and never
- * persisted by this module. This client only ever READS the vault: it never
- * writes, never falls back to a locally stored token, and refuses to run
- * without an explicit service token configured.
+ * HISTORY, 2026-10-15 audit: this fetched
+ * `GET {url}/api/secrets/{owner}/github-token` — a route Keywire never
+ * registered (its 122-route inventory has no `/api/secrets/`). The unit test
+ * passed only because it stubbed fetch, so the loop's PR path could never
+ * actually have obtained a token. It now resolves from Infisical (primary since
+ * the migration): `GITHUB_PAT_<OWNER>` when present, else `GITHUB_TOKEN`.
+ *
+ * The token is used by the caller and never persisted here, and no value is logged.
  */
 
+import { resolveInfisicalSecret } from '../lib/infisicalLane.js';
+
+/** LEGACY Keywire config — kept for compatibility (and its env-derived default);
+ *  token resolution no longer uses it. */
 export interface KeywireConfig {
   url: string;
   apiKey: string;
@@ -28,43 +35,23 @@ export class KeywireError extends Error {
   }
 }
 
+/** Candidate secret names for an owner, most specific first. */
+export function githubTokenCandidates(owner: string): string[] {
+  const slug = owner.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  return slug ? [`GITHUB_PAT_${slug}`, 'GITHUB_TOKEN'] : ['GITHUB_TOKEN'];
+}
+
 export async function fetchGitHubToken(
   owner: string,
   config: KeywireConfig = DEFAULT_KEYWIRE_CONFIG,
   fetchImpl: typeof fetch = fetch,
 ): Promise<string> {
-  if (!config.apiKey) {
-    throw new KeywireError('KEYWIRE_SERVICE_TOKEN not configured');
-  }
-
-  const url = `${config.url}/api/secrets/${encodeURIComponent(owner)}/github-token`;
   const timeoutMs = config.timeoutMs ?? 10_000;
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-  let res: Response;
-  try {
-    res = await fetchImpl(url, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${config.apiKey}`,
-        Accept: 'application/json',
-      },
-      signal: controller.signal,
-    });
-  } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
-    const reason = err instanceof Error && err.name === 'AbortError' ? 'timeout' : detail;
-    throw new KeywireError(`Keywire token fetch unreachable: ${reason}`);
-  } finally {
-    clearTimeout(timer);
+  for (const name of githubTokenCandidates(owner)) {
+    const value = await resolveInfisicalSecret(name, { fetchImpl, timeoutMs });
+    if (value) return value;
   }
-
-  if (!res.ok) {
-    throw new KeywireError(`Keywire token fetch failed: ${res.status}`);
-  }
-
-  const data = (await res.json()) as { token: string };
-  return data.token;
+  throw new KeywireError(
+    `GitHub token unavailable from Infisical for '${owner}' (tried ${githubTokenCandidates(owner).join(', ')})`,
+  );
 }

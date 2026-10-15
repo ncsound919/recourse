@@ -15,6 +15,12 @@ export default defineConfig({
       '**/node_modules/**',
       '**/dist/**',
       '**/recourse-fix-bundle/**',
+      // dsh-recourse is a separate vendored sub-project with its own
+      // tsconfig.json + package.json and a node:test runner; its
+      // scripts/*.test.mjs are not vitest suites. Collecting them produced
+      // "Cannot find module '../lib/api.js'" and "No test suite found"
+      // failures unrelated to the app.
+      '**/dsh-recourse/**',
       // Generated self-hosted tool artifacts (raw `assert` scripts, not vitest
       // suites) written by the forge/learner loops. They are runtime output,
       // not the test suite, and were producing 13 phantom collection failures.

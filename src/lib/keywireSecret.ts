@@ -119,18 +119,24 @@ async function fetchAllSecrets(): Promise<Record<string, string>> {
 
 export interface ResolvedSecret {
   value: string;
-  source: 'keywire' | 'env' | 'none';
+  source: 'infisical' | 'keywire' | 'env' | 'none';
 }
 
 /**
- * Resolve a secret Keywire-FIRST, env fallback. Cached for `KEYWIRE_SECRET_TTL_MS`
- * (default 10m). Pass `{ preferKeywire: false }` to force env-first. Never throws.
+ * Resolve a secret VAULT-FIRST, env fallback. Vault order is Infisical (primary
+ * since the 2026-10-15 migration) then Keywire (legacy), then `process.env`.
+ * Cached for `KEYWIRE_SECRET_TTL_MS` (default 10m). Pass `{ preferKeywire: false }`
+ * to force env-first. Never throws, never logs a value.
  */
 export async function resolveSecret(key: string, opts: { preferKeywire?: boolean } = {}): Promise<ResolvedSecret> {
-  const preferKeywire = opts.preferKeywire !== false;
+  const preferVault = opts.preferKeywire !== false;
   const envValue = (process.env[key] || '').trim();
 
-  if (!preferKeywire && envValue) return { value: envValue, source: 'env' };
+  if (!preferVault && envValue) return { value: envValue, source: 'env' };
+
+  const { resolveInfisicalSecret } = await import('./infisicalLane.js');
+  const infValue = (await resolveInfisicalSecret(key)) ?? '';
+  if (infValue.trim()) return { value: infValue.trim(), source: 'infisical' };
 
   const secrets = await fetchAllSecrets();
   const kwValue = (secrets[String(key)] || '').trim();
@@ -139,9 +145,11 @@ export async function resolveSecret(key: string, opts: { preferKeywire?: boolean
   return { value: '', source: 'none' };
 }
 
-/** Test/reset hook — clears the in-memory vault cache. */
-export function resetKeywireSecretCache(): void {
+/** Test/reset hook — clears the in-memory vault caches (both lanes). */
+export async function resetKeywireSecretCache(): Promise<void> {
   secretsCache = null;
   failedAt = 0;
   inflight = null;
+  const { resetInfisicalLaneCache } = await import('./infisicalLane.js');
+  resetInfisicalLaneCache();
 }

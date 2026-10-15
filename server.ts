@@ -2169,7 +2169,7 @@ if (typeof data.intakeAutopilotOn === 'boolean') intakeAutopilotOn = data.intake
           const replacement = DEFAULT_CORPUS_ROOTS.find((d) => d.project === r.project);
           if (replacement) {
             healed.push({ ...replacement });
-            try { console.log(`[corpus] healed stale root ${r.project}: ${r.root} -> ${replacement.root}`); } catch { /* best-effort */ }
+            try { console.log(`[corpus] healed stale root ${r.project}: ${r.root} -> ${replacement.root}`); } catch (e) { swallow('boot.corpus.healLog', e, undefined);  /* best-effort */ }
           }
         }
         for (const d of DEFAULT_CORPUS_ROOTS) {
@@ -2199,7 +2199,7 @@ if (typeof data.intakeAutopilotOn === 'boolean') intakeAutopilotOn = data.intake
           const replacement = defaults.find((d) => d.id === r.id);
           if (replacement) {
             healed.push({ ...replacement });
-            try { console.log(`[skills] healed stale root ${r.id}: ${r.root} -> ${replacement.root}`); } catch { /* best-effort */ }
+            try { console.log(`[skills] healed stale root ${r.id}: ${r.root} -> ${replacement.root}`); } catch (e) { swallow('boot.skills.healLog', e, undefined);  /* best-effort */ }
           }
         }
         for (const d of defaults) {
