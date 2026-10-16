@@ -20,7 +20,7 @@
  *   -> { "model": "...", "answers": { "<id>": { ... } }, "usage": { ... } }
  */
 
-import { resolveSecret } from './keywireSecret.js';
+import { resolveSecret } from './infisicalSecret.js';
 
 export type JevState = string | unknown[] | Record<string, unknown>;
 
@@ -74,7 +74,7 @@ const LOCAL_MODEL_DEFAULT = 'jev-latest';
  *  `TYPESAFE_API_KEY` in env is an accepted alias (see jevConfig). */
 const GATEWAY_KEY_NAME = 'AI_GATEWAY_API_KEY';
 
-type GatewayKeySource = 'keywire' | 'env' | 'none' | 'unresolved';
+type GatewayKeySource = 'infisical' | 'env' | 'none' | 'unresolved';
 let resolvedGatewayKey: string | undefined;
 let gatewayKeySource: GatewayKeySource = 'unresolved';
 let gatewayKeyResolvedAt = 0;
@@ -100,10 +100,10 @@ export async function ensureJevGatewayKey(): Promise<string> {
   if (gatewayKeyInflight) return gatewayKeyInflight;
   gatewayKeyInflight = (async () => {
     try {
-      const r = await resolveSecret(GATEWAY_KEY_NAME, { preferKeywire: true });
-      if (r.source === 'keywire') {
+      const r = await resolveSecret(GATEWAY_KEY_NAME, { preferVault: true });
+      if (r.source === 'infisical') {
         resolvedGatewayKey = r.value;
-        gatewayKeySource = 'keywire';
+        gatewayKeySource = 'infisical';
       } else {
         // Vault miss: fall back to explicit env with the documented precedence
         // (TYPESAFE_API_KEY, then AI_GATEWAY_API_KEY).

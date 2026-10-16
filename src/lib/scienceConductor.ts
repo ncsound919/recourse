@@ -67,7 +67,6 @@ import { fetchDomainPageviews, generateSeededCorpus, type TrendDomain } from './
 import { appendInsight, verifyLedgerChain, readLedger } from './trendLedger.js';
 import { trendHealth, trendScan, type ScanResult } from './trendSidecarClient.js';
 import { axiomReachable, integrateAxiomTool } from './axiomBridge.js';
-import { keywireHealth, keywireCallService, keywireBrainTask } from './keywireBridge.js';
 import { executeResearch, bindToClaims, claimSourceSimilarity, adoptForgeLevenshtein, type RawSource } from './deterministicResearch.js';
 import { geneLookup } from './scientificApiBridge.js';
 import { translationHealth, translateTerm, translateMetric, engineConfig, type TranslationEngineId } from './translationBridge.js';
@@ -1675,64 +1674,13 @@ async function runAxiomPhase(
 // --- KEYWIRE HANDOFF -----------------------------------------------------------
 
 /**
- * Keywire fleet handoff: scout the vault's command plane, bring up fleet
- * services relevant to the science loop, and submit a deterministic-brain
- * verification task when the brain is reachable. Honest: when Keywire is
- * unreachable the handoff reports reachable:false and never fabricates fleet
- * state. The brain task is a real POST to the brain's /task (via Keywire);
- * its response is recorded verbatim, never reshaped.
+ * Fleet handoff — RETIRED 2026-10-15 (Keywire retired ecosystem-wide). The
+ * Keywire command-plane scout / bring-up / brain-task handoff is gone; the
+ * science loop no longer reaches a fleet control plane. Honest no-op so the
+ * cycle shape is unchanged.
  */
-async function runKeywireHandoff(cycleNum: number, problemId: string): Promise<KeywireHandoffResult> {
-  // Env opt-out for CI / fast tests: SCIENCE_KEYWIRE_HANDOFF=0 skips real calls.
-  if (process.env.SCIENCE_KEYWIRE_HANDOFF === '0') {
-    return { reachable: false, servicesEnsured: [], brainTaskSubmitted: false, brainOk: undefined };
-  }
-  const scout = await keywireHealth();
-  if (!scout.ok) {
-    return { reachable: false, servicesEnsured: [], brainTaskSubmitted: false, brainOk: undefined };
-  }
-  const summary = scout.summary;
-  const servicesEnsured: string[] = [];
-  let brainOk: boolean | undefined;
-  let brainError: string | undefined;
-
-  // Bring up fleet control services the science loop can leverage. Fail-soft:
-  // a service that can't come up is reported as skipped, never a fake "up".
-  for (const id of ['draymond', 'brain']) {
-    const called = await keywireCallService(id);
-    if (called.ok && called.service) {
-      servicesEnsured.push(called.service.id);
-    }
-  }
-
-  // Submit a real brain verification task scoped to this cycle's problem.
-  // The brain's /task contract requires `query` (TaskRequest.query) — extra
-  // structured fields ride along for provenance.
-  const brainTask = await keywireBrainTask({
-    query: `verify_research_cycle ${cycleNum} ${problemId}: confirm the dose-response findings and trend anomalies recorded this cycle are internally consistent; reply with a one-line verdict plus any inconsistency found`,
-    task: 'verify_research_cycle',
-    cycle: cycleNum,
-    problemId,
-    note: 'Recourse science conductor cycle handoff',
-  });
-  if (brainTask.ok) {
-    brainOk = true;
-    brainError = undefined;
-  } else {
-    brainOk = false;
-    brainError = brainTask.error;
-  }
-
-  return {
-    reachable: true,
-    fleetHealth: summary?.health,
-    servicesTaken: summary?.servers?.taken,
-    servicesTotal: summary?.servers?.total,
-    servicesEnsured,
-    brainTaskSubmitted: true,
-    brainOk,
-    brainError,
-  };
+async function runKeywireHandoff(_cycleNum: number, _problemId: string): Promise<KeywireHandoffResult> {
+  return { reachable: false, servicesEnsured: [], brainTaskSubmitted: false, brainOk: undefined };
 }
 
 // --- ONE CYCLE ---------------------------------------------------------------

@@ -69,7 +69,6 @@ import {
   jobEffectiveState,
   schedulerEffectiveness,
 } from './src/lib/jobScheduler.js';
-import { keywireHealth } from './src/lib/keywireBridge.js';
 import { computeIssueProgress, renderIssueDocs, renderIssueIndex } from './src/lib/issueTracker.js';
 import { renderDailyReport } from './src/lib/researchReports.js';
 // SelfReporter ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â deterministic first-person field dispatches about Recourse.
@@ -3909,10 +3908,6 @@ try {
   try {
     connections.push({ name: 'Axiom bridge', reachable: await axiomReachable() });
   } catch { connections.push({ name: 'Axiom bridge', reachable: false, detail: 'status check failed' }); }
-  try {
-    const h = await keywireHealth();
-    connections.push({ name: 'Keywire fleet', reachable: h.ok, ...(h.error ? { detail: h.error } : {}) });
-  } catch { connections.push({ name: 'Keywire fleet', reachable: false, detail: 'status check failed' }); }
 
   const activeProfile = activeProviderProfile();
   return {
@@ -10484,21 +10479,6 @@ register({
       const created = consolidateSemanticMemory({ minClusterSize: 2 });
       const status = memoryStoreStatus();
       return { driver: status.kind, episodes: status.episodes, facts: status.facts, created: created.length };
-    },
-  });
-
-  register({
-    id: 'keywire',
-    name: 'Keywire Fleet Command (summary + services)',
-    group: 'fleet',
-    cadenceMs: Math.max(60_000, Number(process.env.KEYWIRE_POLL_MS) || 5 * 60 * 1000),
-    enabledByDefault: true,
-    maintenance: true, // keeps state healthy; nothing to do is the correct outcome
-    run: async () => {
-      const h = await keywireHealth();
-      if (!h.ok) return { skipped: 'keywire unreachable', error: h.error };
-      const summary = h.summary;
-      return { health: summary?.health, taken: summary?.servers?.taken, open: summary?.servers?.open, drift: summary?.sync?.driftCount };
     },
   });
 

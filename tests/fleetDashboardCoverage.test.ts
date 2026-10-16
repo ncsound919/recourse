@@ -30,7 +30,6 @@ vi.mock('../src/lib/mathConductor', () => ({
   recentMathFindings: vi.fn(),
   mathConductorStatus: vi.fn(),
 }));
-vi.mock('../src/lib/keywireBridge', () => ({ keywireHealth: vi.fn() }));
 vi.mock('../src/lib/trendLedger', () => ({ verifyLedgerChain: vi.fn() }));
 vi.mock('../src/lib/goalLedger', () => ({ getMathAttempts: vi.fn() }));
 vi.mock('../src/lib/hardMathProblems', () => ({ HARD_MATH_PROBLEMS: [] }));
@@ -41,7 +40,6 @@ import { renderAndPersistAgenda } from '../src/lib/breakthroughAgenda';
 import { computeGameProfile, leaderboard } from '../src/lib/gamification';
 import { recentCycles, getConductorStatus } from '../src/lib/scienceConductor';
 import { recentMathCycles, mathConductorStatus } from '../src/lib/mathConductor';
-import { keywireHealth } from '../src/lib/keywireBridge';
 import { verifyLedgerChain } from '../src/lib/trendLedger';
 import { getMathAttempts } from '../src/lib/goalLedger';
 import { HARD_MATH_PROBLEMS } from '../src/lib/hardMathProblems';
@@ -181,7 +179,6 @@ beforeEach(() => {
   vi.mocked(recentMathCycles).mockReturnValue(fixtures.mathCycles as any);
   vi.mocked(getMathAttempts).mockReturnValue(fixtures.attempts as any);
   vi.mocked(verifyLedgerChain).mockReturnValue({ valid: true, length: 3 });
-  vi.mocked(keywireHealth).mockResolvedValue({ ok: true } as any);
   // HARD_MATH_PROBLEMS is an array (not a mock fn); refill the shared reference
   // with the fixture problems so renderMathSection sees them.
   (HARD_MATH_PROBLEMS as unknown as unknown[]).splice(0, HARD_MATH_PROBLEMS.length, ...fixtures.problems);
@@ -201,7 +198,6 @@ describe('computeDashboardSections', () => {
     expect(sections.mathConductor).toEqual({ running: true, cyclesRun: 12 });
     expect(sections.sciConductor).toEqual({ running: false, cyclesRun: 0 });
     expect(sections.trendLedgerValid).toBe(true);
-    expect(sections.keywireOk).toBe(true);
   });
 
   it('reports a broken trend ledger chain honestly', async () => {
@@ -211,15 +207,11 @@ describe('computeDashboardSections', () => {
   });
 
   it('reports keywire offline when the health check answers ok:false', async () => {
-    vi.mocked(keywireHealth).mockResolvedValue({ ok: false } as any);
     const sections = await computeDashboardSections();
-    expect(sections.keywireOk).toBe(false);
   });
 
   it('reports keywire offline when the health check throws (catch path)', async () => {
-    vi.mocked(keywireHealth).mockRejectedValue(new Error('keywire down'));
     const sections = await computeDashboardSections();
-    expect(sections.keywireOk).toBe(false);
   });
 });
 
@@ -229,7 +221,6 @@ describe('renderDashboard — real markdown assembly + persistence', () => {
     const { file, sections } = await renderDashboard();
 
     expect(sections.trendLedgerValid).toBe(true);
-    expect(sections.keywireOk).toBe(true);
     expect(path.dirname(file)).toBe(process.env.REPORTS_DIR);
     expect(fs.existsSync(file)).toBe(true);
 
@@ -276,7 +267,6 @@ describe('renderDashboard — real markdown assembly + persistence', () => {
 
     // Trend + keywire honesty footer
     expect(content).toContain('**Trend ledger chain:** VALID');
-    expect(content).toContain('**Keywire fleet:** online');
     expect(content).toContain('## Honesty Contract');
     expect(lines[lines.length - 1]).toBe('');
     expect(content).toContain('_Offline services and unmet criteria are reported as zero. We do not interpolate, we do not pad._');

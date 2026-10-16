@@ -15,7 +15,6 @@
 
 export type FleetServiceId =
   | 'infisical'
-  | 'keywire'
   | 'openhub'
   | 'omniresearch'
   | 'axiom'
@@ -34,9 +33,8 @@ interface FleetServiceDef {
 }
 
 export const FLEET_SERVICES: Readonly<Record<FleetServiceId, FleetServiceDef>> = {
-  // Primary vault since the 2026-10-15 migration; keywire is the legacy lane.
+  // The vault since the 2026-10-15 migration (Keywire retired ecosystem-wide).
   infisical:    { label: 'Infisical',    env: ['INFISICAL_URL'],                     port: 8081, health: '/api/status' },
-  keywire:      { label: 'Keywire (legacy)', env: ['KEYWIRE_URL'],                   port: 4700, health: '/api/health' },
   openhub:      { label: 'OpenHub',      env: ['OPENHUB_URL'],                      port: 3011, health: '/api/health' },
   omniresearch: { label: 'OmniResearch', env: ['OMNIRESEARCH_URL'],                 port: 3012, health: '/api/health' },
   axiom:        { label: 'Axiom',        env: ['AXIOM_URL'],                        port: 3198, health: '/api/health' },

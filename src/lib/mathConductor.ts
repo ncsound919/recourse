@@ -51,7 +51,6 @@ import {
   recordMathAttempt,
   getMathAttempts,
 } from './goalLedger.js';
-import { keywireHealth } from './keywireBridge.js';
 import { assertInProcessSafe, inProcessFallbackRefusal } from './codeSafety.js';
 import { isIsolateAvailable, runBodyInIsolate } from './isolatedSandbox.js';
 import {
@@ -562,14 +561,6 @@ export async function runMathCycle(): Promise<MathCycle> {
     }
   } else {
     skipped.push('axiom (offline or disabled)');
-  }
-
-  // 4. Keywire brain verify.
-  try {
-    const kw = await keywireHealth();
-    if (kw?.ok) enginesUsed.push('keywire-brain');
-  } catch {
-    skipped.push('keywire (offline)');
   }
 
   // 5. Novelty partition.

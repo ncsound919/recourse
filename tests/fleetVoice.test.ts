@@ -53,9 +53,9 @@ describe('summarizeAxiom', () => {
   });
 
   it('says plainly when no loop has been recorded (not a read failure)', () => {
-    const text = summarizeAxiom(axiom({ online: true, auth: 'keywire', noLoopYet: true }));
+    const text = summarizeAxiom(axiom({ online: true, auth: 'jwt', noLoopYet: true }));
     expect(text).toContain('online');
-    expect(text).toContain('keywire auth');
+    expect(text).toContain('jwt auth');
     expect(text).toContain('No project loop has been recorded yet');
     expect(text).not.toContain('could not be read');
   });
@@ -118,7 +118,7 @@ describe('summarizeOpenHub', () => {
 
 describe('buildFleetBriefs', () => {
   it('produces one brief per fleet peer', () => {
-    const briefs = buildFleetBriefs(state({ online: true, auth: 'keywire' }, { recorded: true, audit: audit() }));
+    const briefs = buildFleetBriefs(state({ online: true, auth: 'jwt' }, { recorded: true, audit: audit() }));
     expect(briefs.axiom).toContain('Axiom bridge');
     expect(briefs.openhub).toContain('OpenHub');
   });

@@ -1,5 +1,3 @@
-import fs from 'fs';
-import path from 'path';
 import crypto from 'crypto';
 import { executeTestSuite } from './executionSandbox.js';
 import { writeStatelessSelfHostedTool, verifySelfHostedEntry } from './selfHosting.js';
@@ -14,23 +12,21 @@ const TIMEOUT_MS = Number(process.env.AXIOM_TIMEOUT_MS || 180000);
 // ---------------------------------------------------------------------------
 // Auth — Axiom gates /api/* with an HS256 JWT (see Axiom src/server/auth.ts).
 // Recourse presents a pre-minted AXIOM_API_TOKEN when configured, otherwise
-// mints a short-lived token from the Keywire jwtSecret (the same secret Axiom
-// signs with). With neither, calls go out unauthenticated (Axiom answers 401;
-// that is reported honestly, never masked).
+// mints a short-lived token from AXIOM_JWT_SECRET. The Keywire keywire-keys.json
+// source was retired ecosystem-wide 2026-10-15 (Axiom archived). With no token,
+// calls go out unauthenticated (Axiom answers 401; reported honestly, never masked).
 // ---------------------------------------------------------------------------
 
 function axiomApiToken(): string {
   const explicit = process.env.AXIOM_API_TOKEN;
   if (explicit && explicit.trim()) return explicit.trim();
 
-  const keysFile = process.env.KEYWIRE_KEYS_FILE
-    || process.env.AXIOM_KEYS_FILE
-    || path.join(process.env.KEYWIRE_ROOT || path.join('C:', 'Users', 'User', 'Downloads', 'BUSINESS', 'INFRASTRUCTURE', 'Keywire'), 'data', 'keywire-keys.json');
-  if (!keysFile || !fs.existsSync(keysFile)) return '';
+  // Keywire's keywire-keys.json read is gone (Keywire retired 2026-10-15; Axiom
+  // archived). Mint from AXIOM_JWT_SECRET only; absent it, calls go out
+  // unauthenticated (Axiom 401) — honest, never masked.
+  const secret = (process.env.AXIOM_JWT_SECRET || '').trim();
+  if (!secret) return '';
   try {
-    const parsed = JSON.parse(fs.readFileSync(keysFile, 'utf-8').replace(/^\uFEFF/, ''));
-    const secret = typeof parsed?.jwtSecret === 'string' ? parsed.jwtSecret : '';
-    if (!secret) return '';
     const now = Math.floor(Date.now() / 1000);
     const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
     const payload = Buffer.from(JSON.stringify({
@@ -67,14 +63,14 @@ export async function axiomReachable(): Promise<boolean> {
 export interface AxiomBridgeStatus {
   online: boolean;
   url: string;
-  auth: 'token' | 'keywire' | 'none';
+  auth: 'token' | 'jwt' | 'none';
 }
 
 /** Reachability + auth posture for the Axiom bridge. Never throws. */
 export async function axiomBridgeStatus(): Promise<AxiomBridgeStatus> {
   const auth: AxiomBridgeStatus['auth'] = process.env.AXIOM_API_TOKEN?.trim()
     ? 'token'
-    : axiomApiToken() ? 'keywire' : 'none';
+    : axiomApiToken() ? 'jwt' : 'none';
   return { online: await axiomReachable(), url: AXIOM_URL, auth };
 }
 

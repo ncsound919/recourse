@@ -23,7 +23,7 @@ const audit: ReporterAuditFact = {
 
 function makeDeps(overrides: Partial<FleetVoiceRouterDeps> = {}): FleetVoiceRouterDeps {
   return {
-    axiomStatus: vi.fn(async () => ({ online: true, url: 'http://127.0.0.1:3198', auth: 'keywire' as const })),
+    axiomStatus: vi.fn(async () => ({ online: true, url: 'http://127.0.0.1:3198', auth: 'jwt' as const })),
     axiomLatest: vi.fn(async () => ({
       ok: true,
       state: { id: 'loop-3', status: 'running', iteration: 2, goal: 'repair the parser' },
@@ -79,7 +79,7 @@ describe('fleet voice router', () => {
     const body: any = await (await get('/api/recourse/fleet/voice')).json();
 
     expect(body.success).toBe(true);
-    expect(body.axiom).toMatchObject({ online: true, auth: 'keywire', url: 'http://127.0.0.1:3198' });
+    expect(body.axiom).toMatchObject({ online: true, auth: 'jwt', url: 'http://127.0.0.1:3198' });
     expect(body.axiom.loop).toMatchObject({ id: 'loop-3', status: 'running', iteration: 2 });
     expect(body.openhub.recorded).toBe(true);
     expect(body.openhub.audit.grade).toBe('B');

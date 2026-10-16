@@ -1,40 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { keywireHealth, keywireCallService, keywirePm2Status, keywireAuthStatus } from '../src/lib/keywireBridge.js';
 import { computeIssueProgress, readIssueRecords } from '../src/lib/issueTracker.js';
 import { generateFleetReport, renderFleetReportMarkdown, recentReports } from '../src/lib/researchReports.js';
 import { axiomReachable } from '../src/lib/axiomBridge.js';
 
 const DOWN = 'http://127.0.0.1:1';
-
-describe('keywire bridge (fail-soft, honest)', () => {
-  it('health reports ok:false on unreachable keywire', async () => {
-    const r = await keywireHealth(DOWN, 1500);
-    expect(r.ok).toBe(false);
-    expect(typeof r.error).toBe('string');
-  });
-
-  it('call/pm2 fail soft without throwing', async () => {
-    const c = await keywireCallService('draymond', DOWN, 1500);
-    expect(c.ok).toBe(false);
-    const p = await keywirePm2Status(DOWN, 1500);
-    expect(p.ok).toBe(false);
-  });
-
-  it('reports real summary when keywire is online (skip when not)', async () => {
-    const r = await keywireHealth();
-    if (!r.ok) return; // environment-dependent
-    expect(r.summary).toHaveProperty('servers');
-    expect(typeof r.summary?.servers?.taken).toBe('number');
-  });
-
-  it('auth status never leaks the token', () => {
-    const s = keywireAuthStatus();
-    expect(typeof s.configured).toBe('boolean');
-    expect(typeof s.jwtCached).toBe('boolean');
-    const j = JSON.stringify(s);
-    expect(j).not.toMatch(/kw_st_live_/);
-  });
-});
 
 describe('issue tracker (real progress, no fabrication)', () => {
   it('computes records for every grant problem with honest counters', () => {

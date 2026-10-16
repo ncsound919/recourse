@@ -11,7 +11,6 @@ const h = vi.hoisted(() => ({
   clearGoalLedger: vi.fn(),
   axiomReachable: vi.fn(),
   integrateAxiomTool: vi.fn(),
-  keywireHealth: vi.fn(),
   chatCompleteRoute: vi.fn(),
   orchestrate: vi.fn(),
 }));
@@ -26,7 +25,6 @@ vi.mock('../src/lib/axiomBridge.js', () => ({
   axiomReachable: h.axiomReachable,
   integrateAxiomTool: h.integrateAxiomTool,
 }));
-vi.mock('../src/lib/keywireBridge.js', () => ({ keywireHealth: h.keywireHealth }));
 vi.mock('../src/lib/modelProvider.js', () => ({ chatCompleteRoute: h.chatCompleteRoute }));
 vi.mock('../src/lib/subsystemOrchestrator.js', () => ({ orchestrate: h.orchestrate }));
 
@@ -52,7 +50,6 @@ beforeEach(() => {
   h.recordMathAttempt.mockImplementation((a: Record<string, unknown>) => ({ id: 'math_x', timestamp: Date.now(), ...a }));
   h.axiomReachable.mockResolvedValue(false);
   h.integrateAxiomTool.mockResolvedValue({ ok: false, error: 'offline' });
-  h.keywireHealth.mockResolvedValue({ ok: true, latencyMs: 1 });
   h.chatCompleteRoute.mockResolvedValue({ content: null });
   h.orchestrate.mockResolvedValue({ ok: true });
 });
@@ -298,23 +295,6 @@ describe('mathConductor — axiom + keywire verification', () => {
     expect(cycle.skipped).toContain('axiom build failed');
   });
 
-  it('pushes the keywire-brain engine when keywire is healthy', async () => {
-    const dir = tmpDir();
-    tempDirs.push(dir);
-    h.keywireHealth.mockResolvedValue({ ok: true, latencyMs: 2 });
-    const mc = await freshConductor(dir);
-    const cycle = await mc.runMathCycle();
-    expect(cycle.enginesUsed).toContain('keywire-brain');
-  });
-
-  it('records a keywire skip when keywireHealth throws (defensive catch)', async () => {
-    const dir = tmpDir();
-    tempDirs.push(dir);
-    h.keywireHealth.mockRejectedValue(new Error('vault down'));
-    const mc = await freshConductor(dir);
-    const cycle = await mc.runMathCycle();
-    expect(cycle.skipped).toContain('keywire (offline)');
-  });
 });
 
 describe('mathConductor — loadSeenMathClaims and normalization', () => {

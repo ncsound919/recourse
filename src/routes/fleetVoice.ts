@@ -23,7 +23,7 @@ import {
 
 export interface FleetVoiceRouterDeps {
   /** Reachability + auth posture of the Axiom bridge (never throws). */
-  axiomStatus: () => Promise<{ online: boolean; url: string; auth: 'token' | 'keywire' | 'none' }>;
+  axiomStatus: () => Promise<{ online: boolean; url: string; auth: 'token' | 'jwt' | 'none' }>;
   /** Axiom's most recent project loop, when the bridge is reachable. */
   axiomLatest: () => Promise<{ ok: boolean; state?: Record<string, unknown>; error?: string }>;
   /** Latest audit snapshot written by OpenHub; null when none is recorded. */

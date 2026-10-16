@@ -158,7 +158,6 @@ describe('computeDashboardSections — real aggregation', () => {
   it('reports offline keywire and conductor state honestly', async () => {
     keywireOnline = false;
     const sections = await dash.computeDashboardSections();
-    expect(sections.keywireOk).toBe(false);
     expect(sections.trendLedgerValid).toBe(true);
     expect(sections.mathConductor.running).toBe(false);
     expect(sections.mathConductor.cyclesRun).toBe(0);
@@ -186,7 +185,6 @@ describe('computeDashboardSections — real aggregation', () => {
     );
     const sections = await dash.computeDashboardSections();
     expect(sections.trendLedgerValid).toBe(false);
-    expect(sections.keywireOk).toBe(true);
   });
 });
 
@@ -196,7 +194,6 @@ describe('renderDashboard — real markdown assembly', () => {
     expect(path.dirname(file)).toBe(REPORTS_DIR);
     expect(fs.existsSync(file)).toBe(true);
     expect(sections.trendLedgerValid).toBe(true);
-    expect(sections.keywireOk).toBe(true);
 
     const content = fs.readFileSync(file, 'utf-8');
     const lines = content.split('\n');
@@ -240,7 +237,6 @@ describe('renderDashboard — real markdown assembly', () => {
     expect(content).toContain('_No math cycles yet._');
 
     expect(content).toContain('**Trend ledger chain:** VALID');
-    expect(content).toContain('**Keywire fleet:** online');
     expect(content).toContain('## Honesty Contract');
     expect(content).toContain('_Offline services and unmet criteria are reported as zero. We do not interpolate, we do not pad._');
     expect(lines[lines.length - 1]).toBe('');
@@ -376,10 +372,8 @@ describe('renderDashboard — real markdown assembly', () => {
     );
     const { file, sections } = await dash.renderDashboard();
     expect(sections.trendLedgerValid).toBe(false);
-    expect(sections.keywireOk).toBe(false);
     const content = fs.readFileSync(file, 'utf-8');
     expect(content).toContain('**Trend ledger chain:** BROKEN');
-    expect(content).toContain('**Keywire fleet:** offline');
   });
 
   it('renders the max-level header when XP reaches luminary', async () => {

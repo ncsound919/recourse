@@ -1,5 +1,5 @@
 /**
- * Recourse services router — translation, keywire, trend.
+ * Recourse services router — translation, trend.
  * Extracted from the server.ts monolith (2026-09). Stateless handlers over lib
  * modules: real results forwarded, honest offline status.
  */
@@ -12,17 +12,6 @@ import {
   translationRunnerPath,
   type TranslationEngineId,
 } from '../lib/translationBridge.js';
-import {
-  keywireHealth,
-  keywireSummary,
-  keywireCallService,
-  keywireBrainTask,
-  keywireAxiomTest,
-  keywirePm2Status,
-  keywireServers,
-  keywireAuthStatus,
-  KEYWIRE_DEFAULT_URL,
-} from '../lib/keywireBridge.js';
 import { recentInsights, verifyLedgerChain } from '../lib/trendLedger.js';
 import { fetchDomainPageviews } from '../lib/trendSources.js';
 import { runTrendScan } from '../lib/trendEngine.js';
@@ -79,52 +68,6 @@ export function createServicesRouter(deps: ServicesRouterDeps = {}): Router {
       runner: translationRunnerPath(),
       engines,
     });
-  });
-
-  // --- keywire ---
-  router.get('/keywire/status', async (_req, res) => {
-    const r = await keywireHealth();
-    res.json({
-      success: true,
-      online: r.ok,
-      keywireUrl: process.env.KEYWIRE_URL || KEYWIRE_DEFAULT_URL,
-      auth: keywireAuthStatus(),
-      summary: r.ok ? r.summary : null,
-      error: r.error ?? null,
-      latencyMs: r.latencyMs,
-    });
-  });
-
-  router.get('/keywire/summary', async (_req, res) => {
-    const r = await keywireSummary();
-    res.json({ success: true, ...r });
-  });
-
-  router.post('/keywire/call', async (req, res) => {
-    const { id } = (req.body ?? {}) as { id?: string };
-    if (!id) return res.status(400).json({ success: false, error: 'id (string) required' });
-    const r = await keywireCallService(id);
-    res.json({ success: true, ...r });
-  });
-
-  router.post('/keywire/brain', async (req, res) => {
-    const r = await keywireBrainTask((req.body ?? {}) as Record<string, unknown>);
-    res.json({ success: true, ...r });
-  });
-
-  router.get('/keywire/axiom', async (_req, res) => {
-    const r = await keywireAxiomTest();
-    res.json({ success: true, ...r });
-  });
-
-  router.get('/keywire/pm2', async (_req, res) => {
-    const r = await keywirePm2Status();
-    res.json({ success: true, ...r });
-  });
-
-  router.get('/keywire/servers', async (_req, res) => {
-    const r = await keywireServers();
-    res.json({ success: true, ...r });
   });
 
   // --- trend ---

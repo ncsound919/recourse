@@ -15,7 +15,7 @@
 
 import type { ReporterAuditFact } from './selfReporter.js';
 
-export type FleetAuth = 'token' | 'keywire' | 'none';
+export type FleetAuth = 'token' | 'jwt' | 'none';
 
 export interface FleetAxiomLoop {
   id: string;

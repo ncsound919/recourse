@@ -26,13 +26,10 @@ describe('axiomBridgeStatus', () => {
 
   it('reports honest offline + auth none', async () => {
     vi.stubEnv('AXIOM_API_TOKEN', '');
-    // The Keywire lane is the second auth source (axiomBridge.ts:22-77 reads
-    // KEYWIRE_KEYS_FILE → jwtSecret). On a host where that file exists, an
-    // empty env still resolves a token and auth is 'keywire', which is the
-    // code being correct — so this test must point the Keywire lane at an
-    // absent file to exercise the genuine "no token anywhere" posture.
-    vi.stubEnv('KEYWIRE_KEYS_FILE', path.join(os.tmpdir(), `absent-keystore-${Date.now()}.json`));
-    vi.stubEnv('AXIOM_KEYS_FILE', '');
+    // 2026-10-15: the Keywire keywire-keys.json lane is retired; the bridge mints
+    // only from AXIOM_JWT_SECRET. With it empty and no AXIOM_API_TOKEN there is no
+    // token anywhere -> auth 'none' (honest, never masked).
+    vi.stubEnv('AXIOM_JWT_SECRET', '');
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')));
     const s = await axiomBridgeStatus();
     expect(s.online).toBe(false);

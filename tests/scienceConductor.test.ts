@@ -36,9 +36,6 @@ const M = vi.hoisted(() => ({
   trendScan: vi.fn(),
   axiomReachable: vi.fn(),
   integrateAxiomTool: vi.fn(),
-  keywireHealth: vi.fn(),
-  keywireCallService: vi.fn(),
-  keywireBrainTask: vi.fn(),
   fetchExport: vi.fn(),
   fetchDomainPageviews: vi.fn(),
   appendInsight: vi.fn(),
@@ -99,11 +96,6 @@ vi.mock('../src/lib/trendLedger.js', () => ({
 vi.mock('../src/lib/axiomBridge.js', () => ({
   axiomReachable: M.axiomReachable,
   integrateAxiomTool: M.integrateAxiomTool,
-}));
-vi.mock('../src/lib/keywireBridge.js', () => ({
-  keywireHealth: M.keywireHealth,
-  keywireCallService: M.keywireCallService,
-  keywireBrainTask: M.keywireBrainTask,
 }));
 vi.mock('../src/lib/prometheusBridge.js', () => ({ fetchExport: M.fetchExport }));
 vi.mock('../src/lib/translationBridge.js', () => ({
@@ -191,9 +183,6 @@ beforeEach(async () => {
   M.trendScan.mockResolvedValue({ ok: false, error: 'offline' });
   M.axiomReachable.mockResolvedValue(false);
   M.integrateAxiomTool.mockResolvedValue({ ok: false, error: 'offline' });
-  M.keywireHealth.mockResolvedValue({ ok: false });
-  M.keywireCallService.mockResolvedValue({ ok: false });
-  M.keywireBrainTask.mockResolvedValue({ ok: false, error: 'offline' });
   M.fetchExport.mockResolvedValue({ ok: false });
   M.fetchDomainPageviews.mockResolvedValue([]);
   M.appendInsight.mockReturnValue(true);
@@ -714,30 +703,9 @@ describe('runScienceCycle — axiom + keywire + integrity', () => {
     expect(cycle.axiomBuild?.reason).toBe('sandbox refused');
   });
 
-  it('walks the keywire fleet handoff and submits a brain task', async () => {
-    vi.stubEnv('SCIENCE_KEYWIRE_HANDOFF', '1');
-    M.keywireHealth.mockResolvedValue({ ok: true, summary: { health: 'healthy', servers: { taken: 2, total: 3 } } });
-    M.keywireCallService.mockImplementation(async (id: string) => ({ ok: true, service: { id } }));
-    M.keywireBrainTask.mockResolvedValue({ ok: true });
+  it('no longer performs a keywire fleet handoff (feature retired 2026-10-15)', async () => {
     const cycle = await sci.runScienceCycle();
-    expect(cycle.keywireHandoff?.reachable).toBe(true);
-    expect(cycle.keywireHandoff?.fleetHealth).toBe('healthy');
-    expect(cycle.keywireHandoff?.servicesTaken).toBe(2);
-    expect(cycle.keywireHandoff?.servicesTotal).toBe(3);
-    expect(cycle.keywireHandoff?.servicesEnsured).toEqual(['draymond', 'brain']);
-    expect(cycle.keywireHandoff?.brainTaskSubmitted).toBe(true);
-    expect(cycle.keywireHandoff?.brainOk).toBe(true);
-    expect(cycle.enginesUsed).toContain('keywire-brain');
-  });
-
-  it('reports a failed brain task without fabricating success', async () => {
-    vi.stubEnv('SCIENCE_KEYWIRE_HANDOFF', '1');
-    M.keywireHealth.mockResolvedValue({ ok: true, summary: { health: 'degraded' } });
-    M.keywireCallService.mockResolvedValue({ ok: false });
-    M.keywireBrainTask.mockResolvedValue({ ok: false, error: 'brain down' });
-    const cycle = await sci.runScienceCycle();
-    expect(cycle.keywireHandoff?.brainOk).toBe(false);
-    expect(cycle.keywireHandoff?.brainError).toBe('brain down');
+    expect(cycle.keywireHandoff?.reachable).toBe(false);
     expect(cycle.enginesUsed).not.toContain('keywire-brain');
   });
 

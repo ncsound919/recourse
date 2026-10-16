@@ -25,7 +25,6 @@ import {
 } from './gamification.js';
 import { recentCycles, getConductorStatus } from './scienceConductor.js';
 import { recentMathCycles, mathConductorStatus } from './mathConductor.js';
-import { keywireHealth } from './keywireBridge.js';
 import { verifyLedgerChain } from './trendLedger.js';
 import { getMathAttempts } from './goalLedger.js';
 import { HARD_MATH_PROBLEMS } from './hardMathProblems.js';
@@ -257,7 +256,6 @@ export interface DashboardSections {
   mathConductor: { running: boolean; cyclesRun: number };
   sciConductor: { running: boolean; cyclesRun: number };
   trendLedgerValid: boolean;
-  keywireOk: boolean;
 }
 
 export async function computeDashboardSections(): Promise<DashboardSections> {
@@ -265,7 +263,6 @@ export async function computeDashboardSections(): Promise<DashboardSections> {
   const issues = computeIssueProgress();
   const profile = computeGameProfile();
   const trend = verifyLedgerChain();
-  const kw = await keywireHealth().catch(() => ({ ok: false }));
   return {
     agenda: agenda.milestones,
     issues,
@@ -273,7 +270,6 @@ export async function computeDashboardSections(): Promise<DashboardSections> {
     mathConductor: mathConductorStatus(),
     sciConductor: getConductorStatus(),
     trendLedgerValid: trend.valid,
-    keywireOk: !!kw?.ok,
   };
 }
 
@@ -286,7 +282,6 @@ export async function renderDashboard(): Promise<{ file: string; sections: Dashb
   lines.push(...renderMathSection());
   lines.push(...renderRecentCycles());
   lines.push(`- **Trend ledger chain:** ${sections.trendLedgerValid ? 'VALID' : 'BROKEN'}`);
-  lines.push(`- **Keywire fleet:** ${sections.keywireOk ? 'online' : 'offline'}`);
   lines.push('');
   lines.push(...renderHonestyFooter());
 
