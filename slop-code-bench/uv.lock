@@ -8,6 +8,18 @@ resolution-markers = [
 ]
 
 [[package]]
+name = "aiofile"
+version = "3.12.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "caio" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/14/31/edb06aabd8f8f0b56d659f30800795f40b93cba96be946ce179f6931e3a5/aiofile-3.12.3.tar.gz", hash = "sha256:caa6aa746b5e47e2165f7abd741b6415e49cf4d44fddc0f61844612cc3924d41", size = 21600, upload-time = "2026-08-04T22:59:27.171Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4e/79/6e45e778c4c3cab39e0937b007b720c15f76c50c6453d153282d0fcc3588/aiofile-3.12.3-py3-none-any.whl", hash = "sha256:5c1bcc9e929c50834608e8cc1a4cc1d7503eb60c15a535b779fd39e2f372c017", size = 22122, upload-time = "2026-08-04T22:59:25.838Z" },
+]
+
+[[package]]
 name = "aiofiles"
 version = "25.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -465,8 +477,7 @@ dependencies = [
     { name = "httpx" },
     { name = "inquirerpy" },
     { name = "markdownify" },
-    { name = "mcp", version = "1.16.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14'" },
-    { name = "mcp", version = "1.20.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.14'" },
+    { name = "mcp" },
     { name = "ollama" },
     { name = "openai" },
     { name = "pillow" },
@@ -530,6 +541,46 @@ resolution-markers = [
 sdist = { url = "https://files.pythonhosted.org/packages/cc/7e/b975b5814bd36faf009faebe22c1072a1fa1168db34d285ef0ba071ad78c/cachetools-6.2.1.tar.gz", hash = "sha256:3f391e4bd8f8bf0931169baf7456cc822705f4e2a31f840d218f445b9a854201", size = 31325, upload-time = "2025-10-12T14:55:30.139Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/96/c5/1e741d26306c42e2bf6ab740b2202872727e0f606033c9dd713f8b93f5a8/cachetools-6.2.1-py3-none-any.whl", hash = "sha256:09868944b6dde876dfd44e1d47e18484541eaf12f26f29b7af91b26cc892d701", size = 11280, upload-time = "2025-10-12T14:55:28.382Z" },
+]
+
+[[package]]
+name = "caio"
+version = "0.12.9"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/56/51/bd8b64bf700f5b1a956a60bb62276b79a094e8cd0ddc60b1b61c3edd496f/caio-0.12.9.tar.gz", hash = "sha256:99e99419b44ab5511f7468c6a452887dd125b8e4042672a7589f0cf01d254ea8", size = 84084, upload-time = "2026-09-26T09:51:49.433Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/08/36/4cf8f5a6fd0ea7234107e5ab38ca5e0058beae7477c24768a6ab51b79e0a/caio-0.12.9-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:554c6ee883a0f1e95236d85b8e7d8187b212668855ac3a858acb80f5e2e82e82", size = 49041, upload-time = "2026-09-26T09:51:03.37Z" },
+    { url = "https://files.pythonhosted.org/packages/94/31/3b6e9d644f9337ac6823f25b3cce838569d4b27ac9a3f9a371369f3d15d5/caio-0.12.9-cp312-cp312-manylinux_2_34_aarch64.whl", hash = "sha256:6e72fb0ddd369f712a4ad229ee0f1d7df6852e9b59b36fe8a46210b4c9ea8e82", size = 164686, upload-time = "2026-09-26T09:51:04.88Z" },
+    { url = "https://files.pythonhosted.org/packages/71/f7/1894b1ca1fae9317b8b8203f999107e927ca9badafbe0f7a294952fe00cb/caio-0.12.9-cp312-cp312-manylinux_2_34_x86_64.whl", hash = "sha256:f0698976f84dd40024204f0f77cf59ed7446e989575c8ad8cb64cd4b3e2871f3", size = 162375, upload-time = "2026-09-26T09:51:06.448Z" },
+    { url = "https://files.pythonhosted.org/packages/21/ce/040af704ea23a6f4383685d05068ec59301e3bb12cc2ca7c664d16a82691/caio-0.12.9-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:a06afa038f76324f439595b7a3242abf090a80b03006ed3d7dbbb9c031baf8a3", size = 162189, upload-time = "2026-09-26T09:51:07.862Z" },
+    { url = "https://files.pythonhosted.org/packages/41/b1/d94003593fee5b76d725e5cc51e902439ee3491c6bd4331b232b2ebf12aa/caio-0.12.9-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:ed343077d8178c003b1596f40b1f46955be963a2871a1f85519be823113b24b0", size = 161976, upload-time = "2026-09-26T09:51:09.178Z" },
+    { url = "https://files.pythonhosted.org/packages/e8/bf/ed21d62204e4feece79985f45d2ebce6949c9e3d320e9f9e9638e9dc980a/caio-0.12.9-cp313-cp313-macosx_10_13_universal2.whl", hash = "sha256:ed23f6ad6897fae4c02e3e8d236aa3cc18e766a7c5bb0352ea5e9fb26c5d3335", size = 49024, upload-time = "2026-09-26T09:51:10.472Z" },
+    { url = "https://files.pythonhosted.org/packages/cc/c6/fea92dd83cdf28ee20d403a910e194fa5e1a97215a00e5bbbeb699ac582a/caio-0.12.9-cp313-cp313-manylinux_2_34_aarch64.whl", hash = "sha256:c327977b8174337c1aaff27da17ac249d176ef8ea6e2dbf70b49cdd8038d57d3", size = 164835, upload-time = "2026-09-26T09:51:12.213Z" },
+    { url = "https://files.pythonhosted.org/packages/ca/0f/8ec37d3d6b47b8c6bd6c68a1d2d9b5de1ea05df59b601575b7003c9439e2/caio-0.12.9-cp313-cp313-manylinux_2_34_x86_64.whl", hash = "sha256:f6ffb3d448016d20d8c40c53864d81bdf7463157969de65841eeb370519dbf78", size = 162567, upload-time = "2026-09-26T09:51:13.559Z" },
+    { url = "https://files.pythonhosted.org/packages/ec/5f/b3258150ea0e87f032859df825dd0ec8e9f3a6c798addc6463cf1e4a2298/caio-0.12.9-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:a11421fb4ac591e6fea5512d9a8ad1b488e7b28cf610ede973bbfb4be5177454", size = 162299, upload-time = "2026-09-26T09:51:14.977Z" },
+    { url = "https://files.pythonhosted.org/packages/f8/6e/5712cbf5168fdb4c65c44b0435daeeac7c00609cdc1fd3414812691fbb68/caio-0.12.9-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:c3f6dc05486ce4e1027f1d2da4d84c1d6bb815886e76f34a9228d370d86a5537", size = 162155, upload-time = "2026-09-26T09:51:16.395Z" },
+    { url = "https://files.pythonhosted.org/packages/3a/6a/5a08b26fae45320c8d6f3b42e6225c5316b39f6cea811ba3f890315b4641/caio-0.12.9-cp313-cp313t-macosx_11_0_arm64.whl", hash = "sha256:5c43eaebf220aeb9a388d309a5352e82562a7b9b2ea0102502204413641cfed7", size = 42777, upload-time = "2026-09-26T09:51:17.929Z" },
+    { url = "https://files.pythonhosted.org/packages/44/fd/d84318ae7704b8c427584becaacfc3888fca8ec3fca25904ef479f57fa2a/caio-0.12.9-cp314-cp314-macosx_26_0_arm64.whl", hash = "sha256:bc63db6b4a54b2f1c519424acfb2b7198664e4ef8427d397215a81c0bed9e9e6", size = 42008, upload-time = "2026-09-26T09:51:19.15Z" },
+    { url = "https://files.pythonhosted.org/packages/d1/f3/34487be50fbdc4cc809bcbe82eac565376fdfa7c675ca02feca2f96cbc6c/caio-0.12.9-cp314-cp314-manylinux_2_34_aarch64.whl", hash = "sha256:83718f0ba9ff56de9c3ce7a61b463466fbb064be4f087230064abac5d08b8100", size = 165343, upload-time = "2026-09-26T09:51:20.394Z" },
+    { url = "https://files.pythonhosted.org/packages/a3/f5/3baf870c5775c1bf2399d971d213d34a30750475010070a595df7f536f7d/caio-0.12.9-cp314-cp314-manylinux_2_34_x86_64.whl", hash = "sha256:4a69de19ef8780ea67f5fffa6fed95af32ed4c036e338a361307314306ac816c", size = 162599, upload-time = "2026-09-26T09:51:21.814Z" },
+    { url = "https://files.pythonhosted.org/packages/93/1d/fbc0005d9aa44204f6d106707a3261c19e402ec64381217998df270cbbe5/caio-0.12.9-cp314-cp314-musllinux_1_2_aarch64.whl", hash = "sha256:d3d3664c757d59d330381666683cdfa287c5bfff90819868e98ef0bb8c2d2382", size = 162959, upload-time = "2026-09-26T09:51:23.489Z" },
+    { url = "https://files.pythonhosted.org/packages/3a/6d/d6274d9a4d637d484314456222c898988ec03c1895d3b9ec2fcefe3c24cd/caio-0.12.9-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:2e152e1a1970d49b6056c1c94547801fcc6b41fc12185db6628ed58ec7785b04", size = 162234, upload-time = "2026-09-26T09:51:24.977Z" },
+    { url = "https://files.pythonhosted.org/packages/9e/fc/228e74a8408714cc2e274250055412c1abd02cce62371820ac9da99a2a1d/caio-0.12.9-cp314-cp314t-macosx_11_0_arm64.whl", hash = "sha256:32755af4459fed70d10a5e8c396de3ccb57e02365c7d818937a9794884b172da", size = 42780, upload-time = "2026-09-26T09:51:26.261Z" },
+    { url = "https://files.pythonhosted.org/packages/47/20/d9d7ee48d7a3cc3211cb841aa78712676416099025c60cb9e316c321d100/caio-0.12.9-cp314-cp314t-manylinux_2_34_aarch64.whl", hash = "sha256:de4458707370b9f13de2ead07e6719305624b4f0aad665ce6cb2f1452eb4965d", size = 186873, upload-time = "2026-09-26T09:51:27.538Z" },
+    { url = "https://files.pythonhosted.org/packages/0e/a9/6fc366300809c09916ee9212711ee470ed5103d5d4895a843633a2ca1ad8/caio-0.12.9-cp314-cp314t-manylinux_2_34_x86_64.whl", hash = "sha256:0a571981c8724f69c34ed4c7619585d552d27fe38bad0daf970dca3e14d6922b", size = 182783, upload-time = "2026-09-26T09:51:28.993Z" },
+    { url = "https://files.pythonhosted.org/packages/65/5d/900bb797d8e51d06b5f1aa691dc1f7bf08a01e6a67397c08f8b4c090e01b/caio-0.12.9-cp314-cp314t-musllinux_1_2_aarch64.whl", hash = "sha256:1c043b15a19e33c0b18b1937493be6730c3b08acc33af6899f669ac8957a3e46", size = 185071, upload-time = "2026-09-26T09:51:30.424Z" },
+    { url = "https://files.pythonhosted.org/packages/df/df/94e65a3e77c5cb1f7ce19714084fc1f19f86fa0a1db43c63edc39d6b38d9/caio-0.12.9-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:dada2e1ca5481e5c11201d269ac8e009ce86d34478f4426e9739470b0c2a1030", size = 182583, upload-time = "2026-09-26T09:51:31.921Z" },
+    { url = "https://files.pythonhosted.org/packages/c8/36/3ae6214f37413e1451b9fba72a05f5f9d64f9020db5445e2d73fa403e53e/caio-0.12.9-cp315-cp315-macosx_11_0_arm64.whl", hash = "sha256:53d3febc3e46707786a023b28bd21213ac78332db46fae7df2a03c0cc208976d", size = 42019, upload-time = "2026-09-26T09:51:33.226Z" },
+    { url = "https://files.pythonhosted.org/packages/c1/0d/9b6cc05b09f66dae9cbb1633ca3c2598496239d636b95e3690db3b2c27e7/caio-0.12.9-cp315-cp315-manylinux_2_34_aarch64.whl", hash = "sha256:6634c57de5883819e0fb423094fe5cb480e81b8f5f46f601eb143e2c762f4c14", size = 166496, upload-time = "2026-09-26T09:51:34.558Z" },
+    { url = "https://files.pythonhosted.org/packages/f2/63/ebb69add3f15b4345323f778295b27988b653b191df54060c19a66ea44d5/caio-0.12.9-cp315-cp315-manylinux_2_34_x86_64.whl", hash = "sha256:aa0fe6b459ef45d9d1fe82e22d5d849dcdb07e3a87f56444d1ff799249a08576", size = 163522, upload-time = "2026-09-26T09:51:36Z" },
+    { url = "https://files.pythonhosted.org/packages/01/60/aec76058124f8a5b1979351cdfc83757a752c6456c36a6bdd256b743360f/caio-0.12.9-cp315-cp315-musllinux_1_2_aarch64.whl", hash = "sha256:7fee93281b220488a5e6949ac197a52c2f1e877c6e32aec5ce658e9add3eba60", size = 164136, upload-time = "2026-09-26T09:51:37.383Z" },
+    { url = "https://files.pythonhosted.org/packages/a4/86/bd5b6553fa6bab7976bf60087c2a73a8546c5bf5499e805d51ea0c33016c/caio-0.12.9-cp315-cp315-musllinux_1_2_x86_64.whl", hash = "sha256:6c28c4789a9c6d8e8b36cac15f85727bd8e4d312c98fc5aa4fceaa4631669786", size = 163131, upload-time = "2026-09-26T09:51:38.868Z" },
+    { url = "https://files.pythonhosted.org/packages/29/fa/2842996fdb0a906325c57bc8adf205be4556e33c7ad0d04eec80077ddc3a/caio-0.12.9-cp315-cp315t-macosx_11_0_arm64.whl", hash = "sha256:e600822c774fdb434e43163c7fc0d4dcfaa6540ebbf77e82e5f0dac071b27f8f", size = 42775, upload-time = "2026-09-26T09:51:40.587Z" },
+    { url = "https://files.pythonhosted.org/packages/f5/9e/080587a73689f5f0de33f8be75cbb2e35c822d50d7f957150bdcef38dd92/caio-0.12.9-cp315-cp315t-manylinux_2_34_aarch64.whl", hash = "sha256:cc30e0c458d2d6785e72bb5117086ffce61b5c058bee5637c5aea69042db5e86", size = 187497, upload-time = "2026-09-26T09:51:42.074Z" },
+    { url = "https://files.pythonhosted.org/packages/49/80/950a557f05c492416e3d5b4ec40d7b6c330567b311141aafe69ecb86a063/caio-0.12.9-cp315-cp315t-manylinux_2_34_x86_64.whl", hash = "sha256:7490517a72f4ad01b39311ff8e909c3cab77f12dddd370ba6deb035313038468", size = 183529, upload-time = "2026-09-26T09:51:43.515Z" },
+    { url = "https://files.pythonhosted.org/packages/c9/35/44b405e601c9662223b01b56a38e16920d9633a8897a223399efa791d0b3/caio-0.12.9-cp315-cp315t-musllinux_1_2_aarch64.whl", hash = "sha256:b30f3f36e45afb0814fc828cbb10ef9dd91043ff0b0a14ffe1cd8a348b461179", size = 185758, upload-time = "2026-09-26T09:51:44.98Z" },
+    { url = "https://files.pythonhosted.org/packages/fb/8f/2b08f5e117e3663396cfd0d935cdb9218ad3c374d10911ec278fc0c6aee5/caio-0.12.9-cp315-cp315t-musllinux_1_2_x86_64.whl", hash = "sha256:b17b9aca6360f72bf07f1062bd60d8849f3fd5c1cb77f43923d8dec7fdbbb5df", size = 183425, upload-time = "2026-09-26T09:51:46.402Z" },
+    { url = "https://files.pythonhosted.org/packages/c0/99/96888ad510c9adf42bfbad9ba139831b58055fd61e1301f6268e9bb490b8/caio-0.12.9-py3-none-any.whl", hash = "sha256:bf12d4f014b2a33e642ed7905b5787656ede2fc24be21f7c086826ff0d32cec3", size = 26154, upload-time = "2026-09-26T09:51:48.071Z" },
 ]
 
 [[package]]
@@ -1164,56 +1215,67 @@ wheels = [
 
 [[package]]
 name = "fastmcp"
-version = "2.12.5"
-source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version == '3.13.*'",
-    "python_full_version < '3.13'",
-]
-dependencies = [
-    { name = "authlib", marker = "python_full_version < '3.14'" },
-    { name = "cyclopts", marker = "python_full_version < '3.14'" },
-    { name = "exceptiongroup", marker = "python_full_version < '3.14'" },
-    { name = "httpx", marker = "python_full_version < '3.14'" },
-    { name = "mcp", version = "1.16.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14'" },
-    { name = "openapi-core", marker = "python_full_version < '3.14'" },
-    { name = "openapi-pydantic", marker = "python_full_version < '3.14'" },
-    { name = "pydantic", extra = ["email"], marker = "python_full_version < '3.14'" },
-    { name = "pyperclip", marker = "python_full_version < '3.14'" },
-    { name = "python-dotenv", marker = "python_full_version < '3.14'" },
-    { name = "rich", marker = "python_full_version < '3.14'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/00/a6/e3b46cd3e228635e0064c2648788b6f66a53bf0d0ddbf5fb44cca951f908/fastmcp-2.12.5.tar.gz", hash = "sha256:2dfd02e255705a4afe43d26caddbc864563036e233dbc6870f389ee523b39a6a", size = 7190263, upload-time = "2025-10-17T13:24:58.896Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/d8/c1/9fb98c9649e15ea8cc691b4b09558b61dafb3dc0345f7322f8c4a8991ade/fastmcp-2.12.5-py3-none-any.whl", hash = "sha256:b1e542f9b83dbae7cecfdc9c73b062f77074785abda9f2306799116121344133", size = 329099, upload-time = "2025-10-17T13:24:57.518Z" },
-]
-
-[[package]]
-name = "fastmcp"
 version = "2.13.0.2"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.14'",
 ]
 dependencies = [
-    { name = "authlib", marker = "python_full_version >= '3.14'" },
-    { name = "cyclopts", marker = "python_full_version >= '3.14'" },
-    { name = "exceptiongroup", marker = "python_full_version >= '3.14'" },
-    { name = "httpx", marker = "python_full_version >= '3.14'" },
-    { name = "jsonschema-path", marker = "python_full_version >= '3.14'" },
-    { name = "mcp", version = "1.20.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.14'" },
-    { name = "openapi-pydantic", marker = "python_full_version >= '3.14'" },
-    { name = "platformdirs", marker = "python_full_version >= '3.14'" },
-    { name = "py-key-value-aio", extra = ["disk", "keyring", "memory"], marker = "python_full_version >= '3.14'" },
-    { name = "pydantic", extra = ["email"], marker = "python_full_version >= '3.14'" },
-    { name = "pyperclip", marker = "python_full_version >= '3.14'" },
-    { name = "python-dotenv", marker = "python_full_version >= '3.14'" },
-    { name = "rich", marker = "python_full_version >= '3.14'" },
-    { name = "websockets", marker = "python_full_version >= '3.14'" },
+    { name = "authlib" },
+    { name = "cyclopts" },
+    { name = "exceptiongroup" },
+    { name = "httpx" },
+    { name = "jsonschema-path" },
+    { name = "mcp" },
+    { name = "openapi-pydantic" },
+    { name = "platformdirs" },
+    { name = "py-key-value-aio", version = "0.2.8", source = { registry = "https://pypi.org/simple" }, extra = ["disk", "keyring", "memory"] },
+    { name = "pydantic", extra = ["email"] },
+    { name = "pyperclip" },
+    { name = "python-dotenv" },
+    { name = "rich" },
+    { name = "websockets" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/1b/74/584a152bcd174c99ddf3cfdd7e86ec4a6c696fb190a907c2a2ec9056bda2/fastmcp-2.13.0.2.tar.gz", hash = "sha256:d35386561b6f3cde195ba2b5892dc89b8919a721e6b39b98e7a16f9a7c0b8e8b", size = 7762083, upload-time = "2025-10-28T13:56:21.702Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/bd/c6/95eacd687cfab64fec13bfb64e6c6e7da13d01ecd4cb7d7e991858a08119/fastmcp-2.13.0.2-py3-none-any.whl", hash = "sha256:eb381eb073a101aabbc0ac44b05e23fef0cd1619344b7703115c825c8755fa1c", size = 367511, upload-time = "2025-10-28T13:56:18.83Z" },
+]
+
+[[package]]
+name = "fastmcp"
+version = "3.2.4"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version == '3.13.*'",
+    "python_full_version < '3.13'",
+]
+dependencies = [
+    { name = "authlib" },
+    { name = "cyclopts" },
+    { name = "exceptiongroup" },
+    { name = "griffelib" },
+    { name = "httpx" },
+    { name = "jsonref" },
+    { name = "jsonschema-path" },
+    { name = "mcp" },
+    { name = "openapi-pydantic" },
+    { name = "opentelemetry-api" },
+    { name = "packaging" },
+    { name = "platformdirs" },
+    { name = "py-key-value-aio", version = "0.4.6", source = { registry = "https://pypi.org/simple" }, extra = ["filetree", "keyring", "memory"] },
+    { name = "pydantic", extra = ["email"] },
+    { name = "pyperclip" },
+    { name = "python-dotenv" },
+    { name = "pyyaml" },
+    { name = "rich" },
+    { name = "uncalled-for" },
+    { name = "uvicorn" },
+    { name = "watchfiles" },
+    { name = "websockets" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/9c/13/29544fbc6dfe45ea38046af0067311e0bad7acc7d1f2ad38bb08f2409fe2/fastmcp-3.2.4.tar.gz", hash = "sha256:083ecb75b44a4169e7fc0f632f94b781bdb0ff877c6b35b9877cbb566fd4d4d1", size = 28746127, upload-time = "2026-04-14T01:42:24.174Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/cf/76/b310d52fa0e30d39bd937eb58ec2c1f1ea1b5f519f0575e9dd9612f01deb/fastmcp-3.2.4-py3-none-any.whl", hash = "sha256:e6c9c429171041455e47ab94bb3f83c4657622a0ec28922f6940053959bd58a9", size = 728599, upload-time = "2026-04-14T01:42:26.85Z" },
 ]
 
 [[package]]
@@ -1630,6 +1692,15 @@ wheels = [
 ]
 
 [[package]]
+name = "griffelib"
+version = "2.3.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/2b/27/b55f1a5278918be765fb2fd8b20966bc72bbdd3f789f031937cceea7834a/griffelib-2.3.2.tar.gz", hash = "sha256:df00c7a0dee3d86268d76788997a1859272cb1fb7b865658e043d2c0c3d52e60", size = 234729, upload-time = "2026-10-06T09:54:37.222Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/04/e5/0ae74c83c1cab2c14daadf28bd0143eb14bb81503834af987b66badc7b61/griffelib-2.3.2-py3-none-any.whl", hash = "sha256:8e710afededd5607f95bf3c8ccc175ee306e7084459faf27b9f9f44ef2a7a274", size = 169420, upload-time = "2026-10-06T09:54:32.038Z" },
+]
+
+[[package]]
 name = "groq"
 version = "0.33.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1878,15 +1949,6 @@ wheels = [
 ]
 
 [[package]]
-name = "isodate"
-version = "0.7.2"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/54/4d/e940025e2ce31a8ce1202635910747e5a87cc3a6a6bb2d00973375014749/isodate-0.7.2.tar.gz", hash = "sha256:4cd1aa0f43ca76f4a6c6c0292a85f40b35ec2e43e315b59f06e6d32171a953e6", size = 29705, upload-time = "2024-10-08T23:04:11.5Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/15/aa/0aca39a37d3c7eb941ba736ede56d689e7be91cab5d9ca846bde3999eba6/isodate-0.7.2-py3-none-any.whl", hash = "sha256:28009937d8031054830160fce6d409ed342816b543597cece116d966c6d99e15", size = 22320, upload-time = "2024-10-08T23:04:09.501Z" },
-]
-
-[[package]]
 name = "isoduration"
 version = "20.11.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1921,7 +1983,7 @@ name = "jaraco-classes"
 version = "3.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "more-itertools", marker = "python_full_version >= '3.14'" },
+    { name = "more-itertools" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/06/c0/ed4a27bc5571b99e3cff68f8a9fa5b56ff7df1c2251cc715a652ddd26402/jaraco.classes-3.4.0.tar.gz", hash = "sha256:47a024b51d0239c0dd8c8540c6c7f484be3b8fcf0b2d85c13825780d3b3f3acd", size = 11780, upload-time = "2024-03-31T07:27:36.643Z" }
 wheels = [
@@ -1942,7 +2004,7 @@ name = "jaraco-functools"
 version = "4.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "more-itertools", marker = "python_full_version >= '3.14'" },
+    { name = "more-itertools" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/f7/ed/1aa2d585304ec07262e1a83a9889880701079dde796ac7b1d1826f40c63d/jaraco_functools-4.3.0.tar.gz", hash = "sha256:cfd13ad0dd2c47a3600b439ef72d8615d482cedcff1632930d6f28924d92f294", size = 19755, upload-time = "2025-08-18T20:05:09.91Z" }
 wheels = [
@@ -2064,6 +2126,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/6a/0a/eebeb1fa92507ea94016a2a790b93c2ae41a7e18778f85471dc54475ed25/jsonpointer-3.0.0.tar.gz", hash = "sha256:2b2d729f2091522d61c3b31f82e11870f60b68f43fbc705cb76bf4b832af59ef", size = 9114, upload-time = "2024-06-10T19:24:42.462Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/71/92/5e77f98553e9e75130c78900d000368476aed74276eb8ae8796f65f00918/jsonpointer-3.0.0-py2.py3-none-any.whl", hash = "sha256:13e088adc14fca8b6aa8177c044e12701e6ad4b28ff10e65f2267a90109c9942", size = 7595, upload-time = "2024-06-10T19:24:40.698Z" },
+]
+
+[[package]]
+name = "jsonref"
+version = "1.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/aa/0d/c1f3277e90ccdb50d33ed5ba1ec5b3f0a242ed8c1b1a85d3afeb68464dca/jsonref-1.1.0.tar.gz", hash = "sha256:32fe8e1d85af0fdefbebce950af85590b22b60f9e95443176adbde4e1ecea552", size = 8814, upload-time = "2023-01-16T16:10:04.455Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0c/ec/e1db9922bceb168197a558a2b8c03a7963f1afe93517ddd3cf99f202f996/jsonref-1.1.0-py3-none-any.whl", hash = "sha256:590dc7773df6c21cbf948b5dac07a72a251db28b0238ceecce0a2abfa8ec30a9", size = 9425, upload-time = "2023-01-16T16:10:02.255Z" },
 ]
 
 [[package]]
@@ -2340,12 +2411,12 @@ name = "keyring"
 version = "25.6.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "jaraco-classes", marker = "python_full_version >= '3.14'" },
-    { name = "jaraco-context", marker = "python_full_version >= '3.14'" },
-    { name = "jaraco-functools", marker = "python_full_version >= '3.14'" },
-    { name = "jeepney", marker = "python_full_version >= '3.14' and sys_platform == 'linux'" },
-    { name = "pywin32-ctypes", marker = "python_full_version >= '3.14' and sys_platform == 'win32'" },
-    { name = "secretstorage", marker = "python_full_version >= '3.14' and sys_platform == 'linux'" },
+    { name = "jaraco-classes" },
+    { name = "jaraco-context" },
+    { name = "jaraco-functools" },
+    { name = "jeepney", marker = "sys_platform == 'linux'" },
+    { name = "pywin32-ctypes", marker = "sys_platform == 'win32'" },
+    { name = "secretstorage", marker = "sys_platform == 'linux'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/70/09/d904a6e96f76ff214be59e7aa6ef7190008f52a0ab6689760a98de0bf37d/keyring-25.6.0.tar.gz", hash = "sha256:0b39998aa941431eb3d9b0d4b2460bc773b9df6fed7621c2dfb291a7e0187a66", size = 62750, upload-time = "2024-12-25T15:26:45.782Z" }
 wheels = [
@@ -2431,38 +2502,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/1d/37/a13baf0135f348af608c667633cbe5d13aa2c5c15a56ae9ad3e6cba45ae3/lark-1.3.0.tar.gz", hash = "sha256:9a3839d0ca5e1faf7cfa3460e420e859b66bcbde05b634e73c369c8244c5fa48", size = 259551, upload-time = "2025-09-22T13:45:05.072Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a8/3e/1c6b43277de64fc3c0333b0e72ab7b52ddaaea205210d60d9b9f83c3d0c7/lark-1.3.0-py3-none-any.whl", hash = "sha256:80661f261fb2584a9828a097a2432efd575af27d20be0fd35d17f0fe37253831", size = 113002, upload-time = "2025-09-22T13:45:03.747Z" },
-]
-
-[[package]]
-name = "lazy-object-proxy"
-version = "1.12.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/08/a2/69df9c6ba6d316cfd81fe2381e464db3e6de5db45f8c43c6a23504abf8cb/lazy_object_proxy-1.12.0.tar.gz", hash = "sha256:1f5a462d92fd0cfb82f1fab28b51bfb209fabbe6aabf7f0d51472c0c124c0c61", size = 43681, upload-time = "2025-08-22T13:50:06.783Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/0d/1b/b5f5bd6bda26f1e15cd3232b223892e4498e34ec70a7f4f11c401ac969f1/lazy_object_proxy-1.12.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:8ee0d6027b760a11cc18281e702c0309dd92da458a74b4c15025d7fc490deede", size = 26746, upload-time = "2025-08-22T13:42:37.572Z" },
-    { url = "https://files.pythonhosted.org/packages/55/64/314889b618075c2bfc19293ffa9153ce880ac6153aacfd0a52fcabf21a66/lazy_object_proxy-1.12.0-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl", hash = "sha256:4ab2c584e3cc8be0dfca422e05ad30a9abe3555ce63e9ab7a559f62f8dbc6ff9", size = 71457, upload-time = "2025-08-22T13:42:38.743Z" },
-    { url = "https://files.pythonhosted.org/packages/11/53/857fc2827fc1e13fbdfc0ba2629a7d2579645a06192d5461809540b78913/lazy_object_proxy-1.12.0-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:14e348185adbd03ec17d051e169ec45686dcd840a3779c9d4c10aabe2ca6e1c0", size = 71036, upload-time = "2025-08-22T13:42:40.184Z" },
-    { url = "https://files.pythonhosted.org/packages/2b/24/e581ffed864cd33c1b445b5763d617448ebb880f48675fc9de0471a95cbc/lazy_object_proxy-1.12.0-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:c4fcbe74fb85df8ba7825fa05eddca764138da752904b378f0ae5ab33a36c308", size = 69329, upload-time = "2025-08-22T13:42:41.311Z" },
-    { url = "https://files.pythonhosted.org/packages/78/be/15f8f5a0b0b2e668e756a152257d26370132c97f2f1943329b08f057eff0/lazy_object_proxy-1.12.0-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:563d2ec8e4d4b68ee7848c5ab4d6057a6d703cb7963b342968bb8758dda33a23", size = 70690, upload-time = "2025-08-22T13:42:42.51Z" },
-    { url = "https://files.pythonhosted.org/packages/5d/aa/f02be9bbfb270e13ee608c2b28b8771f20a5f64356c6d9317b20043c6129/lazy_object_proxy-1.12.0-cp312-cp312-win_amd64.whl", hash = "sha256:53c7fd99eb156bbb82cbc5d5188891d8fdd805ba6c1e3b92b90092da2a837073", size = 26563, upload-time = "2025-08-22T13:42:43.685Z" },
-    { url = "https://files.pythonhosted.org/packages/f4/26/b74c791008841f8ad896c7f293415136c66cc27e7c7577de4ee68040c110/lazy_object_proxy-1.12.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:86fd61cb2ba249b9f436d789d1356deae69ad3231dc3c0f17293ac535162672e", size = 26745, upload-time = "2025-08-22T13:42:44.982Z" },
-    { url = "https://files.pythonhosted.org/packages/9b/52/641870d309e5d1fb1ea7d462a818ca727e43bfa431d8c34b173eb090348c/lazy_object_proxy-1.12.0-cp313-cp313-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl", hash = "sha256:81d1852fb30fab81696f93db1b1e55a5d1ff7940838191062f5f56987d5fcc3e", size = 71537, upload-time = "2025-08-22T13:42:46.141Z" },
-    { url = "https://files.pythonhosted.org/packages/47/b6/919118e99d51c5e76e8bf5a27df406884921c0acf2c7b8a3b38d847ab3e9/lazy_object_proxy-1.12.0-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:be9045646d83f6c2664c1330904b245ae2371b5c57a3195e4028aedc9f999655", size = 71141, upload-time = "2025-08-22T13:42:47.375Z" },
-    { url = "https://files.pythonhosted.org/packages/e5/47/1d20e626567b41de085cf4d4fb3661a56c159feaa73c825917b3b4d4f806/lazy_object_proxy-1.12.0-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:67f07ab742f1adfb3966c40f630baaa7902be4222a17941f3d85fd1dae5565ff", size = 69449, upload-time = "2025-08-22T13:42:48.49Z" },
-    { url = "https://files.pythonhosted.org/packages/58/8d/25c20ff1a1a8426d9af2d0b6f29f6388005fc8cd10d6ee71f48bff86fdd0/lazy_object_proxy-1.12.0-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:75ba769017b944fcacbf6a80c18b2761a1795b03f8899acdad1f1c39db4409be", size = 70744, upload-time = "2025-08-22T13:42:49.608Z" },
-    { url = "https://files.pythonhosted.org/packages/c0/67/8ec9abe15c4f8a4bcc6e65160a2c667240d025cbb6591b879bea55625263/lazy_object_proxy-1.12.0-cp313-cp313-win_amd64.whl", hash = "sha256:7b22c2bbfb155706b928ac4d74c1a63ac8552a55ba7fff4445155523ea4067e1", size = 26568, upload-time = "2025-08-22T13:42:57.719Z" },
-    { url = "https://files.pythonhosted.org/packages/23/12/cd2235463f3469fd6c62d41d92b7f120e8134f76e52421413a0ad16d493e/lazy_object_proxy-1.12.0-cp313-cp313t-macosx_11_0_arm64.whl", hash = "sha256:4a79b909aa16bde8ae606f06e6bbc9d3219d2e57fb3e0076e17879072b742c65", size = 27391, upload-time = "2025-08-22T13:42:50.62Z" },
-    { url = "https://files.pythonhosted.org/packages/60/9e/f1c53e39bbebad2e8609c67d0830cc275f694d0ea23d78e8f6db526c12d3/lazy_object_proxy-1.12.0-cp313-cp313t-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl", hash = "sha256:338ab2f132276203e404951205fe80c3fd59429b3a724e7b662b2eb539bb1be9", size = 80552, upload-time = "2025-08-22T13:42:51.731Z" },
-    { url = "https://files.pythonhosted.org/packages/4c/b6/6c513693448dcb317d9d8c91d91f47addc09553613379e504435b4cc8b3e/lazy_object_proxy-1.12.0-cp313-cp313t-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:8c40b3c9faee2e32bfce0df4ae63f4e73529766893258eca78548bac801c8f66", size = 82857, upload-time = "2025-08-22T13:42:53.225Z" },
-    { url = "https://files.pythonhosted.org/packages/12/1c/d9c4aaa4c75da11eb7c22c43d7c90a53b4fca0e27784a5ab207768debea7/lazy_object_proxy-1.12.0-cp313-cp313t-musllinux_1_2_aarch64.whl", hash = "sha256:717484c309df78cedf48396e420fa57fc8a2b1f06ea889df7248fdd156e58847", size = 80833, upload-time = "2025-08-22T13:42:54.391Z" },
-    { url = "https://files.pythonhosted.org/packages/0b/ae/29117275aac7d7d78ae4f5a4787f36ff33262499d486ac0bf3e0b97889f6/lazy_object_proxy-1.12.0-cp313-cp313t-musllinux_1_2_x86_64.whl", hash = "sha256:a6b7ea5ea1ffe15059eb44bcbcb258f97bcb40e139b88152c40d07b1a1dfc9ac", size = 79516, upload-time = "2025-08-22T13:42:55.812Z" },
-    { url = "https://files.pythonhosted.org/packages/19/40/b4e48b2c38c69392ae702ae7afa7b6551e0ca5d38263198b7c79de8b3bdf/lazy_object_proxy-1.12.0-cp313-cp313t-win_amd64.whl", hash = "sha256:08c465fb5cd23527512f9bd7b4c7ba6cec33e28aad36fbbe46bf7b858f9f3f7f", size = 27656, upload-time = "2025-08-22T13:42:56.793Z" },
-    { url = "https://files.pythonhosted.org/packages/ef/3a/277857b51ae419a1574557c0b12e0d06bf327b758ba94cafc664cb1e2f66/lazy_object_proxy-1.12.0-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:c9defba70ab943f1df98a656247966d7729da2fe9c2d5d85346464bf320820a3", size = 26582, upload-time = "2025-08-22T13:49:49.366Z" },
-    { url = "https://files.pythonhosted.org/packages/1a/b6/c5e0fa43535bb9c87880e0ba037cdb1c50e01850b0831e80eb4f4762f270/lazy_object_proxy-1.12.0-cp314-cp314-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl", hash = "sha256:6763941dbf97eea6b90f5b06eb4da9418cc088fce0e3883f5816090f9afcde4a", size = 71059, upload-time = "2025-08-22T13:49:50.488Z" },
-    { url = "https://files.pythonhosted.org/packages/06/8a/7dcad19c685963c652624702f1a968ff10220b16bfcc442257038216bf55/lazy_object_proxy-1.12.0-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:fdc70d81235fc586b9e3d1aeef7d1553259b62ecaae9db2167a5d2550dcc391a", size = 71034, upload-time = "2025-08-22T13:49:54.224Z" },
-    { url = "https://files.pythonhosted.org/packages/12/ac/34cbfb433a10e28c7fd830f91c5a348462ba748413cbb950c7f259e67aa7/lazy_object_proxy-1.12.0-cp314-cp314-musllinux_1_2_aarch64.whl", hash = "sha256:0a83c6f7a6b2bfc11ef3ed67f8cbe99f8ff500b05655d8e7df9aab993a6abc95", size = 69529, upload-time = "2025-08-22T13:49:55.29Z" },
-    { url = "https://files.pythonhosted.org/packages/6f/6a/11ad7e349307c3ca4c0175db7a77d60ce42a41c60bcb11800aabd6a8acb8/lazy_object_proxy-1.12.0-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:256262384ebd2a77b023ad02fbcc9326282bcfd16484d5531154b02bc304f4c5", size = 70391, upload-time = "2025-08-22T13:49:56.35Z" },
-    { url = "https://files.pythonhosted.org/packages/59/97/9b410ed8fbc6e79c1ee8b13f8777a80137d4bc189caf2c6202358e66192c/lazy_object_proxy-1.12.0-cp314-cp314-win_amd64.whl", hash = "sha256:7601ec171c7e8584f8ff3f4e440aa2eebf93e854f04639263875b8c2971f819f", size = 26988, upload-time = "2025-08-22T13:49:57.302Z" },
 ]
 
 [[package]]
@@ -2758,54 +2797,27 @@ wheels = [
 
 [[package]]
 name = "mcp"
-version = "1.16.0"
+version = "1.30.0"
 source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version == '3.13.*'",
-    "python_full_version < '3.13'",
-]
 dependencies = [
-    { name = "anyio", marker = "python_full_version < '3.14'" },
-    { name = "httpx", marker = "python_full_version < '3.14'" },
-    { name = "httpx-sse", marker = "python_full_version < '3.14'" },
-    { name = "jsonschema", marker = "python_full_version < '3.14'" },
-    { name = "pydantic", marker = "python_full_version < '3.14'" },
-    { name = "pydantic-settings", marker = "python_full_version < '3.14'" },
-    { name = "python-multipart", marker = "python_full_version < '3.14'" },
-    { name = "pywin32", marker = "python_full_version < '3.14' and sys_platform == 'win32'" },
-    { name = "sse-starlette", marker = "python_full_version < '3.14'" },
-    { name = "starlette", marker = "python_full_version < '3.14'" },
-    { name = "uvicorn", marker = "python_full_version < '3.14' and sys_platform != 'emscripten'" },
+    { name = "anyio" },
+    { name = "httpx" },
+    { name = "httpx-sse" },
+    { name = "jsonschema" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "pyjwt", extra = ["crypto"] },
+    { name = "python-multipart" },
+    { name = "pywin32", marker = "sys_platform == 'win32'" },
+    { name = "sse-starlette" },
+    { name = "starlette" },
+    { name = "typing-extensions" },
+    { name = "typing-inspection" },
+    { name = "uvicorn", marker = "sys_platform != 'emscripten'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3d/a1/b1f328da3b153683d2ec34f849b4b6eac2790fb240e3aef06ff2fab3df9d/mcp-1.16.0.tar.gz", hash = "sha256:39b8ca25460c578ee2cdad33feeea122694cfdf73eef58bee76c42f6ef0589df", size = 472918, upload-time = "2025-10-02T16:58:20.631Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ba/93/0142dc84a666daf8ad51a34268f34c12fd6fda4f3810c4be2504eecc8212/mcp-1.30.0.tar.gz", hash = "sha256:445414625fce5c295faa505bb11bacece661ab6f4028d57c935db57820b7a3e4", size = 680511, upload-time = "2026-09-07T14:34:15.845Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c9/0e/7cebc88e17daf94ebe28c95633af595ccb2864dc2ee7abd75542d98495cc/mcp-1.16.0-py3-none-any.whl", hash = "sha256:ec917be9a5d31b09ba331e1768aa576e0af45470d657a0319996a20a57d7d633", size = 167266, upload-time = "2025-10-02T16:58:19.039Z" },
-]
-
-[[package]]
-name = "mcp"
-version = "1.20.0"
-source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version >= '3.14'",
-]
-dependencies = [
-    { name = "anyio", marker = "python_full_version >= '3.14'" },
-    { name = "httpx", marker = "python_full_version >= '3.14'" },
-    { name = "httpx-sse", marker = "python_full_version >= '3.14'" },
-    { name = "jsonschema", marker = "python_full_version >= '3.14'" },
-    { name = "pydantic", marker = "python_full_version >= '3.14'" },
-    { name = "pydantic-settings", marker = "python_full_version >= '3.14'" },
-    { name = "pyjwt", extra = ["crypto"], marker = "python_full_version >= '3.14'" },
-    { name = "python-multipart", marker = "python_full_version >= '3.14'" },
-    { name = "pywin32", marker = "python_full_version >= '3.14' and sys_platform == 'win32'" },
-    { name = "sse-starlette", marker = "python_full_version >= '3.14'" },
-    { name = "starlette", marker = "python_full_version >= '3.14'" },
-    { name = "uvicorn", marker = "python_full_version >= '3.14' and sys_platform != 'emscripten'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/f8/22/fae38092e6c2995c03232635028510d77e7decff31b4ae79dfa0ba99c635/mcp-1.20.0.tar.gz", hash = "sha256:9ccc09eaadbfbcbbdab1c9723cfe2e0d1d9e324d7d3ce7e332ef90b09ed35177", size = 451377, upload-time = "2025-10-30T22:14:53.421Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/df/00/76fc92f4892d47fecb37131d0e95ea69259f077d84c68f6793a0d96cfe80/mcp-1.20.0-py3-none-any.whl", hash = "sha256:d0dc06f93653f7432ff89f694721c87f79876b6f93741bf628ad1e48f7ac5e5d", size = 173136, upload-time = "2025-10-30T22:14:51.078Z" },
+    { url = "https://files.pythonhosted.org/packages/f5/f4/e58bc33317c92a0203664daaf00bf6f41166cc0149e5d6870a03f7cd004a/mcp-1.30.0-py3-none-any.whl", hash = "sha256:666edb5009503e1047c9d60346a756f94b261f05cc2625f23d41c728ffc484d0", size = 234581, upload-time = "2026-09-07T14:34:14.266Z" },
 ]
 
 [[package]]
@@ -3271,26 +3283,6 @@ wheels = [
 ]
 
 [[package]]
-name = "openapi-core"
-version = "0.19.5"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "isodate", marker = "python_full_version < '3.14'" },
-    { name = "jsonschema", marker = "python_full_version < '3.14'" },
-    { name = "jsonschema-path", marker = "python_full_version < '3.14'" },
-    { name = "more-itertools", marker = "python_full_version < '3.14'" },
-    { name = "openapi-schema-validator", marker = "python_full_version < '3.14'" },
-    { name = "openapi-spec-validator", marker = "python_full_version < '3.14'" },
-    { name = "parse", marker = "python_full_version < '3.14'" },
-    { name = "typing-extensions", marker = "python_full_version < '3.14'" },
-    { name = "werkzeug", version = "3.1.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/b1/35/1acaa5f2fcc6e54eded34a2ec74b479439c4e469fc4e8d0e803fda0234db/openapi_core-0.19.5.tar.gz", hash = "sha256:421e753da56c391704454e66afe4803a290108590ac8fa6f4a4487f4ec11f2d3", size = 103264, upload-time = "2025-03-20T20:17:28.193Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/27/6f/83ead0e2e30a90445ee4fc0135f43741aebc30cca5b43f20968b603e30b6/openapi_core-0.19.5-py3-none-any.whl", hash = "sha256:ef7210e83a59394f46ce282639d8d26ad6fc8094aa904c9c16eb1bac8908911f", size = 106595, upload-time = "2025-03-20T20:17:26.77Z" },
-]
-
-[[package]]
 name = "openapi-pydantic"
 version = "0.5.1"
 source = { registry = "https://pypi.org/simple" }
@@ -3300,35 +3292,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/02/2e/58d83848dd1a79cb92ed8e63f6ba901ca282c5f09d04af9423ec26c56fd7/openapi_pydantic-0.5.1.tar.gz", hash = "sha256:ff6835af6bde7a459fb93eb93bb92b8749b754fc6e51b2f1590a19dc3005ee0d", size = 60892, upload-time = "2025-01-08T19:29:27.083Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/12/cf/03675d8bd8ecbf4445504d8071adab19f5f993676795708e36402ab38263/openapi_pydantic-0.5.1-py3-none-any.whl", hash = "sha256:a3a09ef4586f5bd760a8df7f43028b60cafb6d9f61de2acba9574766255ab146", size = 96381, upload-time = "2025-01-08T19:29:25.275Z" },
-]
-
-[[package]]
-name = "openapi-schema-validator"
-version = "0.6.3"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "jsonschema", marker = "python_full_version < '3.14'" },
-    { name = "jsonschema-specifications", marker = "python_full_version < '3.14'" },
-    { name = "rfc3339-validator", marker = "python_full_version < '3.14'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/8b/f3/5507ad3325169347cd8ced61c232ff3df70e2b250c49f0fe140edb4973c6/openapi_schema_validator-0.6.3.tar.gz", hash = "sha256:f37bace4fc2a5d96692f4f8b31dc0f8d7400fd04f3a937798eaf880d425de6ee", size = 11550, upload-time = "2025-01-10T18:08:22.268Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/21/c6/ad0fba32775ae749016829dace42ed80f4407b171da41313d1a3a5f102e4/openapi_schema_validator-0.6.3-py3-none-any.whl", hash = "sha256:f3b9870f4e556b5a62a1c39da72a6b4b16f3ad9c73dc80084b1b11e74ba148a3", size = 8755, upload-time = "2025-01-10T18:08:19.758Z" },
-]
-
-[[package]]
-name = "openapi-spec-validator"
-version = "0.7.2"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "jsonschema", marker = "python_full_version < '3.14'" },
-    { name = "jsonschema-path", marker = "python_full_version < '3.14'" },
-    { name = "lazy-object-proxy", marker = "python_full_version < '3.14'" },
-    { name = "openapi-schema-validator", marker = "python_full_version < '3.14'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/82/af/fe2d7618d6eae6fb3a82766a44ed87cd8d6d82b4564ed1c7cfb0f6378e91/openapi_spec_validator-0.7.2.tar.gz", hash = "sha256:cc029309b5c5dbc7859df0372d55e9d1ff43e96d678b9ba087f7c56fc586f734", size = 36855, upload-time = "2025-06-07T14:48:56.299Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/27/dd/b3fd642260cb17532f66cc1e8250f3507d1e580483e209dc1e9d13bd980d/openapi_spec_validator-0.7.2-py3-none-any.whl", hash = "sha256:4bbdc0894ec85f1d1bea1d6d9c8b2c3c8d7ccaa13577ef40da9c006c9fd0eb60", size = 39713, upload-time = "2025-06-07T14:48:54.077Z" },
 ]
 
 [[package]]
@@ -3356,8 +3319,8 @@ name = "openhands-sdk"
 version = "1.0.0a5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "fastmcp", version = "2.12.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14'" },
     { name = "fastmcp", version = "2.13.0.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.14'" },
+    { name = "fastmcp", version = "3.2.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14'" },
     { name = "httpx" },
     { name = "litellm" },
     { name = "pydantic" },
@@ -3648,15 +3611,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/70/6f/3dd4940bbe001c06a65f88e36bad298bc7a0de5036115639926b0c5c0458/pandocfilters-1.5.1.tar.gz", hash = "sha256:002b4a555ee4ebc03f8b66307e287fa492e4a77b4ea14d3f934328297bb4939e", size = 8454, upload-time = "2024-01-18T20:08:13.726Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ef/af/4fbc8cab944db5d21b7e2a5b8e9211a03a79852b1157e2c102fcc61ac440/pandocfilters-1.5.1-py2.py3-none-any.whl", hash = "sha256:93be382804a9cdb0a7267585f157e5d1731bbe5545a85b268d6f5fe6232de2bc", size = 8663, upload-time = "2024-01-18T20:08:11.28Z" },
-]
-
-[[package]]
-name = "parse"
-version = "1.20.2"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/4f/78/d9b09ba24bb36ef8b83b71be547e118d46214735b6dfb39e4bfde0e9b9dd/parse-1.20.2.tar.gz", hash = "sha256:b41d604d16503c79d81af5165155c0b20f6c8d6c559efa66b4b695c3e5a0a0ce", size = 29391, upload-time = "2024-06-11T04:41:57.34Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/d0/31/ba45bf0b2aa7898d81cbbfac0e88c267befb59ad91a19e36e1bc5578ddb1/parse-1.20.2-py2.py3-none-any.whl", hash = "sha256:967095588cb802add9177d0c0b6133b5ba33b1ea9007ca800e526f42a85af558", size = 20126, upload-time = "2024-06-11T04:41:55.057Z" },
 ]
 
 [[package]]
@@ -4070,9 +4024,12 @@ wheels = [
 name = "py-key-value-aio"
 version = "0.2.8"
 source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.14'",
+]
 dependencies = [
-    { name = "beartype", marker = "python_full_version >= '3.14'" },
-    { name = "py-key-value-shared", marker = "python_full_version >= '3.14'" },
+    { name = "beartype" },
+    { name = "py-key-value-shared" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/ca/35/65310a4818acec0f87a46e5565e341c5a96fc062a9a03495ad28828ff4d7/py_key_value_aio-0.2.8.tar.gz", hash = "sha256:c0cfbb0bd4e962a3fa1a9fa6db9ba9df812899bd9312fa6368aaea7b26008b36", size = 32853, upload-time = "2025-10-24T13:31:04.688Z" }
 wheels = [
@@ -4081,14 +4038,43 @@ wheels = [
 
 [package.optional-dependencies]
 disk = [
-    { name = "diskcache", marker = "python_full_version >= '3.14'" },
-    { name = "pathvalidate", marker = "python_full_version >= '3.14'" },
+    { name = "diskcache" },
+    { name = "pathvalidate" },
 ]
 keyring = [
-    { name = "keyring", marker = "python_full_version >= '3.14'" },
+    { name = "keyring" },
 ]
 memory = [
-    { name = "cachetools", version = "6.2.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.14'" },
+    { name = "cachetools", version = "6.2.1", source = { registry = "https://pypi.org/simple" } },
+]
+
+[[package]]
+name = "py-key-value-aio"
+version = "0.4.6"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version == '3.13.*'",
+    "python_full_version < '3.13'",
+]
+dependencies = [
+    { name = "beartype" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ca/99/c346e3474853801ec5ecf4c3ee60cfc6060327ebc31424df4e346620dde4/py_key_value_aio-0.4.6.tar.gz", hash = "sha256:267c03c3e24cb99d3097612f8a5cfd8e11785c6a2975e272db0e303ea1850bfd", size = 112876, upload-time = "2026-09-18T15:29:52.002Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9a/46/12871550fb0613d149144bb9d41f22680d5f46717bc45a76eb5798c20c3f/py_key_value_aio-0.4.6-py3-none-any.whl", hash = "sha256:820b30c7959fc738ea3d00160cdb10cd258f51e38737b2add530defeea1ded77", size = 171289, upload-time = "2026-09-18T15:29:50.665Z" },
+]
+
+[package.optional-dependencies]
+filetree = [
+    { name = "aiofile" },
+    { name = "anyio" },
+]
+keyring = [
+    { name = "keyring" },
+]
+memory = [
+    { name = "cachetools", version = "5.5.2", source = { registry = "https://pypi.org/simple" } },
 ]
 
 [[package]]
@@ -4096,8 +4082,8 @@ name = "py-key-value-shared"
 version = "0.2.8"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "beartype", marker = "python_full_version >= '3.14'" },
-    { name = "typing-extensions", marker = "python_full_version >= '3.14'" },
+    { name = "beartype" },
+    { name = "typing-extensions" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/26/79/05a1f9280cfa0709479319cbfd2b1c5beb23d5034624f548c83fb65b0b61/py_key_value_shared-0.2.8.tar.gz", hash = "sha256:703b4d3c61af124f0d528ba85995c3c8d78f8bd3d2b217377bd3278598070cc1", size = 8216, upload-time = "2025-10-24T13:31:03.601Z" }
 wheels = [
@@ -4333,7 +4319,7 @@ wheels = [
 
 [package.optional-dependencies]
 crypto = [
-    { name = "cryptography", marker = "python_full_version >= '3.14'" },
+    { name = "cryptography" },
 ]
 
 [[package]]
@@ -4342,165 +4328,166 @@ version = "12.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pyobjc-core" },
-    { name = "pyobjc-framework-accessibility", marker = "platform_release >= '20.0'" },
-    { name = "pyobjc-framework-accounts", marker = "platform_release >= '12.0'" },
+    { name = "pyobjc-framework-accessibility", marker = "(platform_release >= '20.0' and sys_platform != 'darwin') or (platform_release >= '20' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-accounts", marker = "(platform_release >= '12.0' and sys_platform != 'darwin') or (platform_release >= '12' and sys_platform == 'darwin')" },
     { name = "pyobjc-framework-addressbook" },
-    { name = "pyobjc-framework-adservices", marker = "platform_release >= '20.0'" },
-    { name = "pyobjc-framework-adsupport", marker = "platform_release >= '18.0'" },
+    { name = "pyobjc-framework-adservices", marker = "(platform_release >= '20.0' and sys_platform != 'darwin') or (platform_release >= '20' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-adsupport", marker = "(platform_release >= '18.0' and sys_platform != 'darwin') or (platform_release >= '18' and sys_platform == 'darwin')" },
     { name = "pyobjc-framework-applescriptkit" },
-    { name = "pyobjc-framework-applescriptobjc", marker = "platform_release >= '10.0'" },
+    { name = "pyobjc-framework-applescriptobjc", marker = "(platform_release >= '10.0' and sys_platform != 'darwin') or (platform_release >= '10' and sys_platform == 'darwin')" },
     { name = "pyobjc-framework-applicationservices" },
-    { name = "pyobjc-framework-apptrackingtransparency", marker = "platform_release >= '20.0'" },
-    { name = "pyobjc-framework-arkit", marker = "platform_release >= '25.0'" },
-    { name = "pyobjc-framework-audiovideobridging", marker = "platform_release >= '12.0'" },
-    { name = "pyobjc-framework-authenticationservices", marker = "platform_release >= '19.0'" },
-    { name = "pyobjc-framework-automaticassessmentconfiguration", marker = "platform_release >= '19.0'" },
+    { name = "pyobjc-framework-apptrackingtransparency", marker = "(platform_release >= '20.0' and sys_platform != 'darwin') or (platform_release >= '20' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-arkit", marker = "(platform_release >= '25.0' and sys_platform != 'darwin') or (platform_release >= '25' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-audiovideobridging", marker = "(platform_release >= '12.0' and sys_platform != 'darwin') or (platform_release >= '12' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-authenticationservices", marker = "(platform_release >= '19.0' and sys_platform != 'darwin') or (platform_release >= '19' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-automaticassessmentconfiguration", marker = "(platform_release >= '19.0' and sys_platform != 'darwin') or (platform_release >= '19' and sys_platform == 'darwin')" },
     { name = "pyobjc-framework-automator" },
-    { name = "pyobjc-framework-avfoundation", marker = "platform_release >= '11.0'" },
-    { name = "pyobjc-framework-avkit", marker = "platform_release >= '13.0'" },
-    { name = "pyobjc-framework-avrouting", marker = "platform_release >= '22.0'" },
-    { name = "pyobjc-framework-backgroundassets", marker = "platform_release >= '22.0'" },
+    { name = "pyobjc-framework-avfoundation", marker = "(platform_release >= '11.0' and sys_platform != 'darwin') or (platform_release >= '11' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-avkit", marker = "(platform_release >= '13.0' and sys_platform != 'darwin') or (platform_release >= '13' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-avrouting", marker = "(platform_release >= '22.0' and sys_platform != 'darwin') or (platform_release >= '22' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-backgroundassets", marker = "(platform_release >= '22.0' and sys_platform != 'darwin') or (platform_release >= '22' and sys_platform == 'darwin')" },
     { name = "pyobjc-framework-browserenginekit", marker = "platform_release >= '23.4'" },
-    { name = "pyobjc-framework-businesschat", marker = "platform_release >= '18.0'" },
-    { name = "pyobjc-framework-calendarstore", marker = "platform_release >= '9.0'" },
-    { name = "pyobjc-framework-callkit", marker = "platform_release >= '20.0'" },
+    { name = "pyobjc-framework-businesschat", marker = "(platform_release >= '18.0' and sys_platform != 'darwin') or (platform_release >= '18' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-calendarstore", marker = "(platform_release >= '9.0' and sys_platform != 'darwin') or (platform_release >= '9' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-callkit", marker = "(platform_release >= '20.0' and sys_platform != 'darwin') or (platform_release >= '20' and sys_platform == 'darwin')" },
     { name = "pyobjc-framework-carbon" },
     { name = "pyobjc-framework-cfnetwork" },
-    { name = "pyobjc-framework-cinematic", marker = "platform_release >= '23.0'" },
-    { name = "pyobjc-framework-classkit", marker = "platform_release >= '20.0'" },
-    { name = "pyobjc-framework-cloudkit", marker = "platform_release >= '14.0'" },
+    { name = "pyobjc-framework-cinematic", marker = "(platform_release >= '23.0' and sys_platform != 'darwin') or (platform_release >= '23' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-classkit", marker = "(platform_release >= '20.0' and sys_platform != 'darwin') or (platform_release >= '20' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-cloudkit", marker = "(platform_release >= '14.0' and sys_platform != 'darwin') or (platform_release >= '14' and sys_platform == 'darwin')" },
     { name = "pyobjc-framework-cocoa" },
-    { name = "pyobjc-framework-collaboration", marker = "platform_release >= '9.0'" },
-    { name = "pyobjc-framework-colorsync", marker = "platform_release >= '17.0'" },
-    { name = "pyobjc-framework-compositorservices", marker = "platform_release >= '25.0'" },
-    { name = "pyobjc-framework-contacts", marker = "platform_release >= '15.0'" },
-    { name = "pyobjc-framework-contactsui", marker = "platform_release >= '15.0'" },
+    { name = "pyobjc-framework-collaboration", marker = "(platform_release >= '9.0' and sys_platform != 'darwin') or (platform_release >= '9' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-colorsync", marker = "(platform_release >= '17.0' and sys_platform != 'darwin') or (platform_release >= '17' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-compositorservices", marker = "(platform_release >= '25.0' and sys_platform != 'darwin') or (platform_release >= '25' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-contacts", marker = "(platform_release >= '15.0' and sys_platform != 'darwin') or (platform_release >= '15' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-contactsui", marker = "(platform_release >= '15.0' and sys_platform != 'darwin') or (platform_release >= '15' and sys_platform == 'darwin')" },
     { name = "pyobjc-framework-coreaudio" },
     { name = "pyobjc-framework-coreaudiokit" },
-    { name = "pyobjc-framework-corebluetooth", marker = "platform_release >= '14.0'" },
+    { name = "pyobjc-framework-corebluetooth", marker = "(platform_release >= '14.0' and sys_platform != 'darwin') or (platform_release >= '14' and sys_platform == 'darwin')" },
     { name = "pyobjc-framework-coredata" },
-    { name = "pyobjc-framework-corehaptics", marker = "platform_release >= '19.0'" },
-    { name = "pyobjc-framework-corelocation", marker = "platform_release >= '10.0'" },
-    { name = "pyobjc-framework-coremedia", marker = "platform_release >= '11.0'" },
-    { name = "pyobjc-framework-coremediaio", marker = "platform_release >= '11.0'" },
+    { name = "pyobjc-framework-corehaptics", marker = "(platform_release >= '19.0' and sys_platform != 'darwin') or (platform_release >= '19' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-corelocation", marker = "(platform_release >= '10.0' and sys_platform != 'darwin') or (platform_release >= '10' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-coremedia", marker = "(platform_release >= '11.0' and sys_platform != 'darwin') or (platform_release >= '11' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-coremediaio", marker = "(platform_release >= '11.0' and sys_platform != 'darwin') or (platform_release >= '11' and sys_platform == 'darwin')" },
     { name = "pyobjc-framework-coremidi" },
-    { name = "pyobjc-framework-coreml", marker = "platform_release >= '17.0'" },
-    { name = "pyobjc-framework-coremotion", marker = "platform_release >= '19.0'" },
+    { name = "pyobjc-framework-coreml", marker = "(platform_release >= '17.0' and sys_platform != 'darwin') or (platform_release >= '17' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-coremotion", marker = "(platform_release >= '19.0' and sys_platform != 'darwin') or (platform_release >= '19' and sys_platform == 'darwin')" },
     { name = "pyobjc-framework-coreservices" },
-    { name = "pyobjc-framework-corespotlight", marker = "platform_release >= '17.0'" },
+    { name = "pyobjc-framework-corespotlight", marker = "(platform_release >= '17.0' and sys_platform != 'darwin') or (platform_release >= '17' and sys_platform == 'darwin')" },
     { name = "pyobjc-framework-coretext" },
-    { name = "pyobjc-framework-corewlan", marker = "platform_release >= '10.0'" },
-    { name = "pyobjc-framework-cryptotokenkit", marker = "platform_release >= '14.0'" },
-    { name = "pyobjc-framework-datadetection", marker = "platform_release >= '21.0'" },
-    { name = "pyobjc-framework-devicecheck", marker = "platform_release >= '19.0'" },
-    { name = "pyobjc-framework-devicediscoveryextension", marker = "platform_release >= '24.0'" },
-    { name = "pyobjc-framework-dictionaryservices", marker = "platform_release >= '9.0'" },
+    { name = "pyobjc-framework-corewlan", marker = "(platform_release >= '10.0' and sys_platform != 'darwin') or (platform_release >= '10' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-cryptotokenkit", marker = "(platform_release >= '14.0' and sys_platform != 'darwin') or (platform_release >= '14' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-datadetection", marker = "(platform_release >= '21.0' and sys_platform != 'darwin') or (platform_release >= '21' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-devicecheck", marker = "(platform_release >= '19.0' and sys_platform != 'darwin') or (platform_release >= '19' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-devicediscoveryextension", marker = "(platform_release >= '24.0' and sys_platform != 'darwin') or (platform_release >= '24' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-dictionaryservices", marker = "(platform_release >= '9.0' and sys_platform != 'darwin') or (platform_release >= '9' and sys_platform == 'darwin')" },
     { name = "pyobjc-framework-discrecording" },
     { name = "pyobjc-framework-discrecordingui" },
     { name = "pyobjc-framework-diskarbitration" },
     { name = "pyobjc-framework-dvdplayback" },
-    { name = "pyobjc-framework-eventkit", marker = "platform_release >= '12.0'" },
+    { name = "pyobjc-framework-eventkit", marker = "(platform_release >= '12.0' and sys_platform != 'darwin') or (platform_release >= '12' and sys_platform == 'darwin')" },
     { name = "pyobjc-framework-exceptionhandling" },
-    { name = "pyobjc-framework-executionpolicy", marker = "platform_release >= '19.0'" },
-    { name = "pyobjc-framework-extensionkit", marker = "platform_release >= '22.0'" },
-    { name = "pyobjc-framework-externalaccessory", marker = "platform_release >= '17.0'" },
-    { name = "pyobjc-framework-fileprovider", marker = "platform_release >= '19.0'" },
-    { name = "pyobjc-framework-fileproviderui", marker = "platform_release >= '19.0'" },
-    { name = "pyobjc-framework-findersync", marker = "platform_release >= '14.0'" },
-    { name = "pyobjc-framework-fsevents", marker = "platform_release >= '9.0'" },
+    { name = "pyobjc-framework-executionpolicy", marker = "(platform_release >= '19.0' and sys_platform != 'darwin') or (platform_release >= '19' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-extensionkit", marker = "(platform_release >= '22.0' and sys_platform != 'darwin') or (platform_release >= '22' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-externalaccessory", marker = "(platform_release >= '17.0' and sys_platform != 'darwin') or (platform_release >= '17' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-fileprovider", marker = "(platform_release >= '19.0' and sys_platform != 'darwin') or (platform_release >= '19' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-fileproviderui", marker = "(platform_release >= '19.0' and sys_platform != 'darwin') or (platform_release >= '19' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-findersync", marker = "(platform_release >= '14.0' and sys_platform != 'darwin') or (platform_release >= '14' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-fsevents", marker = "(platform_release >= '9.0' and sys_platform != 'darwin') or (platform_release >= '9' and sys_platform == 'darwin')" },
     { name = "pyobjc-framework-fskit", marker = "platform_release >= '24.4'" },
-    { name = "pyobjc-framework-gamecenter", marker = "platform_release >= '12.0'" },
-    { name = "pyobjc-framework-gamecontroller", marker = "platform_release >= '13.0'" },
-    { name = "pyobjc-framework-gamekit", marker = "platform_release >= '12.0'" },
-    { name = "pyobjc-framework-gameplaykit", marker = "platform_release >= '15.0'" },
-    { name = "pyobjc-framework-gamesave", marker = "platform_release >= '25.0'" },
-    { name = "pyobjc-framework-healthkit", marker = "platform_release >= '22.0'" },
-    { name = "pyobjc-framework-imagecapturecore", marker = "platform_release >= '10.0'" },
-    { name = "pyobjc-framework-inputmethodkit", marker = "platform_release >= '9.0'" },
+    { name = "pyobjc-framework-gamecenter", marker = "(platform_release >= '12.0' and sys_platform != 'darwin') or (platform_release >= '12' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-gamecontroller", marker = "(platform_release >= '13.0' and sys_platform != 'darwin') or (platform_release >= '13' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-gamekit", marker = "(platform_release >= '12.0' and sys_platform != 'darwin') or (platform_release >= '12' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-gameplaykit", marker = "(platform_release >= '15.0' and sys_platform != 'darwin') or (platform_release >= '15' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-gamesave", marker = "(platform_release >= '25.0' and sys_platform != 'darwin') or (platform_release >= '25' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-healthkit", marker = "(platform_release >= '22.0' and sys_platform != 'darwin') or (platform_release >= '22' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-imagecapturecore", marker = "(platform_release >= '10.0' and sys_platform != 'darwin') or (platform_release >= '10' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-inputmethodkit", marker = "(platform_release >= '9.0' and sys_platform != 'darwin') or (platform_release >= '9' and sys_platform == 'darwin')" },
     { name = "pyobjc-framework-installerplugins" },
-    { name = "pyobjc-framework-instantmessage", marker = "platform_release >= '9.0'" },
-    { name = "pyobjc-framework-intents", marker = "platform_release >= '16.0'" },
-    { name = "pyobjc-framework-intentsui", marker = "platform_release >= '21.0'" },
+    { name = "pyobjc-framework-instantmessage", marker = "(platform_release >= '9.0' and sys_platform != 'darwin') or (platform_release >= '9' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-intents", marker = "(platform_release >= '16.0' and sys_platform != 'darwin') or (platform_release >= '16' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-intentsui", marker = "(platform_release >= '21.0' and sys_platform != 'darwin') or (platform_release >= '21' and sys_platform == 'darwin')" },
     { name = "pyobjc-framework-iobluetooth" },
     { name = "pyobjc-framework-iobluetoothui" },
-    { name = "pyobjc-framework-iosurface", marker = "platform_release >= '10.0'" },
-    { name = "pyobjc-framework-ituneslibrary", marker = "platform_release >= '10.0'" },
-    { name = "pyobjc-framework-kernelmanagement", marker = "platform_release >= '20.0'" },
+    { name = "pyobjc-framework-iosurface", marker = "(platform_release >= '10.0' and sys_platform != 'darwin') or (platform_release >= '10' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-ituneslibrary", marker = "(platform_release >= '10.0' and sys_platform != 'darwin') or (platform_release >= '10' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-kernelmanagement", marker = "(platform_release >= '20.0' and sys_platform != 'darwin') or (platform_release >= '20' and sys_platform == 'darwin')" },
     { name = "pyobjc-framework-latentsemanticmapping" },
     { name = "pyobjc-framework-launchservices" },
-    { name = "pyobjc-framework-libdispatch", marker = "platform_release >= '12.0'" },
-    { name = "pyobjc-framework-libxpc", marker = "platform_release >= '12.0'" },
-    { name = "pyobjc-framework-linkpresentation", marker = "platform_release >= '19.0'" },
-    { name = "pyobjc-framework-localauthentication", marker = "platform_release >= '14.0'" },
-    { name = "pyobjc-framework-localauthenticationembeddedui", marker = "platform_release >= '21.0'" },
-    { name = "pyobjc-framework-mailkit", marker = "platform_release >= '21.0'" },
-    { name = "pyobjc-framework-mapkit", marker = "platform_release >= '13.0'" },
-    { name = "pyobjc-framework-mediaaccessibility", marker = "platform_release >= '13.0'" },
-    { name = "pyobjc-framework-mediaextension", marker = "platform_release >= '24.0'" },
-    { name = "pyobjc-framework-medialibrary", marker = "platform_release >= '13.0'" },
-    { name = "pyobjc-framework-mediaplayer", marker = "platform_release >= '16.0'" },
-    { name = "pyobjc-framework-mediatoolbox", marker = "platform_release >= '13.0'" },
-    { name = "pyobjc-framework-metal", marker = "platform_release >= '15.0'" },
-    { name = "pyobjc-framework-metalfx", marker = "platform_release >= '22.0'" },
-    { name = "pyobjc-framework-metalkit", marker = "platform_release >= '15.0'" },
-    { name = "pyobjc-framework-metalperformanceshaders", marker = "platform_release >= '17.0'" },
-    { name = "pyobjc-framework-metalperformanceshadersgraph", marker = "platform_release >= '20.0'" },
-    { name = "pyobjc-framework-metrickit", marker = "platform_release >= '21.0'" },
-    { name = "pyobjc-framework-mlcompute", marker = "platform_release >= '20.0'" },
-    { name = "pyobjc-framework-modelio", marker = "platform_release >= '15.0'" },
-    { name = "pyobjc-framework-multipeerconnectivity", marker = "platform_release >= '14.0'" },
-    { name = "pyobjc-framework-naturallanguage", marker = "platform_release >= '18.0'" },
-    { name = "pyobjc-framework-netfs", marker = "platform_release >= '10.0'" },
-    { name = "pyobjc-framework-network", marker = "platform_release >= '18.0'" },
-    { name = "pyobjc-framework-networkextension", marker = "platform_release >= '15.0'" },
-    { name = "pyobjc-framework-notificationcenter", marker = "platform_release >= '14.0'" },
-    { name = "pyobjc-framework-opendirectory", marker = "platform_release >= '10.0'" },
+    { name = "pyobjc-framework-libdispatch", marker = "(platform_release >= '12.0' and sys_platform != 'darwin') or (platform_release >= '12' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-libxpc", marker = "(platform_release >= '12.0' and sys_platform != 'darwin') or (platform_release >= '12' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-linkpresentation", marker = "(platform_release >= '19.0' and sys_platform != 'darwin') or (platform_release >= '19' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-localauthentication", marker = "(platform_release >= '14.0' and sys_platform != 'darwin') or (platform_release >= '14' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-localauthenticationembeddedui", marker = "(platform_release >= '21.0' and sys_platform != 'darwin') or (platform_release >= '21' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-mailkit", marker = "(platform_release >= '21.0' and sys_platform != 'darwin') or (platform_release >= '21' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-mapkit", marker = "(platform_release >= '13.0' and sys_platform != 'darwin') or (platform_release >= '13' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-mediaaccessibility", marker = "(platform_release >= '13.0' and sys_platform != 'darwin') or (platform_release >= '13' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-mediaextension", marker = "(platform_release >= '24.0' and sys_platform != 'darwin') or (platform_release >= '24' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-medialibrary", marker = "(platform_release >= '13.0' and sys_platform != 'darwin') or (platform_release >= '13' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-mediaplayer", marker = "(platform_release >= '16.0' and sys_platform != 'darwin') or (platform_release >= '16' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-mediatoolbox", marker = "(platform_release >= '13.0' and sys_platform != 'darwin') or (platform_release >= '13' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-metal", marker = "(platform_release >= '15.0' and sys_platform != 'darwin') or (platform_release >= '15' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-metalfx", marker = "(platform_release >= '22.0' and sys_platform != 'darwin') or (platform_release >= '22' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-metalkit", marker = "(platform_release >= '15.0' and sys_platform != 'darwin') or (platform_release >= '15' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-metalperformanceshaders", marker = "(platform_release >= '17.0' and sys_platform != 'darwin') or (platform_release >= '17' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-metalperformanceshadersgraph", marker = "(platform_release >= '20.0' and sys_platform != 'darwin') or (platform_release >= '20' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-metrickit", marker = "(platform_release >= '21.0' and sys_platform != 'darwin') or (platform_release >= '21' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-mlcompute", marker = "(platform_release >= '20.0' and sys_platform != 'darwin') or (platform_release >= '20' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-modelio", marker = "(platform_release >= '15.0' and sys_platform != 'darwin') or (platform_release >= '15' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-multipeerconnectivity", marker = "(platform_release >= '14.0' and sys_platform != 'darwin') or (platform_release >= '14' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-naturallanguage", marker = "(platform_release >= '18.0' and sys_platform != 'darwin') or (platform_release >= '18' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-netfs", marker = "(platform_release >= '10.0' and sys_platform != 'darwin') or (platform_release >= '10' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-network", marker = "(platform_release >= '18.0' and sys_platform != 'darwin') or (platform_release >= '18' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-networkextension", marker = "(platform_release >= '15.0' and sys_platform != 'darwin') or (platform_release >= '15' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-notificationcenter", marker = "(platform_release >= '14.0' and sys_platform != 'darwin') or (platform_release >= '14' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-opendirectory", marker = "(platform_release >= '10.0' and sys_platform != 'darwin') or (platform_release >= '10' and sys_platform == 'darwin')" },
     { name = "pyobjc-framework-osakit" },
-    { name = "pyobjc-framework-oslog", marker = "platform_release >= '19.0'" },
-    { name = "pyobjc-framework-passkit", marker = "platform_release >= '20.0'" },
-    { name = "pyobjc-framework-pencilkit", marker = "platform_release >= '19.0'" },
-    { name = "pyobjc-framework-phase", marker = "platform_release >= '21.0'" },
-    { name = "pyobjc-framework-photos", marker = "platform_release >= '15.0'" },
-    { name = "pyobjc-framework-photosui", marker = "platform_release >= '15.0'" },
+    { name = "pyobjc-framework-oslog", marker = "(platform_release >= '19.0' and sys_platform != 'darwin') or (platform_release >= '19' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-passkit", marker = "(platform_release >= '20.0' and sys_platform != 'darwin') or (platform_release >= '20' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-pencilkit", marker = "(platform_release >= '19.0' and sys_platform != 'darwin') or (platform_release >= '19' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-phase", marker = "(platform_release >= '21.0' and sys_platform != 'darwin') or (platform_release >= '21' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-photos", marker = "(platform_release >= '15.0' and sys_platform != 'darwin') or (platform_release >= '15' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-photosui", marker = "(platform_release >= '15.0' and sys_platform != 'darwin') or (platform_release >= '15' and sys_platform == 'darwin')" },
     { name = "pyobjc-framework-preferencepanes" },
-    { name = "pyobjc-framework-pushkit", marker = "platform_release >= '19.0'" },
+    { name = "pyobjc-framework-pubsub", marker = "platform_release >= '9' and platform_release < '18' and sys_platform == 'darwin'" },
+    { name = "pyobjc-framework-pushkit", marker = "(platform_release >= '19.0' and sys_platform != 'darwin') or (platform_release >= '19' and sys_platform == 'darwin')" },
     { name = "pyobjc-framework-quartz" },
-    { name = "pyobjc-framework-quicklookthumbnailing", marker = "platform_release >= '19.0'" },
-    { name = "pyobjc-framework-replaykit", marker = "platform_release >= '20.0'" },
-    { name = "pyobjc-framework-safariservices", marker = "platform_release >= '16.0'" },
-    { name = "pyobjc-framework-safetykit", marker = "platform_release >= '22.0'" },
-    { name = "pyobjc-framework-scenekit", marker = "platform_release >= '11.0'" },
+    { name = "pyobjc-framework-quicklookthumbnailing", marker = "(platform_release >= '19.0' and sys_platform != 'darwin') or (platform_release >= '19' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-replaykit", marker = "(platform_release >= '20.0' and sys_platform != 'darwin') or (platform_release >= '20' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-safariservices", marker = "(platform_release >= '16.0' and sys_platform != 'darwin') or (platform_release >= '16' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-safetykit", marker = "(platform_release >= '22.0' and sys_platform != 'darwin') or (platform_release >= '22' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-scenekit", marker = "(platform_release >= '11.0' and sys_platform != 'darwin') or (platform_release >= '11' and sys_platform == 'darwin')" },
     { name = "pyobjc-framework-screencapturekit", marker = "platform_release >= '21.4'" },
     { name = "pyobjc-framework-screensaver" },
-    { name = "pyobjc-framework-screentime", marker = "platform_release >= '20.0'" },
-    { name = "pyobjc-framework-scriptingbridge", marker = "platform_release >= '9.0'" },
+    { name = "pyobjc-framework-screentime", marker = "(platform_release >= '20.0' and sys_platform != 'darwin') or (platform_release >= '20' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-scriptingbridge", marker = "(platform_release >= '9.0' and sys_platform != 'darwin') or (platform_release >= '9' and sys_platform == 'darwin')" },
     { name = "pyobjc-framework-searchkit" },
     { name = "pyobjc-framework-security" },
     { name = "pyobjc-framework-securityfoundation" },
     { name = "pyobjc-framework-securityinterface" },
     { name = "pyobjc-framework-securityui", marker = "platform_release >= '24.4'" },
-    { name = "pyobjc-framework-sensitivecontentanalysis", marker = "platform_release >= '23.0'" },
-    { name = "pyobjc-framework-servicemanagement", marker = "platform_release >= '10.0'" },
-    { name = "pyobjc-framework-sharedwithyou", marker = "platform_release >= '22.0'" },
-    { name = "pyobjc-framework-sharedwithyoucore", marker = "platform_release >= '22.0'" },
-    { name = "pyobjc-framework-shazamkit", marker = "platform_release >= '21.0'" },
-    { name = "pyobjc-framework-social", marker = "platform_release >= '12.0'" },
-    { name = "pyobjc-framework-soundanalysis", marker = "platform_release >= '19.0'" },
-    { name = "pyobjc-framework-speech", marker = "platform_release >= '19.0'" },
-    { name = "pyobjc-framework-spritekit", marker = "platform_release >= '13.0'" },
-    { name = "pyobjc-framework-storekit", marker = "platform_release >= '11.0'" },
-    { name = "pyobjc-framework-symbols", marker = "platform_release >= '23.0'" },
+    { name = "pyobjc-framework-sensitivecontentanalysis", marker = "(platform_release >= '23.0' and sys_platform != 'darwin') or (platform_release >= '23' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-servicemanagement", marker = "(platform_release >= '10.0' and sys_platform != 'darwin') or (platform_release >= '10' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-sharedwithyou", marker = "(platform_release >= '22.0' and sys_platform != 'darwin') or (platform_release >= '22' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-sharedwithyoucore", marker = "(platform_release >= '22.0' and sys_platform != 'darwin') or (platform_release >= '22' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-shazamkit", marker = "(platform_release >= '21.0' and sys_platform != 'darwin') or (platform_release >= '21' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-social", marker = "(platform_release >= '12.0' and sys_platform != 'darwin') or (platform_release >= '12' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-soundanalysis", marker = "(platform_release >= '19.0' and sys_platform != 'darwin') or (platform_release >= '19' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-speech", marker = "(platform_release >= '19.0' and sys_platform != 'darwin') or (platform_release >= '19' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-spritekit", marker = "(platform_release >= '13.0' and sys_platform != 'darwin') or (platform_release >= '13' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-storekit", marker = "(platform_release >= '11.0' and sys_platform != 'darwin') or (platform_release >= '11' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-symbols", marker = "(platform_release >= '23.0' and sys_platform != 'darwin') or (platform_release >= '23' and sys_platform == 'darwin')" },
     { name = "pyobjc-framework-syncservices" },
     { name = "pyobjc-framework-systemconfiguration" },
-    { name = "pyobjc-framework-systemextensions", marker = "platform_release >= '19.0'" },
-    { name = "pyobjc-framework-threadnetwork", marker = "platform_release >= '22.0'" },
-    { name = "pyobjc-framework-uniformtypeidentifiers", marker = "platform_release >= '20.0'" },
-    { name = "pyobjc-framework-usernotifications", marker = "platform_release >= '18.0'" },
-    { name = "pyobjc-framework-usernotificationsui", marker = "platform_release >= '20.0'" },
-    { name = "pyobjc-framework-videosubscriberaccount", marker = "platform_release >= '18.0'" },
-    { name = "pyobjc-framework-videotoolbox", marker = "platform_release >= '12.0'" },
-    { name = "pyobjc-framework-virtualization", marker = "platform_release >= '20.0'" },
-    { name = "pyobjc-framework-vision", marker = "platform_release >= '17.0'" },
+    { name = "pyobjc-framework-systemextensions", marker = "(platform_release >= '19.0' and sys_platform != 'darwin') or (platform_release >= '19' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-threadnetwork", marker = "(platform_release >= '22.0' and sys_platform != 'darwin') or (platform_release >= '22' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-uniformtypeidentifiers", marker = "(platform_release >= '20.0' and sys_platform != 'darwin') or (platform_release >= '20' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-usernotifications", marker = "(platform_release >= '18.0' and sys_platform != 'darwin') or (platform_release >= '18' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-usernotificationsui", marker = "(platform_release >= '20.0' and sys_platform != 'darwin') or (platform_release >= '20' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-videosubscriberaccount", marker = "(platform_release >= '18.0' and sys_platform != 'darwin') or (platform_release >= '18' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-videotoolbox", marker = "(platform_release >= '12.0' and sys_platform != 'darwin') or (platform_release >= '12' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-virtualization", marker = "(platform_release >= '20.0' and sys_platform != 'darwin') or (platform_release >= '20' and sys_platform == 'darwin')" },
+    { name = "pyobjc-framework-vision", marker = "(platform_release >= '17.0' and sys_platform != 'darwin') or (platform_release >= '17' and sys_platform == 'darwin')" },
     { name = "pyobjc-framework-webkit" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/36/0f/0b21447c9461905022aab2f19626e94a0b00eee9c6d3593a5ab425f7a42e/pyobjc-12.0.tar.gz", hash = "sha256:ce6b7c68889722248250d1b4daac28272100634e3a9826affdbd6f36a0dc52b2", size = 11236, upload-time = "2025-10-21T08:25:05.018Z" }
@@ -6407,6 +6394,19 @@ wheels = [
 ]
 
 [[package]]
+name = "pyobjc-framework-pubsub"
+version = "12.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyobjc-core" },
+    { name = "pyobjc-framework-cocoa" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/93/ea/01eb0ea1961ac5f050dffbf9a4b892a7c623779070a3df25b3033f577727/pyobjc_framework_pubsub-12.0.tar.gz", hash = "sha256:023cc67f69a4e0d3dab3644f73dccab50c56ed966cb6bc1183369f66018020fc", size = 15481, upload-time = "2025-10-21T08:36:42.962Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4c/7a/deee58db2850dc951c6b283ea2a6928b2993df8debff2f634189dc34170e/pyobjc_framework_pubsub-12.0-py2.py3-none-any.whl", hash = "sha256:5cb334d5dd1b42c4968ec1cf39863c9f7ae11c0fb877cfdb57fd834895659a4d", size = 5235, upload-time = "2025-10-21T08:16:47.109Z" },
+]
+
+[[package]]
 name = "pyobjc-framework-pushkit"
 version = "12.0"
 source = { registry = "https://pypi.org/simple" }
@@ -7875,8 +7875,8 @@ name = "secretstorage"
 version = "3.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cryptography", marker = "python_full_version >= '3.14'" },
-    { name = "jeepney", marker = "python_full_version >= '3.14'" },
+    { name = "cryptography" },
+    { name = "jeepney" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/31/9f/11ef35cf1027c1339552ea7bfe6aaa74a8516d8b5caf6e7d338daf54fd80/secretstorage-3.4.0.tar.gz", hash = "sha256:c46e216d6815aff8a8a18706a2fbfd8d53fcbb0dce99301881687a1b0289ef7c", size = 19748, upload-time = "2025-09-09T16:42:13.859Z" }
 wheels = [
@@ -8777,6 +8777,15 @@ wheels = [
 ]
 
 [[package]]
+name = "uncalled-for"
+version = "0.4.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/6c/54/4651e4c5fe84300f8e03c0390aaad41bcb9c7b81d7783542a3ee690b40ee/uncalled_for-0.4.1.tar.gz", hash = "sha256:6412b19d1b1e7d431981fee01f8b47be7802f48328a48cbe9603acee757ec553", size = 56971, upload-time = "2026-10-09T12:54:34.941Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/bf/a6/ba763e3812e572de7291676c3a41adfac1ef1209a6acda6bae055970f127/uncalled_for-0.4.1-py3-none-any.whl", hash = "sha256:b611b38879d9fe5088297e7bb28f2ddd12d2d73dad933d93da107fb63eb4058e", size = 14889, upload-time = "2026-10-09T12:54:33.596Z" },
+]
+
+[[package]]
 name = "universal-pathlib"
 version = "0.3.4"
 source = { registry = "https://pypi.org/simple" }
@@ -8887,6 +8896,45 @@ wheels = [
 ]
 
 [[package]]
+name = "watchfiles"
+version = "1.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b3/68/e6aa0b77d217b31f8f486ec0cdfe5e00e6e38dc0be657e7d85819b9faf0a/watchfiles-1.3.0.tar.gz", hash = "sha256:99aee4a07847c06820765fd7b1b49ceac4f3f711ccb7d104655a33231de1c207", size = 108119, upload-time = "2026-09-21T09:08:55.664Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/68/fa/c0b840d5d8bafe640925408ce11095948c8945bb61be1e67d0ab629b872a/watchfiles-1.3.0-cp310-abi3-macosx_10_12_x86_64.whl", hash = "sha256:000b9688fc8133037a8b075c8ebf98f32844ff8964dda61e85c1db547dafc441", size = 399703, upload-time = "2026-09-21T09:08:13.518Z" },
+    { url = "https://files.pythonhosted.org/packages/c7/8a/894799b485fe9473ad10422a0d9668e53fb78e3a2b5cc6061159572844ad/watchfiles-1.3.0-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:bbc1198edfdc90fda0600f825aa94150f428dfcbf8138746f55998e0e660d64c", size = 397647, upload-time = "2026-09-21T09:08:15.16Z" },
+    { url = "https://files.pythonhosted.org/packages/5a/61/f277cd5ead05f5d37b98b41fbdd0c943ee0c04d49738f62e902cb291cf43/watchfiles-1.3.0-cp310-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:4af9c464d410e8c44b58ddf1cbec7c3a02c1cb2c6c80df9c74659ba2fbda0ab5", size = 454994, upload-time = "2026-09-21T09:08:16.587Z" },
+    { url = "https://files.pythonhosted.org/packages/46/66/ea4c01382975e53b1ac1b0a0ea1b353416b8127fb6e04f5c1c313119aab6/watchfiles-1.3.0-cp310-abi3-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:eb94e40b9a0db19636b5e3fed0a9803452ecc7381df13b385272abb779ee83ca", size = 460105, upload-time = "2026-09-21T09:08:17.961Z" },
+    { url = "https://files.pythonhosted.org/packages/31/c3/1a501b597817096c9831c255f6270c124ce0e2faeb74124be24dcc93b86d/watchfiles-1.3.0-cp310-abi3-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:7398930a2b76b9dc67a4e6b8bfc7baf30946892a86f417a3920c07bdd6febc30", size = 493761, upload-time = "2026-09-21T09:08:19.327Z" },
+    { url = "https://files.pythonhosted.org/packages/5a/16/77352d05e152c7786a016e9f1decdb4507e8aa5bcf3343c72142a0413d14/watchfiles-1.3.0-cp310-abi3-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl", hash = "sha256:025b108f2d5cc2799cb941f79380df3e8b22bfb589c218e801767fe78d598c95", size = 577500, upload-time = "2026-09-21T09:08:20.723Z" },
+    { url = "https://files.pythonhosted.org/packages/95/fe/81001c55b24466fe9911135e50269fd3a29f43e446627a92adfab54553b6/watchfiles-1.3.0-cp310-abi3-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:be9ef3cd403d756a304a0a08a112163c63da7ec72c8c9d083c98818291ff8f29", size = 469209, upload-time = "2026-09-21T09:08:22.346Z" },
+    { url = "https://files.pythonhosted.org/packages/8a/cf/e3ad894ed5909a7c44b0707e89bc25d19a3d78b3a7aec846119443b6ae56/watchfiles-1.3.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:b5768b49e426fd5b550b012c866db347cdf15c398ef98dc557b6e6b72fa74cd1", size = 458353, upload-time = "2026-09-21T09:08:23.7Z" },
+    { url = "https://files.pythonhosted.org/packages/7f/f5/2f106829e6e2bc91ad74614730f6df484202b9a4d20d927dbf2f08d37d44/watchfiles-1.3.0-cp310-abi3-manylinux_2_31_riscv64.whl", hash = "sha256:d36c72fcdc08f143d87316a4c4c3b064e340da2c7383d39803950740ed418935", size = 468707, upload-time = "2026-09-21T09:08:25.167Z" },
+    { url = "https://files.pythonhosted.org/packages/15/37/2741ab776b978669c1f3bba1e573f1a184f727ab8b4d3a6d9c61090800ed/watchfiles-1.3.0-cp310-abi3-musllinux_1_1_aarch64.whl", hash = "sha256:f0c9865240e065a2247f4b5248528ae3d01e0e8ae071462c250c884dc16e3ee3", size = 632510, upload-time = "2026-09-21T09:08:26.532Z" },
+    { url = "https://files.pythonhosted.org/packages/48/64/db4a4684275fe9b696ee5118c194705c1423b3d42181c3f8ee70194d5c73/watchfiles-1.3.0-cp310-abi3-musllinux_1_1_x86_64.whl", hash = "sha256:380f513d26cc2e598266b88d66456e07d67ef4be8f0f435a1154d9c44b43d509", size = 661723, upload-time = "2026-09-21T09:08:28.004Z" },
+    { url = "https://files.pythonhosted.org/packages/52/80/95ddb24f6a2f595c031c24432ab7b8aa7d6d1ada0c6d63a552166e06e8d1/watchfiles-1.3.0-cp310-abi3-win32.whl", hash = "sha256:509d9f74d2bec5c1f4cd868ddcfe0c9601f7ea53066dfcb19d8ede742c4de661", size = 277761, upload-time = "2026-09-21T09:08:29.335Z" },
+    { url = "https://files.pythonhosted.org/packages/48/a1/1c4a1b3c8030cd03206232612be8a6e8799093490c220b0fcb935d02b75a/watchfiles-1.3.0-cp310-abi3-win_amd64.whl", hash = "sha256:1acabde19b67e673274e89a04d613b7fb1f122e2c4b8ec9a581e59c149264b61", size = 290643, upload-time = "2026-09-21T09:08:30.45Z" },
+    { url = "https://files.pythonhosted.org/packages/82/e0/d2db577c632d26d08078c4390dd870b8555c4e558df25d22270f0166c71f/watchfiles-1.3.0-cp310-abi3-win_arm64.whl", hash = "sha256:d978cc1dd7ba44f5590d7de74f7a9c8be7262d9e469c2c0efb8bbfc2574321dc", size = 285510, upload-time = "2026-09-21T09:08:31.561Z" },
+    { url = "https://files.pythonhosted.org/packages/4f/55/a122743607939429ab6a7272672f49303aa02bbd34c3f06676765a3861de/watchfiles-1.3.0-cp314-cp314t-macosx_10_12_x86_64.whl", hash = "sha256:e0204f90677b7fb8d3a824279a71a01166bea9f6e53923b8056592d87b33b0b6", size = 395978, upload-time = "2026-09-21T09:08:32.747Z" },
+    { url = "https://files.pythonhosted.org/packages/3e/9d/0ee1b0ea42acfe72afa2484f0222e2386dd09992e9034a81e63cc3cdab0a/watchfiles-1.3.0-cp314-cp314t-macosx_11_0_arm64.whl", hash = "sha256:7c1125e99f84934a92996ae343501285617373acd66f16b59fd5654b27ad8d80", size = 387997, upload-time = "2026-09-21T09:08:33.953Z" },
+    { url = "https://files.pythonhosted.org/packages/b7/f2/4319c6b683e8bd28465dfc53c750617a2a07f072eb2e3ab0182ccf812229/watchfiles-1.3.0-cp314-cp314t-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:a85e243c87109d9f48a2e0d10d6abdee8768cc114848b32281ec83d7f81d86ef", size = 448067, upload-time = "2026-09-21T09:08:35.104Z" },
+    { url = "https://files.pythonhosted.org/packages/b7/71/9f37ac192a51a24de3a2d7fe9aac1e99b2b2668300674ff7a9f85d95beb1/watchfiles-1.3.0-cp314-cp314t-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:dd538c71766c59c732e2c5cedc39323c99c11897b99f93eac773438e54af206a", size = 452881, upload-time = "2026-09-21T09:08:36.238Z" },
+    { url = "https://files.pythonhosted.org/packages/34/07/1224667c32a4a96876ddd642da69733cbfe6a15897db0865aec5a882cebc/watchfiles-1.3.0-cp314-cp314t-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:da213822ec9082b62cadf3008e07a8c690ec7a3c89f6dc5e55a8cf07b56a1b26", size = 484802, upload-time = "2026-09-21T09:08:37.717Z" },
+    { url = "https://files.pythonhosted.org/packages/bd/4d/7f29cd87e1f826df86fc0418d0b8f370ca0311c29c618406dc492aad9951/watchfiles-1.3.0-cp314-cp314t-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl", hash = "sha256:d4593392e87669836670f87d62fc754059eaeb0e6157af44060a46558cebe5a3", size = 567522, upload-time = "2026-09-21T09:08:38.94Z" },
+    { url = "https://files.pythonhosted.org/packages/e3/ac/3aa1f84abd4dbbfbae99a817dd931f77b439261c911189cad4c30fdfd470/watchfiles-1.3.0-cp314-cp314t-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:26b81bc515a0f03f66a69a6fea86eea54c8eca4173c46dd7222569f79dd2f977", size = 461997, upload-time = "2026-09-21T09:08:40.142Z" },
+    { url = "https://files.pythonhosted.org/packages/82/1c/27c66764d5b0dbb70a36770a32eca217eba739c28b24e8583a035087a3d7/watchfiles-1.3.0-cp314-cp314t-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:ca39661934749df580d89f3dde266f2af7c6968f4c21c72ce2dc387d299e6aa7", size = 451856, upload-time = "2026-09-21T09:08:41.305Z" },
+    { url = "https://files.pythonhosted.org/packages/1e/b3/a45827084d953c1d0dd3d75abf85dcac26a0f5d115ad2fe0b7e9e931573b/watchfiles-1.3.0-cp314-cp314t-manylinux_2_31_riscv64.whl", hash = "sha256:04c5500faa725d69a99b0f63750e80795e455bb951849e9c98a811b4324997c4", size = 459889, upload-time = "2026-09-21T09:08:42.58Z" },
+    { url = "https://files.pythonhosted.org/packages/7a/3d/07740d23ce2bb23419bb24055c435a9abe5fe03efdaea1ba0720b831aab6/watchfiles-1.3.0-cp314-cp314t-musllinux_1_1_aarch64.whl", hash = "sha256:ec3cd4bb181a7b6329134204c2277c7144ab5f62cce9c5335d6f901ee7ce8d6a", size = 624482, upload-time = "2026-09-21T09:08:44.064Z" },
+    { url = "https://files.pythonhosted.org/packages/91/46/9540f8123eaec86df989f26d7704cad0448d9fb7271763a4f8f9fe23617d/watchfiles-1.3.0-cp314-cp314t-musllinux_1_1_x86_64.whl", hash = "sha256:e5871d4a7f788a9f64fb06f5793389d29d171e5c32d37c3ebfd520b017cc7694", size = 653724, upload-time = "2026-09-21T09:08:45.257Z" },
+    { url = "https://files.pythonhosted.org/packages/25/9d/b9deb52f1e4528ffe44338c5ebab95c32ed79203082da661de50288e130a/watchfiles-1.3.0-cp314-cp314t-win32.whl", hash = "sha256:81c989d7267bfb7b676cd32c83bec97914e396870983cbf493e29415037bff5e", size = 270863, upload-time = "2026-09-21T09:08:46.518Z" },
+    { url = "https://files.pythonhosted.org/packages/59/59/8b1881afccbafda06248be4185e28034dd73c80c85e4da24f2cb0c1321eb/watchfiles-1.3.0-cp314-cp314t-win_amd64.whl", hash = "sha256:d754e049006e81a9be49dc78ba7802081cee426e968cbc63ee19e164fa2d0e39", size = 286879, upload-time = "2026-09-21T09:08:47.874Z" },
+    { url = "https://files.pythonhosted.org/packages/46/dd/41c12ae9745d5d72f709333287679d71cbba68ad7678fed872207bba94f4/watchfiles-1.3.0-cp314-cp314t-win_arm64.whl", hash = "sha256:a5b631db08fd3032db57ec6a92d1777cd60f88803287e4e941a4858c53aab1e0", size = 276924, upload-time = "2026-09-21T09:08:48.976Z" },
+]
+
+[[package]]
 name = "wcmatch"
 version = "8.5.2"
 source = { registry = "https://pypi.org/simple" }
@@ -8974,7 +9022,7 @@ resolution-markers = [
     "python_full_version < '3.13'",
 ]
 dependencies = [
-    { name = "markupsafe", marker = "python_full_version < '3.14'" },
+    { name = "markupsafe" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/32/af/d4502dc713b4ccea7175d764718d5183caf8d0867a4f0190d5d4a45cea49/werkzeug-3.1.1.tar.gz", hash = "sha256:8cd39dfbdfc1e051965f156163e2974e52c210f130810e9ad36858f0fd3edad4", size = 806453, upload-time = "2024-11-01T16:40:45.462Z" }
 wheels = [
@@ -8989,7 +9037,7 @@ resolution-markers = [
     "python_full_version >= '3.14'",
 ]
 dependencies = [
-    { name = "markupsafe", marker = "python_full_version >= '3.14'" },
+    { name = "markupsafe" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/9f/69/83029f1f6300c5fb2471d621ab06f6ec6b3324685a2ce0f9777fd4a8b71e/werkzeug-3.1.3.tar.gz", hash = "sha256:60723ce945c19328679790e3282cc758aa4a6040e4bb330f53d30fa546d44746", size = 806925, upload-time = "2024-11-08T15:52:18.093Z" }
 wheels = [
