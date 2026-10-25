@@ -9620,6 +9620,35 @@ if (autonomySettings.safeBoot && !acceptanceAutonomyRequested) {
   // and no port bound (EADDRINUSE / EACCES). Without this listener the 'error'
   // event would become an uncaughtException; with a bare swallow it would hang.
   server.on('error', (err: any) => {
+    // EADDRINUSE: another Recourse instance already owns the port. If it is
+    // healthy, this is not a failure — exit 0 so the supervisor/keepalive do
+    // not treat the (duplicate) boot as a crash and respawn it. Only a genuine
+    // bind failure (EACCES, etc.) or an unhealthy holder is a real error.
+    if (err?.code === 'EADDRINUSE') {
+      try {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 3000);
+        fetch(`http://127.0.0.1:${PORT}/api/recourse/status`, { signal: ctrl.signal })
+          .then((res) => {
+            clearTimeout(t);
+            if (res.ok) {
+              console.log(`[Recourse] Port ${PORT} already served by a healthy instance; exiting duplicate (0).`);
+              process.exit(0);
+            } else {
+              console.error(`[Recourse] HTTP listen failed on ${LISTEN_HOST}:${PORT}: ${err?.code || ''} ${err?.message || err}`);
+              logCrash('listen', err);
+              gracefulExit(1);
+            }
+          })
+          .catch(() => {
+            clearTimeout(t);
+            console.error(`[Recourse] HTTP listen failed on ${LISTEN_HOST}:${PORT}: ${err?.code || ''} ${err?.message || err}`);
+            logCrash('listen', err);
+            gracefulExit(1);
+          });
+        return;
+      } catch (e) { swallow('listen.probe', e, undefined);  /* fall through */ }
+    }
     console.error(`[Recourse] HTTP listen failed on ${LISTEN_HOST}:${PORT}: ${err?.code || ''} ${err?.message || err}`);
     logCrash('listen', err);
     gracefulExit(1);

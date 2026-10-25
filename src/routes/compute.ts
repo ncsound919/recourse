@@ -13,6 +13,7 @@ import {
   type ComputeJobHandle,
   type ComputePlatformId,
 } from '../lib/computePlatforms.js';
+import { ComputeHandleStore } from '../lib/computeHandles.js';
 import { drainRemoteTasks, enqueueRemoteTask, remoteComputeSnapshot } from '../lib/remoteCompute.js';
 import {
   enqueueForgePrecompute,
@@ -33,6 +34,21 @@ export interface ComputeDeps {
 export function createComputeRouter(deps: ComputeDeps): Router {
   const router = Router();
   const client = createComputeClient();
+
+  // Remember the real handles returned by submit, so poll/result/cancel hit the
+  // platform's actual external id (e.g. 'djoochie/kernel-slug') instead of the
+  // caller's local job id. Keyed by job id AND external id for either lookup.
+  // Durable: the store replays data/compute-handles.json on boot, so a gateway
+  // restart keeps the kernel refs that are still running remotely. Unknown ids
+  // fall back to a stub keyed by the caller's id (same behaviour as before).
+  const jobHandles = new ComputeHandleStore();
+  function rememberHandle(h: ComputeJobHandle) {
+    jobHandles.remember(h);
+  }
+  /** Stored handle wins; fall back to a stub keyed by the caller's id. */
+  function lookupHandle(id: string, platform: ComputePlatformId): ComputeJobHandle {
+    return jobHandles.lookup(id) ?? { id, platform, externalId: id, submittedAt: Date.now(), status: 'pending' };
+  }
 
   // Initialize platforms on first request (lazy) or at boot via initializeComputePlatforms()
   let initialized = false;
@@ -85,6 +101,7 @@ export function createComputeRouter(deps: ComputeDeps): Router {
       } else {
         handle = await client.submit(job);
       }
+      rememberHandle(handle);
 
       deps.appendProvenanceEvent('compute_job_submitted', {
         jobId: handle.id,
@@ -110,14 +127,9 @@ export function createComputeRouter(deps: ComputeDeps): Router {
       if (!platformId) {
         return res.status(400).json({ success: false, error: 'platform query param required' });
       }
-      const handle: ComputeJobHandle = {
-        id: req.params.id,
-        platform: platformId,
-        externalId: req.params.id,
-        submittedAt: Date.now(),
-        status: 'pending',
-      };
+      const handle = lookupHandle(req.params.id, platformId);
       const status = await client.poll(handle);
+      if (jobHandles.has(handle.id)) jobHandles.update(handle.id, { status: status.state });
       res.json({ success: true, status });
     } catch (e: any) {
       res.status(500).json({ success: false, error: e.message });
@@ -133,14 +145,11 @@ export function createComputeRouter(deps: ComputeDeps): Router {
       if (!platformId) {
         return res.status(400).json({ success: false, error: 'platform query param required' });
       }
-      const handle: ComputeJobHandle = {
-        id: req.params.id,
-        platform: platformId,
-        externalId: req.params.id,
-        submittedAt: Date.now(),
-        status: 'pending',
-      };
+      const handle = lookupHandle(req.params.id, platformId);
       const result = await client.await(handle, timeoutMs);
+      if (jobHandles.has(handle.id)) {
+        jobHandles.update(handle.id, { status: result.success ? 'completed' : 'failed' });
+      }
       deps.appendProvenanceEvent('compute_job_completed', {
         jobId: handle.id,
         platform: handle.platform,
@@ -162,13 +171,7 @@ export function createComputeRouter(deps: ComputeDeps): Router {
       if (!platformId) {
         return res.status(400).json({ success: false, error: 'platform query param required' });
       }
-      const handle: ComputeJobHandle = {
-        id: req.params.id,
-        platform: platformId,
-        externalId: req.params.id,
-        submittedAt: Date.now(),
-        status: 'pending',
-      };
+      const handle = lookupHandle(req.params.id, platformId);
       const cancelled = await client.cancel(handle);
       res.json({ success: true, cancelled });
     } catch (e: any) {
@@ -195,6 +198,7 @@ export function createComputeRouter(deps: ComputeDeps): Router {
       };
 
       const handle = await client.submitTo('kaggle', job);
+      rememberHandle(handle);
       deps.appendProvenanceEvent('compute_kaggle_notebook_submitted', {
         jobId: handle.id,
         cellCount: cells.length,
@@ -233,6 +237,7 @@ export function createComputeRouter(deps: ComputeDeps): Router {
       };
 
       const handle = await client.submitTo('huggingface', job);
+      rememberHandle(handle);
       deps.appendProvenanceEvent('compute_hf_static_deployed', {
         jobId: handle.id,
         repoId: handle.externalId,
@@ -272,6 +277,7 @@ export function createComputeRouter(deps: ComputeDeps): Router {
       };
 
       const handle = await client.submitTo('huggingface', job);
+      rememberHandle(handle);
       deps.appendProvenanceEvent('compute_hf_zerogpu_submitted', {
         jobId: handle.id,
         repoId: handle.externalId,
@@ -305,6 +311,7 @@ export function createComputeRouter(deps: ComputeDeps): Router {
       };
 
       const handle = await client.submitTo('e2b', job);
+      rememberHandle(handle);
       deps.appendProvenanceEvent('compute_e2b_script_submitted', {
         jobId: handle.id,
         language,
