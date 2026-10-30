@@ -198,6 +198,199 @@ export function repairScriptHash(script: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Mixing-model registry (Qwen 3.5 4B audio-mixing fine-tune on Kaggle GPU)
+// ---------------------------------------------------------------------------
+export interface MixingModelRecord {
+  jobId: string; at: number; platform: string;
+  finalLoss: number | null; jsonValidity: number | null; steps: number;
+  trainExamples: number; hfRepo: string | null; adapterPath: string | null;
+  runtimeSec: number | null; peakVramGb: number | null;
+}
+export interface MixingModelRegistryDoc { version: 1; models: MixingModelRecord[]; }
+
+export function mixingModelRegistryPath(): string {
+  return process.env.MIXING_MODEL_REGISTRY_FILE || `${process.cwd()}/data/mixing-models.json`;
+}
+export function readMixingModelRegistry(): MixingModelRegistryDoc {
+  const doc = readJsonFile<MixingModelRegistryDoc>(mixingModelRegistryPath(), { version: 1, models: [] });
+  if (!doc || doc.version !== 1 || !Array.isArray(doc.models)) return { version: 1, models: [] };
+  return doc;
+}
+export function writeMixingModelRegistry(doc: MixingModelRegistryDoc): void {
+  try { writeJsonFile(mixingModelRegistryPath(), doc); }
+  catch (err) { console.warn('[remote-compute] mixing-model registry persist failed:', err instanceof Error ? err.message : String(err)); }
+}
+
+export function enqueueMixingModelTraining(
+  opts?: RemoteJobOptions,
+  deps?: RemoteComputeDeps,
+): Promise<EnqueueResult> {
+  return enqueueRemoteTask('train_mixing_model', {}, { ...opts, hardware: opts?.hardware ?? { type: 'gpu' }, maxRuntimeMs: opts?.maxRuntimeMs ?? 4 * 60 * 60 * 1000 }, deps);
+}
+
+// ---------------------------------------------------------------------------
+// Oncology concordance model registry (METABRIC/GBSG2 survival, C-index)
+// ---------------------------------------------------------------------------
+export interface OncologyConcordanceRecord {
+  jobId: string; at: number; platform: string;
+  source: string | null; nTrain: number; nTest: number;
+  coxCindex: number | null; rsfCindex: number | null; xgbCindex: number | null;
+  bestModel: string | null; bestCindex: number | null; brier: number | null;
+  topFeatures: Array<{ name: string; importance: number }>;
+  runtimeSec: number | null;
+}
+export interface OncologyConcordanceRegistryDoc { version: 1; models: OncologyConcordanceRecord[]; }
+
+export function oncologyConcordanceRegistryPath(): string {
+  return process.env.ONCOLOGY_CONCORDANCE_REGISTRY_FILE || `${process.cwd()}/data/oncology-concordance-models.json`;
+}
+export function readOncologyConcordanceRegistry(): OncologyConcordanceRegistryDoc {
+  const doc = readJsonFile<OncologyConcordanceRegistryDoc>(oncologyConcordanceRegistryPath(), { version: 1, models: [] });
+  if (!doc || doc.version !== 1 || !Array.isArray(doc.models)) return { version: 1, models: [] };
+  return doc;
+}
+export function writeOncologyConcordanceRegistry(doc: OncologyConcordanceRegistryDoc): void {
+  try { writeJsonFile(oncologyConcordanceRegistryPath(), doc); }
+  catch (err) { console.warn('[remote-compute] oncology-concordance registry persist failed:', err instanceof Error ? err.message : String(err)); }
+}
+
+export function enqueueOncologyConcordanceTraining(
+  opts?: RemoteJobOptions,
+  deps?: RemoteComputeDeps,
+): Promise<EnqueueResult> {
+  return enqueueRemoteTask('train_oncology_concordance', {}, { ...opts, hardware: opts?.hardware ?? { type: 'cpu' }, maxRuntimeMs: opts?.maxRuntimeMs ?? 60 * 60 * 1000 }, deps);
+}
+
+// ---------------------------------------------------------------------------
+// SurvBoard concordance model registry (TCGA standardized features, multi-cancer)
+// ---------------------------------------------------------------------------
+export interface SurvboardConcordanceRecord {
+  jobId: string; at: number; platform: string;
+  nCancers: number; pooledCindex: number | null;
+  results: Record<string, { best_model: string | null; best_cindex: number | null; cox_cindex: number | null; rsf_cindex: number | null; xgb_cindex: number | null; n: number }>;
+  runtimeSec: number | null;
+}
+export interface SurvboardConcordanceRegistryDoc { version: 1; models: SurvboardConcordanceRecord[]; }
+
+export function survboardConcordanceRegistryPath(): string {
+  return process.env.SURVBOARD_CONCORDANCE_REGISTRY_FILE || `${process.cwd()}/data/survboard-concordance-models.json`;
+}
+export function readSurvboardConcordanceRegistry(): SurvboardConcordanceRegistryDoc {
+  const doc = readJsonFile<SurvboardConcordanceRegistryDoc>(survboardConcordanceRegistryPath(), { version: 1, models: [] });
+  if (!doc || doc.version !== 1 || !Array.isArray(doc.models)) return { version: 1, models: [] };
+  return doc;
+}
+export function writeSurvboardConcordanceRegistry(doc: SurvboardConcordanceRegistryDoc): void {
+  try { writeJsonFile(survboardConcordanceRegistryPath(), doc); }
+  catch (err) { console.warn('[remote-compute] survboard-concordance registry persist failed:', err instanceof Error ? err.message : String(err)); }
+}
+
+export function enqueueSurvboardConcordanceTraining(
+  opts?: RemoteJobOptions,
+  deps?: RemoteComputeDeps,
+): Promise<EnqueueResult> {
+  return enqueueRemoteTask('train_survboard_concordance', {}, { ...opts, hardware: opts?.hardware ?? { type: 'cpu' }, maxRuntimeMs: opts?.maxRuntimeMs ?? 60 * 60 * 1000 }, deps);
+}
+
+// ---------------------------------------------------------------------------
+// Music therapy concordance registry (oncology supportive intervention)
+// ---------------------------------------------------------------------------
+export interface MusicTherapyConcordanceRecord {
+  jobId: string; at: number; platform: string;
+  nPatients: number; nTrials: number; bestModel: string | null; bestR2: number | null;
+  rfR2: number | null; gbR2: number | null; topFeatures: Array<{ name: string; importance: number }>;
+  runtimeSec: number | null;
+}
+export interface MusicTherapyConcordanceRegistryDoc { version: 1; models: MusicTherapyConcordanceRecord[]; }
+
+export function musicTherapyConcordanceRegistryPath(): string {
+  return process.env.MUSIC_THERAPY_CONCORDANCE_REGISTRY_FILE || `${process.cwd()}/data/music-therapy-concordance-models.json`;
+}
+export function readMusicTherapyConcordanceRegistry(): MusicTherapyConcordanceRegistryDoc {
+  const doc = readJsonFile<MusicTherapyConcordanceRegistryDoc>(musicTherapyConcordanceRegistryPath(), { version: 1, models: [] });
+  if (!doc || doc.version !== 1 || !Array.isArray(doc.models)) return { version: 1, models: [] };
+  return doc;
+}
+export function writeMusicTherapyConcordanceRegistry(doc: MusicTherapyConcordanceRegistryDoc): void {
+  try { writeJsonFile(musicTherapyConcordanceRegistryPath(), doc); }
+  catch (err) { console.warn('[remote-compute] music-therapy-concordance registry persist failed:', err instanceof Error ? err.message : String(err)); }
+}
+
+export function enqueueMusicTherapyConcordanceTraining(
+  opts?: RemoteJobOptions,
+  deps?: RemoteComputeDeps,
+): Promise<EnqueueResult> {
+  return enqueueRemoteTask('train_music_therapy_concordance', {}, { ...opts, hardware: opts?.hardware ?? { type: 'cpu' }, maxRuntimeMs: opts?.maxRuntimeMs ?? 60 * 60 * 1000 }, deps);
+}
+
+// ---------------------------------------------------------------------------
+// Score calibration — normalize heterogeneous metrics to a common 0..1 scale
+// before feeding the recursive learner, so high-variance metrics don't dominate.
+// ---------------------------------------------------------------------------
+export type ScoreSource = 'json_validity' | 'c_index' | 'r2' | 'loss' | 'external';
+
+export function calibrateExternalScore(source: ScoreSource, raw: number): number {
+  if (Number.isNaN(raw)) return 0;
+  if (raw === Infinity) return 1;
+  if (raw === -Infinity) return 0;
+  switch (source) {
+    case 'json_validity': // already 0..1
+      return Math.max(0, Math.min(1, raw));
+    case 'c_index': // typical range 0.5..0.85 -> map to 0..1
+      return Math.max(0, Math.min(1, (raw - 0.5) / 0.35));
+    case 'r2': // can be negative; clamp to 0..1
+      return Math.max(0, Math.min(1, raw));
+    case 'loss': // lower is better; assume 0..5 range
+      return Math.max(0, Math.min(1, 1 - raw / 5));
+    case 'external':
+    default:
+      return Math.max(0, Math.min(1, raw));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Experiment lineage — track which experiments led to which improvements
+// ---------------------------------------------------------------------------
+export interface ExperimentLineageNode {
+  id: string;
+  kind: string;
+  parent: string | null;
+  result: Record<string, unknown>;
+  score: number;
+  delta: number | null; // improvement over parent
+  at: number;
+}
+
+export interface ExperimentLineageDoc { version: 1; nodes: ExperimentLineageNode[]; }
+
+export function experimentLineagePath(): string {
+  return process.env.EXPERIMENT_LINEAGE_FILE || `${process.cwd()}/data/experiment-lineage.json`;
+}
+
+export function readExperimentLineage(): ExperimentLineageDoc {
+  const doc = readJsonFile<ExperimentLineageDoc>(experimentLineagePath(), { version: 1, nodes: [] });
+  if (!doc || doc.version !== 1 || !Array.isArray(doc.nodes)) return { version: 1, nodes: [] };
+  return doc;
+}
+
+export function writeExperimentLineage(doc: ExperimentLineageDoc): void {
+  try { writeJsonFile(experimentLineagePath(), doc); }
+  catch (err) { console.warn('[remote-compute] experiment lineage persist failed:', err instanceof Error ? err.message : String(err)); }
+}
+
+export function recordExperimentLineage(node: ExperimentLineageNode): void {
+  const doc = readExperimentLineage();
+  // compute delta from parent
+  if (node.parent) {
+    const parentNode = doc.nodes.find((n) => n.id === node.parent);
+    if (parentNode) node.delta = Math.round((node.score - parentNode.score) * 1000) / 1000;
+  }
+  doc.nodes.push(node);
+  if (doc.nodes.length > 500) doc.nodes = doc.nodes.slice(-500);
+  writeExperimentLineage(doc);
+}
+
+// ---------------------------------------------------------------------------
 // Appliers
 // ---------------------------------------------------------------------------
 
@@ -331,5 +524,160 @@ export function registerRemoteComputeAppliers(deps: RemoteIntegrationDeps = {}):
   // science_experiment: dated markdown report (Overlay-Global-Lens) + durable run record.
   registerRemoteApplier('science_experiment', (task) => {
     applyScienceExperiment(task, deps.appendProvenance, recordExternalFinding);
+  });
+
+  // train_mixing_model: Qwen 3.5 4B audio-mixing fine-tune on Kaggle GPU.
+  // Records metrics to a durable registry and feeds a quality score to the learner.
+  registerRemoteApplier('train_mixing_model', async (task) => {
+    const data = task.result?.data;
+    if (!data || data.ok === false) {
+      deps.appendProvenance?.('remote_mixing_model_failed', { jobId: task.id, error: task.result?.error, platform: task.platform });
+      return;
+    }
+    const doc = readMixingModelRegistry();
+    doc.models.push({
+      jobId: task.id,
+      at: Date.now(),
+      platform: task.platform,
+      finalLoss: typeof data.final_loss === 'number' ? Number(data.final_loss) : null,
+      jsonValidity: typeof data.json_validity === 'number' ? Number(data.json_validity) : null,
+      steps: typeof data.steps === 'number' ? Number(data.steps) : 0,
+      trainExamples: typeof data.train_examples === 'number' ? Number(data.train_examples) : 0,
+      hfRepo: typeof data.hf_repo === 'string' ? data.hf_repo : null,
+      adapterPath: typeof data.adapter_path === 'string' ? data.adapter_path : null,
+      runtimeSec: typeof data.runtime_sec === 'number' ? Number(data.runtime_sec) : null,
+      peakVramGb: typeof data.peak_vram_gb === 'number' ? Number(data.peak_vram_gb) : null,
+    });
+    if (doc.models.length > 200) doc.models = doc.models.slice(-200);
+    writeMixingModelRegistry(doc);
+    const rawScore = typeof data.json_validity === 'number' ? Number(data.json_validity) : (typeof data.final_loss === 'number' ? Math.max(0, 1 - Number(data.final_loss)) : undefined);
+    const score = typeof rawScore === 'number' ? calibrateExternalScore('json_validity', rawScore) : undefined;
+    if (typeof score === 'number' && !Number.isNaN(score) && deps.applyExternalScore) {
+      await deps.applyExternalScore(score, task);
+    }
+    // record lineage
+    recordExperimentLineage({ id: task.id, kind: 'train_mixing_model', parent: null, result: { finalLoss: data.final_loss, jsonValidity: data.json_validity, steps: data.steps }, score: score ?? 0, delta: null, at: Date.now() });
+    deps.appendProvenance?.('remote_mixing_model_trained', {
+      jobId: task.id,
+      finalLoss: data.final_loss,
+      jsonValidity: data.json_validity,
+      steps: data.steps,
+      hfRepo: data.hf_repo,
+      platform: task.platform,
+    });
+  });
+
+  // train_oncology_concordance: small survival model on METABRIC/GBSG2, C-index.
+  registerRemoteApplier('train_oncology_concordance', async (task) => {
+    const data = task.result?.data;
+    if (!data || data.ok === false) {
+      deps.appendProvenance?.('remote_oncology_concordance_failed', { jobId: task.id, error: task.result?.error, platform: task.platform });
+      return;
+    }
+    const doc = readOncologyConcordanceRegistry();
+    doc.models.push({
+      jobId: task.id,
+      at: Date.now(),
+      platform: task.platform,
+      source: typeof data.source === 'string' ? data.source : null,
+      nTrain: typeof data.n === 'number' ? Number(data.n) : (typeof data.n_train === 'number' ? Number(data.n_train) : 0),
+      nTest: typeof data.n_test === 'number' ? Number(data.n_test) : 0,
+      coxCindex: typeof data.cox_cindex === 'number' ? Number(data.cox_cindex) : null,
+      rsfCindex: typeof data.rsf_cindex === 'number' ? Number(data.rsf_cindex) : null,
+      xgbCindex: typeof data.xgb_cindex === 'number' ? Number(data.xgb_cindex) : null,
+      bestModel: typeof data.best_model === 'string' ? data.best_model : null,
+      bestCindex: typeof data.best_cindex === 'number' ? Number(data.best_cindex) : null,
+      brier: typeof data.brier_at_median === 'number' ? Number(data.brier_at_median) : null,
+      topFeatures: Array.isArray(data.top_features) ? data.top_features : [],
+      runtimeSec: typeof data.runtime_sec === 'number' ? Number(data.runtime_sec) : null,
+    });
+    if (doc.models.length > 200) doc.models = doc.models.slice(-200);
+    writeOncologyConcordanceRegistry(doc);
+    const rawScore = typeof data.best_cindex === 'number' ? Number(data.best_cindex) : undefined;
+    const score = typeof rawScore === 'number' ? calibrateExternalScore('c_index', rawScore) : undefined;
+    if (typeof score === 'number' && !Number.isNaN(score) && deps.applyExternalScore) {
+      await deps.applyExternalScore(score, task);
+    }
+    recordExperimentLineage({ id: task.id, kind: 'train_oncology_concordance', parent: null, result: { bestModel: data.best_model, bestCindex: data.best_cindex, source: data.source }, score: score ?? 0, delta: null, at: Date.now() });
+    deps.appendProvenance?.('remote_oncology_concordance_trained', {
+      jobId: task.id, bestModel: data.best_model, bestCindex: data.best_cindex, source: data.source, platform: task.platform,
+    });
+  });
+
+  // train_survboard_concordance: multi-cancer survival (TCGA standardized features).
+  registerRemoteApplier('train_survboard_concordance', async (task) => {
+    const data = task.result?.data;
+    if (!data || data.ok === false) {
+      deps.appendProvenance?.('remote_survboard_concordance_failed', { jobId: task.id, error: task.result?.error, platform: task.platform });
+      return;
+    }
+    const doc = readSurvboardConcordanceRegistry();
+    const cancers = (data.datasets && typeof data.datasets === 'object') ? data.datasets : (data.cancers && typeof data.cancers === 'object' ? data.cancers : {});
+    const slim: Record<string, { best_model: string | null; best_cindex: number | null; cox_cindex: number | null; rsf_cindex: number | null; xgb_cindex: number | null; n: number }> = {};
+    for (const [k, v] of Object.entries(cancers)) {
+      const r = v as Record<string, unknown>;
+      slim[k] = {
+        best_model: typeof r.best_model === 'string' ? r.best_model : null,
+        best_cindex: typeof r.best_cindex === 'number' ? Number(r.best_cindex) : null,
+        cox_cindex: typeof r.cox_cindex === 'number' ? Number(r.cox_cindex) : null,
+        rsf_cindex: typeof r.rsf_cindex === 'number' ? Number(r.rsf_cindex) : null,
+        xgb_cindex: typeof r.xgb_cindex === 'number' ? Number(r.xgb_cindex) : null,
+        n: typeof r.n === 'number' ? Number(r.n) : 0,
+      };
+    }
+    doc.models.push({
+      jobId: task.id,
+      at: Date.now(),
+      platform: task.platform,
+      nCancers: typeof data.n_datasets === 'number' ? Number(data.n_datasets) : (typeof data.n_cancers === 'number' ? Number(data.n_cancers) : Object.keys(slim).length),
+      pooledCindex: typeof data.pooled_cindex === 'number' ? Number(data.pooled_cindex) : null,
+      results: slim,
+      runtimeSec: typeof data.runtime_sec === 'number' ? Number(data.runtime_sec) : null,
+    });
+    if (doc.models.length > 200) doc.models = doc.models.slice(-200);
+    writeSurvboardConcordanceRegistry(doc);
+    const rawScore = typeof data.pooled_cindex === 'number' ? Number(data.pooled_cindex) : undefined;
+    const score = typeof rawScore === 'number' ? calibrateExternalScore('c_index', rawScore) : undefined;
+    if (typeof score === 'number' && !Number.isNaN(score) && deps.applyExternalScore) {
+      await deps.applyExternalScore(score, task);
+    }
+    recordExperimentLineage({ id: task.id, kind: 'train_survboard_concordance', parent: null, result: { nCancers: data.n_cancers, pooledCindex: data.pooled_cindex }, score: score ?? 0, delta: null, at: Date.now() });
+    deps.appendProvenance?.('remote_survboard_concordance_trained', {
+      jobId: task.id, nCancers: data.n_cancers, pooledCindex: data.pooled_cindex, platform: task.platform,
+    });
+  });
+
+  // train_music_therapy_concordance: music therapy stimulus optimization for oncology.
+  registerRemoteApplier('train_music_therapy_concordance', async (task) => {
+    const data = task.result?.data;
+    if (!data || data.ok === false) {
+      deps.appendProvenance?.('remote_music_therapy_concordance_failed', { jobId: task.id, error: task.result?.error, platform: task.platform });
+      return;
+    }
+    const doc = readMusicTherapyConcordanceRegistry();
+    doc.models.push({
+      jobId: task.id,
+      at: Date.now(),
+      platform: task.platform,
+      nPatients: typeof data.n_patients === 'number' ? Number(data.n_patients) : 0,
+      nTrials: typeof data.n_trials === 'number' ? Number(data.n_trials) : 0,
+      bestModel: typeof data.best_model === 'string' ? data.best_model : null,
+      bestR2: typeof data.best_r2 === 'number' ? Number(data.best_r2) : null,
+      rfR2: typeof data.rf_r2 === 'number' ? Number(data.rf_r2) : null,
+      gbR2: typeof data.gb_r2 === 'number' ? Number(data.gb_r2) : null,
+      topFeatures: Array.isArray(data.top_features) ? data.top_features : [],
+      runtimeSec: typeof data.runtime_sec === 'number' ? Number(data.runtime_sec) : null,
+    });
+    if (doc.models.length > 200) doc.models = doc.models.slice(-200);
+    writeMusicTherapyConcordanceRegistry(doc);
+    const rawScore = typeof data.best_r2 === 'number' ? Number(data.best_r2) : undefined;
+    const score = typeof rawScore === 'number' ? calibrateExternalScore('r2', rawScore) : undefined;
+    if (typeof score === 'number' && !Number.isNaN(score) && deps.applyExternalScore) {
+      await deps.applyExternalScore(score, task);
+    }
+    recordExperimentLineage({ id: task.id, kind: 'train_music_therapy_concordance', parent: null, result: { bestModel: data.best_model, bestR2: data.best_r2, nPatients: data.n_patients }, score: score ?? 0, delta: null, at: Date.now() });
+    deps.appendProvenance?.('remote_music_therapy_concordance_trained', {
+      jobId: task.id, bestModel: data.best_model, bestR2: data.best_r2, nPatients: data.n_patients, platform: task.platform,
+    });
   });
 }

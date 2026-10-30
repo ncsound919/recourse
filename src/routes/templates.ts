@@ -9,6 +9,10 @@
 import crypto from 'crypto';
 import { Router } from 'express';
 import { listComponentTemplates, getComponentTemplate, buildComponentFromTemplate } from '../lib/componentTemplates.js';
+import { indexTool, clearIndex, searchTools, getIndexedTool } from '../lib/toolFactory/toolDiscovery.js';
+import { autoCompose, publishComposite } from '../lib/toolFactory/autoCompose.js';
+import { runPipeline } from '../lib/toolFactory/toolPipeline.js';
+import { loadRankingWeights, saveRankingWeights } from '../lib/toolFactory/weightsStore.js';
 import { executeTestSuite } from '../lib/executionSandbox.js';
 import { assessSourceSubstance } from '../lib/honestyMetrics.js';
 import { validateV5Manifest, validateIndexLockEntry, validateAdapterManifest, canonicalize, hashManifest } from '../lib/v5manifest.js';
@@ -48,6 +52,122 @@ export function createTemplatesRouter(deps: TemplatesRouterDeps): Router {
       count: templates.length,
       templates,
     });
+  });
+
+  // Factory capabilities in agent-support-hub ingestable shape.
+  // Lets the phone-side hub (or any sibling) pull the factory's tool catalogue
+  // and ingest it as shared memory / context.
+  router.get('/factory/capabilities', (req, res) => {
+    const all = listComponentTemplates();
+    const factory = all.filter((t) => (t.tags ?? []).includes('factory-composed'));
+    // Keep the semantic discovery index in sync with the live catalogue.
+    clearIndex();
+    for (const t of factory) {
+      indexTool({ name: t.id, description: t.description, tags: t.tags ?? [], schema: undefined });
+    }
+    res.json({
+      success: true,
+      hub: 'recourse-tool-factory',
+      protocol: 'agent-support-hub-v1',
+      count: factory.length,
+      capabilities: factory.map((t) => ({
+        appId: 'recourse',
+        title: t.name,
+        content: t.description,
+        category: 'TOOL_CAPABILITY',
+        tier: 'TIER_2_ARCHIVAL',
+        tags: (t.tags ?? []).join(','),
+        selfHostable: t.selfHostable,
+        artifactKind: t.artifactKind ?? 'function',
+      })),
+    });
+  });
+
+  // Semantic search over the factory tool catalogue (meta-tool).
+  router.get('/factory/search', (req, res) => {
+    const { query, limit } = req.query;
+    if (!query || typeof query !== 'string') {
+      return res.status(400).json({ success: false, error: 'query is required (string)' });
+    }
+    const hits = searchTools(query, Number(limit) || 5);
+    res.json({
+      success: true,
+      query,
+      count: hits.length,
+      results: hits.map((h) => ({
+        name: h.name,
+        description: h.description,
+        tags: h.tags,
+        schema: h.schema,
+        score: h.vector ? Math.round(h.vector.reduce((a, v) => a + v * v, 0) * 10000) / 10000 : 0,
+      })),
+    });
+  });
+
+  // Execute a meta-tool: either factory.search_tools or factory.execute_tool.
+  router.post('/factory/meta', async (req, res) => {
+    const { action, parameters } = req.body;
+    if (action === 'search_tools') {
+      const { query, limit } = parameters || {};
+      if (!query) return res.status(400).json({ success: false, error: 'search_tools requires query' });
+      const hits = searchTools(query, Number(limit) || 5);
+      return res.json({ success: true, results: hits });
+    }
+    if (action === 'execute_tool') {
+      const { tool_name, arguments: args } = parameters || {};
+      if (!tool_name) return res.status(400).json({ success: false, error: 'execute_tool requires tool_name' });
+      const tool = getIndexedTool(tool_name);
+      if (!tool) return res.status(404).json({ success: false, error: 'tool not found in discovery index' });
+      const runner = async (name: string, args: any) => {
+        const t = getIndexedTool(name);
+        if (!t) throw new Error('tool not found');
+        // In a real system, this would delegate to a tool runtime.
+        return { result: `tool ${name} called with ${JSON.stringify(args)}`, name, ok: true };
+      };
+      const result = await runPipeline([{ tool: tool_name }], runner, args);
+      return res.json({ success: true, result: result.ok ? result.final : result.steps[0]?.error || 'failed' });
+    }
+    return res.status(400).json({ success: false, error: 'Unknown meta action. Use "search_tools" or "execute_tool"' });
+  });
+
+  // Trigger auto-composition based on natural-language intent.
+  router.post('/factory/compose', async (req, res) => {
+    try {
+      const { intent, limit, runner, initial, index, root = '.' } = req.body;
+      if (!intent) return res.status(400).json({ success: false, error: 'intent is required' });
+      const result = await autoCompose(intent, { limit, runner, initial, index });
+      if (!result) return res.status(404).json({ success: false, error: 'no matching tools found for intent' });
+      const publish = req.body.publish !== false;
+      let manifestPath: string | undefined;
+      if (publish) {
+        manifestPath = await autoPublishComposite(result, root);
+      }
+      res.json({ success: true, composition: result, manifestPath });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // Set/update persistent ranking weights for discovery.
+  router.post('/factory/weights', (req, res) => {
+    const { weights, root = '.' } = req.body;
+    if (!weights || typeof weights !== 'object') {
+      return res.status(400).json({ success: false, error: 'weights is a required object' });
+    }
+    // saveRankingWeights expects Record<string, number>; ensure numeric.
+    const out: Record<string, number> = {};
+    for (const [k, v] of Object.entries(weights)) {
+      if (typeof v === 'number' && Number.isFinite(v) && v > 0) out[k] = v;
+    }
+    saveRankingWeights(root, out);
+    res.json({ success: true, saved: out });
+  });
+
+  // Get current persistent ranking weights.
+  router.get('/factory/weights', (req, res) => {
+    const { root = '.' } = req.query;
+    const weights = loadRankingWeights(root as string);
+    res.json({ success: true, weights });
   });
 
   // Get single component template with details

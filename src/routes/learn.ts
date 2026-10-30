@@ -29,6 +29,9 @@ import {
   selectTemplateForLearnerDirective,
   COMPONENT_TEMPLATES,
 } from '../lib/componentTemplates.js';
+import { composeFromDirective } from '../lib/toolFactory/selfImprove.js';
+import { setRankingWeights } from '../lib/toolFactory/toolDiscovery.js';
+import { listComponentTemplates } from '../lib/componentTemplates.js';
 import { checkOnline as modelCheckOnline, extractJsonBlock } from '../lib/modelProvider.js';
 import { skillAwareChat } from '../lib/skillContext.js';
 import type { RecursiveLearner } from '../dream/learner.js';
@@ -133,6 +136,18 @@ export function createLearnRouter(deps: LearnRouterDeps): Router {
           message: `Directive synthesis produced code that FAILS its real test suite (${testRun.testDetails.filter((d) => d.startsWith('[FAIL')).length} failures). Nothing was registered.`,
         });
       }
+
+      // Accumulate a factory-composed variant of this directive's template so the
+      // tool factory grows autonomously alongside the learner. Fire-and-forget.
+      try { composeFromDirective(targetDirective.kind, targetDomain); } catch { /* non-fatal */ }
+      // Feed learner-driven ranking weights into discovery (tool name -> score).
+      try {
+        const weights: Record<string, number> = {};
+        for (const t of listComponentTemplates()) {
+          weights[t.id] = Math.max(0.1, t.defaultScore ?? 1);
+        }
+        setRankingWeights(weights);
+      } catch { /* non-fatal */ }
 
       const versionHash = crypto.createHash('sha256').update(buildResult.synthesizedCode).digest('hex').substring(0, 16);
       const newToolEntry: ToolEntry = {

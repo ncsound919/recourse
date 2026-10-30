@@ -29,6 +29,10 @@
  *     silently applied.
  */
 import { readJsonFile, writeJsonFile } from './durableJson.js';
+import { mixingTrainingScript } from './mixingTraining.js';
+import { oncologyConcordanceScript } from './oncologyConcordance.js';
+import { survboardConcordanceScript } from './survboardConcordance.js';
+import { musicTherapyConcordanceScript } from './musicTherapyConcordance.js';
 import {
   createComputeClient,
   getAvailablePlatforms,
@@ -48,7 +52,11 @@ export type RemoteTaskKind =
   | 'learner_stress_eval'
   | 'repair_diagnose'
   | 'dream_candidates'
-  | 'science_experiment';
+  | 'science_experiment'
+  | 'train_mixing_model'
+  | 'train_oncology_concordance'
+  | 'train_survboard_concordance'
+  | 'train_music_therapy_concordance';
 
 export type RemoteTaskStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
 
@@ -542,6 +550,26 @@ export function buildRemoteJob(
       const items = payload.items as Array<Record<string, unknown>> | undefined;
       if (!Array.isArray(items) || items.length < 2) return null;
       built = buildMetaAnalysisNotebook({ items, seed: payload.seed as number | undefined, boot: payload.boot as number | undefined });
+      break;
+    }
+    case 'train_mixing_model': {
+      const script = mixingTrainingScript();
+      built = buildEvalNotebook({ script, requirements: ['unsloth', 'trl', 'peft', 'accelerate', 'bitsandbytes', 'xformers', 'datasets', 'pyarrow'] });
+      break;
+    }
+    case 'train_oncology_concordance': {
+      const script = oncologyConcordanceScript();
+      built = buildEvalNotebook({ script, requirements: ['scikit-survival', 'xgboost', 'lifelines', 'pandas', 'numpy', 'scikit-learn'] });
+      break;
+    }
+    case 'train_survboard_concordance': {
+      const script = survboardConcordanceScript();
+      built = buildEvalNotebook({ script, requirements: ['scikit-survival', 'xgboost', 'lifelines', 'pandas', 'numpy', 'scikit-learn'] });
+      break;
+    }
+    case 'train_music_therapy_concordance': {
+      const script = musicTherapyConcordanceScript();
+      built = buildEvalNotebook({ script, requirements: ['scikit-learn', 'scikit-survival', 'numpy', 'pandas'] });
       break;
     }
     default:

@@ -18,6 +18,9 @@ const directDeps = Object.keys(pkg.dependencies ?? {});
 // or already-handled-by-vite client libs).
 const external = [
   'isolated-vm',
+  'tree-sitter',
+  'tree-sitter-typescript',
+  'tree-sitter-javascript',
   '@lancedb/lancedb',
   '@lancedb/lancedb-win32-x64-msvc',
   '@lancedb/lancedb-darwin-arm64',

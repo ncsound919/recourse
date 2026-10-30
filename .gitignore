@@ -55,3 +55,7 @@ scripts/kw-import-phoenix.js
 
 # Storage dumps / backups (68MB regression state, not source)
 *.bak-taxonomy
+
+.vercel
+bugforge_output2/
+bugforge_output3/

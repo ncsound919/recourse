@@ -1081,6 +1081,9 @@ registerComponentTemplatePlugin(v5DecimateAdapterPlugin);
 registerComponentTemplatePlugin(v5InterpolateAdapterPlugin);
 registerComponentTemplatePlugin(v5BufferAdapterPlugin);
 
+// Wire factory-composed templates (Handlebars + Prettier) into the registry.
+import './toolFactory/builtinRecipes.js';
+
 // =========================================================================
 // HELPER FUNCTIONS FOR COMPONENT BUILDING & LEARNING INTEGRATION
 // =========================================================================

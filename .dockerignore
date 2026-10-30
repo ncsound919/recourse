@@ -2,7 +2,7 @@ node_modules
 dist
 coverage
 coverage-baseline
-data
+data/*
 !data/plans
 .selfhosted
 recourse-fix-bundle

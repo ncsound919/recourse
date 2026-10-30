@@ -32,6 +32,7 @@ import {
   type BusinessProfileT,
 } from '../src/autopilot/businessProfile.js';
 import { runLoop, type LoopOutcome } from '../src/autopilot/loopStateMachine.js';
+import { enqueueMixingModelTraining, enqueueOncologyConcordanceTraining, enqueueSurvboardConcordanceTraining, registerRemoteComputeAppliers } from '../src/lib/remoteComputeIntegrations.js';
 import { createCodePlanner } from '../src/autopilot/codePlanner.js';
 import { chatComplete } from '../src/lib/modelProvider.js';
 import { createLearnerStore, RecursiveLearner } from '../src/dream/learner.js';
@@ -87,7 +88,9 @@ async function main(): Promise<void> {
   if (RUN_LOOPS) {
     // Drive the model-backed loop steps. Best-effort: if the model is offline or
     // a step is unavailable we record that honestly rather than fabricate output.
-    for (const [label, url] of [
+    // Register appliers so a completed mixing run feeds the learner.
+   registerRemoteComputeAppliers({ applyExternalScore: async (s) => console.log('mixing externalScore', s), appendProvenance: () => {} });
+   for (const [label, url] of [
       ['dream tick', '/api/recourse/dream/tick'],
       ['forge run', '/api/recourse/forge/run'],
     ] as Array<[string, string]>) {
@@ -96,6 +99,30 @@ async function main(): Promise<void> {
         events.push(`${label}: HTTP ${r.status}`);
       } catch (err: any) {
         events.push(`${label}: skipped (${err?.message ?? err})`);
+      }
+    }
+    if (process.env.RUN_MIXING_TRAINING === '1') {
+      try {
+        const r = await enqueueMixingModelTraining({ hardware: { type: 'gpu' }, maxRuntimeMs: 4 * 60 * 60 * 1000 });
+        events.push('mixing train: ' + (r.queued ? 'queued ' + r.task?.id : 'refused ' + r.reason));
+      } catch (err: any) {
+        events.push('mixing train: skipped (' + (err?.message ?? err) + ')');
+      }
+    }
+    if (process.env.RUN_ONCOLOGY_CONCORDANCE === '1') {
+      try {
+        const r = await enqueueOncologyConcordanceTraining({ hardware: { type: 'cpu' }, maxRuntimeMs: 60 * 60 * 1000 });
+        events.push('oncology concordance: ' + (r.queued ? 'queued ' + r.task?.id : 'refused ' + r.reason));
+      } catch (err: any) {
+        events.push('oncology concordance: skipped (' + (err?.message ?? err) + ')');
+      }
+    }
+    if (process.env.RUN_SURVBOARD_CONCORDANCE === '1') {
+      try {
+        const r = await enqueueSurvboardConcordanceTraining({ hardware: { type: 'cpu' }, maxRuntimeMs: 60 * 60 * 1000 });
+        events.push('survboard concordance: ' + (r.queued ? 'queued ' + r.task?.id : 'refused ' + r.reason));
+      } catch (err: any) {
+        events.push('survboard concordance: skipped (' + (err?.message ?? err) + ')');
       }
     }
     // Give the loops a moment to persist.
