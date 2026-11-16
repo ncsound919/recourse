@@ -74,8 +74,8 @@
     "zod-to-json-schema": "^3.25.2"
   },
   "devDependencies": {
-    "@playwright/test": "^1.63.0",
-    "@tailwindcss/vite": "^4.1.14",
+    "@playwright/test": "^1.65.0",
+    "@tailwindcss/vite": "^4.3.5",
     "@types/express": "^4.17.21",
     "@types/node": "^22.20.4",
     "@types/three": "^0.175.0",
@@ -85,7 +85,7 @@
     "tailwindcss": "^4.1.14",
     "tsx": "^4.23.15",
     "typescript": "~5.9.3",
-    "vite": "^6.2.3",
+    "vite": "^6.4.6",
     "vitest": "^4.1.11"
   },
   "allowScripts": {
